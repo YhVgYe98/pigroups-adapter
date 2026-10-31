@@ -43,6 +43,40 @@ test('the startup brief and the polled copy of the same message are injected onc
   );
 });
 
+// §3.4: the watermark is per member, not per directory. `spawnMember` hands the same
+// `PIGROUPS_ADAPTER_DIR` down to the child, and a conversation id (`g:<owner>`, `dm:<a>_<b>`) is
+// the same string at both ends. A single directory-wide watermark would let the first member's
+// advance drop the second member's copy of the same `(conv, seq)`.
+test('the injection watermark is per member: one member advancing it must not drop the other member\'s copy', async (t) => {
+  const s = await scenario({ siblings: 1 });
+  t.after(() => s.close());
+  const sibling = s.siblings[0];
+
+  // The child of the same parent, on the directory `spawnMember` would have handed down.
+  const peer = await createLoop(s.platform, sibling, { adapterDir: s.adapterDir });
+  try {
+    // One group message naming both members: same conversation, same seq, two recipients.
+    const body = 'both of you: read the design doc before tomorrow';
+    const sent = await send(s.platform, s.parent!.token, s.group, body, [s.me.id, sibling.id]);
+
+    await s.cycle();
+    const mine = s.surface.texts().join('\n');
+    assert.equal(injections(mine, s.group, sent.seq), 1, `the first member injects its copy once, got:\n${mine}`);
+    assert.equal(mine.split(body).length - 1, 1, `the body reaches the first member exactly once, got:\n${mine}`);
+
+    await peer.cycle();
+    const theirs = peer.surface.texts().join('\n');
+    assert.equal(
+      injections(theirs, s.group, sent.seq),
+      1,
+      `the second member has injected nothing, so its own copy must still be injected, got:\n${theirs}`,
+    );
+    assert.equal(theirs.split(body).length - 1, 1, `the body reaches the second member exactly once, got:\n${theirs}`);
+  } finally {
+    await peer.stop();
+  }
+});
+
 test('an already-injected message is not injected again after a restart on the same adapter directory', async (t) => {
   const s = await scenario();
   t.after(() => s.close());

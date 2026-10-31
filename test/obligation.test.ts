@@ -110,6 +110,35 @@ test('a settle delivers once: the queued message first, and the nudge only when 
   assert.deepEqual(s.loop.state().owed, [s.dm], 'the member never spoke, so the conversation is still owed');
 });
 
+// §2.3: `flush()` returns 这次是否真的投出去了 — false while the surface is busy (it spins), true
+// when something was handed to `deliver`. A `flush()` that answers true whenever it was called
+// makes the settle reaction skip the nudge forever, so the busy case has to be pinned.
+test('flush() reports what it did: false while the surface is busy, true when the queued message goes out', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle(); // drain the startup sequence: no DM exists yet, so nothing is injected
+  assert.equal(s.surface.deliveries.length, 0, 'precondition: the member starts idle with an empty queue');
+
+  // A turn is already running, so the next DM is queued and stays queued.
+  s.surface.beginTurn();
+  await send(s.platform, s.parent!.token, s.me.id, 'queued while the turn was running');
+  await s.loop.pollOnce();
+  assert.equal(s.surface.deliveries.length, 0, 'precondition: nothing is injected while the surface is busy');
+
+  const mark = s.surface.mark();
+  assert.equal(await s.loop.flush(), false, 'a busy surface must report that it delivered nothing');
+  assert.equal(s.surface.since(mark).length, 0, 'and it must not have delivered anything while busy');
+
+  // The turn is cut instead of settled: `settle()` would fire the loop's own settle reaction,
+  // which flushes the queue itself and leaves this `flush()` with nothing to report.
+  await s.surface.abort();
+  const afterIdle = s.surface.mark();
+  assert.equal(await s.loop.flush(), true, 'an idle surface with a queued message must report that it delivered');
+  const delivered = s.surface.since(afterIdle);
+  assert.equal(delivered.length, 1, `one deliver for the queued message, got ${delivered.length}`);
+  assert.ok(delivered[0].text.includes('queued while the turn was running'), `the queued message must go out: ${delivered[0].text}`);
+});
+
 test('three nudges without an outbound message produce an adapter-authored blocked report to the parent', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
