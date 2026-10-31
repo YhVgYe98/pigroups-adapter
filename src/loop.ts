@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Journal } from './journal.ts';
 import { ObligationTable, TelemetryTable } from './state.ts';
-import type { AttentionEvent, AttentionState, AttentionTool } from './state.ts';
+import type { AttentionEvent, AttentionState, AttentionTool, Obligation } from './state.ts';
 import { PgError, PgGone, PgPollBusy, PgUnavailable } from './pgclient.ts';
 import type {
   PgClient,
@@ -109,6 +109,12 @@ export class AdapterLoop {
   private readonly blockedReported = new Set<string>();
 
   private chatter = 0;
+  /**
+   * The briefing message (§8.3.3), read from history at startup. A new member's poll
+   * queue still holds that same message (platform §10.6), so the poll hands it again
+   * and one message would be injected twice. This is its identity.
+   */
+  private brief: { conv: string; seq: number } | undefined;
   private selfId: string | undefined;
   private selfName = '';
   private parentId: string | null = null;
@@ -124,7 +130,7 @@ export class AdapterLoop {
   private runPromise: Promise<void> | undefined;
   private settleUnsub: (() => void) | undefined;
   /** The flush currently delivering, so concurrent callers collapse into it (§2.3). */
-  private flushInFlight: Promise<void> | undefined;
+  private flushInFlight: Promise<boolean> | undefined;
   private readonly eventUnsub: () => void;
   private timer: ReturnType<typeof setInterval> | undefined;
   private pollAbort: AbortController | undefined;
@@ -190,29 +196,30 @@ export class AdapterLoop {
   /**
    * Deliver what is held, if the agent is idle. A busy agent never gets a delivery (§3.4).
    *
+   * Returns whether this call actually delivered: `false` when the surface was busy,
+   * nothing was pending, or `deliver` failed. The settle reaction is the caller that
+   * needs it — a nudge may only take the turn when nothing was delivered (§2.3).
+   *
    * Single-flight (§2.3): the constructor's settle subscription calls this on every
    * settle, so a tool, a test and the timer can call it at the same time. A second
    * caller awaits the batch already in flight instead of splicing its own, which
    * would re-concatenate the taken batch and append the chatter count twice.
    */
-  async flush(): Promise<void> {
+  async flush(): Promise<boolean> {
     const inFlight = this.flushInFlight;
-    if (inFlight) {
-      await inFlight;
-      return;
-    }
+    if (inFlight) return inFlight;
     const run = this.deliverPending();
     this.flushInFlight = run;
     try {
-      await run;
+      return await run;
     } finally {
       if (this.flushInFlight === run) this.flushInFlight = undefined;
     }
   }
 
-  private async deliverPending(): Promise<void> {
-    if (this.surface.isBusy()) return;
-    if (this.pending.length === 0) return;
+  private async deliverPending(): Promise<boolean> {
+    if (this.surface.isBusy()) return false;
+    if (this.pending.length === 0) return false;
 
     const batch = this.pending.splice(0, DELIVER_BATCH);
     let text = batch.map((item) => item.text).join('\n');
@@ -222,9 +229,10 @@ export class AdapterLoop {
     try {
       await this.surface.deliver(text, kind);
     } catch {
-      // Keep the journal entry and retry on the next settle (§9).
+      // Nothing was delivered: the batch and its journal entry stay queued so the
+      // settle can still nudge, and the next settle retries (§9).
       this.pending.unshift(...batch);
-      return;
+      return false;
     }
 
     this.chatter = 0;
@@ -236,6 +244,7 @@ export class AdapterLoop {
       }
       if (item.journalId !== undefined) await this.releaseJournal(item.journalId);
     }
+    return true;
   }
 
   /**
@@ -361,6 +370,7 @@ export class AdapterLoop {
     const history = await this.pg.messages({ to: conv, limit: 1 });
     const brief = history.items[0];
     if (!brief || brief.sender_id !== parent) return;
+    this.brief = { conv, seq: brief.seq };
     this.pending.push({
       text: `[${conv}#${brief.seq}] ${brief.sender_name}: ${brief.body}`,
       kind: 'message',
@@ -412,6 +422,9 @@ export class AdapterLoop {
   }
 
   private classifyMessage(item: PollMessageItem, journalId?: string): void {
+    // One message, one injection: the brief came from history, and the copy the poll
+    // queue still holds for it is the same message, not new input.
+    if (this.brief?.conv === item.to && this.brief.seq === item.seq) return;
     if (item.mentions_me || item.from_parent || item.to.startsWith('dm:')) {
       this.enqueue(
         {
@@ -619,15 +632,17 @@ export class AdapterLoop {
   }
 
   /**
-   * The settle reaction (§2.3): decide, nudge, then deliver — one delivery per
-   * settle, nudge first.
+   * The settle reaction (§2.3): decide, deliver, then nudge. One delivery per
+   * settle, and `flush()` has first claim on it.
    *
-   * The nudge goes first because `flush()` starts a turn, and a prompt issued
-   * while streaming must say whether it steers or follows; pi rejects an
-   * unspecified insert. So a nudge after a flush would be lost. When a nudge did
-   * go out, the held items wait for the next settle — the same thing `flush()`
-   * does on a busy surface. Nudging first also means only obligations from an
-   * earlier settle are nudged: nothing still in `pending` has been replied to yet.
+   * The order is liveness, not taste. `deliver` starts a turn, so the surface is
+   * busy for the rest of this settle. Nudging first therefore means: every settle
+   * of a conversation that owes a reply fires a nudge, the nudge makes the surface
+   * busy, and the `flush()` behind it no-ops — the held messages never arrive, and
+   * the conversation that owes a reply is precisely the one that never gets the
+   * input that could make it speak. `flush()`'s return value is what keeps a
+   * settle down to a single delivery: the nudge takes the turn only when nothing
+   * was delivered.
    *
    * The reminder (§5.2) keeps its own path: `tick()` queues it when idle, and
    * `flush()` delivers it.
@@ -635,24 +650,25 @@ export class AdapterLoop {
   private async onSettled(): Promise<void> {
     if (this.stopped) return;
     this.tick();
-    if (await this.nudgeOwed()) return;
-    await this.flush();
+    const delivered = await this.flush();
+    if (!delivered) await this.nudgeOwed();
   }
 
   /**
-   * §4.3: one `deliver(…, 'nudge')` per owed conversation per settle, straight from
-   * the settle — not folded into the injection batch, whose kind and batching
-   * (§3.4) belong to polled messages. The budget is per conversation and the
-   * adapter reports `blocked` itself when it runs out, without the model.
+   * §4.3: one coalesced `deliver(…, 'nudge')` per settle, covering every owed
+   * conversation — never one delivery per conversation. A settle allows a single
+   * delivery (§2.3), so a second nudge would land mid-turn and be lost; and a nudge
+   * exists to wake the model once to look at all of its debts, so one wake-up must
+   * show all of them. Not folded into the injection batch either, whose kind and
+   * batching (§3.4) belong to polled messages.
    *
-   * Returns whether a nudge was actually delivered, so the caller can leave the
-   * held injections for the next settle instead of inserting them mid-turn.
+   * Only called when the settle delivered nothing (§2.3).
    */
-  private async nudgeOwed(): Promise<boolean> {
+  private async nudgeOwed(): Promise<void> {
     const owed = this.obligations.entries();
-    if (owed.length === 0) return false;
-    let delivered = false;
+    if (owed.length === 0) return;
 
+    const due: Obligation[] = [];
     for (const entry of owed) {
       if (entry.nudges >= this.config.nudgeMax) {
         if (!this.blockedReported.has(entry.conv)) {
@@ -662,18 +678,20 @@ export class AdapterLoop {
         continue;
       }
       this.obligations.recordNudge(entry.conv);
-      try {
-        await this.surface.deliver(
-          `你在 ${entry.conv} 还有未回复的消息 (#${entry.lastSeq})。回复，或说明为什么不需要回。`,
-          'nudge',
-        );
-        delivered = true;
-      } catch {
-        // The obligation stays; the next settle nudges again (§9).
-        console.warn(`[pigroups] nudge for ${entry.conv} failed; retrying on the next settle`);
-      }
+      due.push(entry);
     }
-    return delivered;
+    if (due.length === 0) return;
+
+    const debts = due.map((entry) => `${entry.conv} #${entry.lastSeq}`).join(', ');
+    try {
+      await this.surface.deliver(
+        `你在这些会话还有未回复的消息：${debts}。回复，或说明为什么不需要回。`,
+        'nudge',
+      );
+    } catch {
+      // The obligations stay; the next settle nudges again (§9).
+      console.warn('[pigroups] nudge failed; retrying on the next settle');
+    }
   }
 
   /** The window expires into one held reminder, never into an interrupting delivery (§5.2). */
