@@ -102,7 +102,10 @@ export class AdapterLoop {
   private attention: { state: AttentionState } | undefined;
   /** Sticky until a turn ends without a provider error. */
   private errorNote: string | undefined;
-  /** Conversations whose nudge budget is spent and that were already reported blocked (§4.3). */
+  /**
+   * Conversations whose nudge budget is spent and that were already reported blocked (§4.3).
+   * The episode stands until the member speaks: only `say()` clears an entry.
+   */
   private readonly blockedReported = new Set<string>();
 
   private chatter = 0;
@@ -227,8 +230,9 @@ export class AdapterLoop {
     this.chatter = 0;
     for (const item of batch) {
       if (item.conv !== undefined) {
+        // `mark` keeps `nudges`, so it must not re-arm `blockedReported` either:
+        // a blocked episode ends only when the member speaks (§4.3), not on inbound traffic.
         this.obligations.mark(item.conv, item.seq ?? 0, this.now());
-        this.blockedReported.delete(item.conv);
       }
       if (item.journalId !== undefined) await this.releaseJournal(item.journalId);
     }
@@ -614,11 +618,24 @@ export class AdapterLoop {
     });
   }
 
+  /**
+   * The settle reaction (§2.3): decide, nudge, then deliver — one delivery per
+   * settle, nudge first.
+   *
+   * The nudge goes first because `flush()` starts a turn, and a prompt issued
+   * while streaming must say whether it steers or follows; pi rejects an
+   * unspecified insert. So a nudge after a flush would be lost. When a nudge did
+   * go out, the held items wait for the next settle — the same thing `flush()`
+   * does on a busy surface. Nudging first also means only obligations from an
+   * earlier settle are nudged: nothing still in `pending` has been replied to yet.
+   *
+   * The reminder (§5.2) keeps its own path: `tick()` queues it when idle, and
+   * `flush()` delivers it.
+   */
   private async onSettled(): Promise<void> {
     if (this.stopped) return;
-    await this.flush();
-    await this.nudgeOwed();
-    this.queueReminder(this.now());
+    this.tick();
+    if (await this.nudgeOwed()) return;
     await this.flush();
   }
 
@@ -627,10 +644,14 @@ export class AdapterLoop {
    * the settle — not folded into the injection batch, whose kind and batching
    * (§3.4) belong to polled messages. The budget is per conversation and the
    * adapter reports `blocked` itself when it runs out, without the model.
+   *
+   * Returns whether a nudge was actually delivered, so the caller can leave the
+   * held injections for the next settle instead of inserting them mid-turn.
    */
-  private async nudgeOwed(): Promise<void> {
+  private async nudgeOwed(): Promise<boolean> {
     const owed = this.obligations.entries();
-    if (owed.length === 0) return;
+    if (owed.length === 0) return false;
+    let delivered = false;
 
     for (const entry of owed) {
       if (entry.nudges >= this.config.nudgeMax) {
@@ -646,11 +667,13 @@ export class AdapterLoop {
           `你在 ${entry.conv} 还有未回复的消息 (#${entry.lastSeq})。回复，或说明为什么不需要回。`,
           'nudge',
         );
+        delivered = true;
       } catch {
         // The obligation stays; the next settle nudges again (§9).
         console.warn(`[pigroups] nudge for ${entry.conv} failed; retrying on the next settle`);
       }
     }
+    return delivered;
   }
 
   /** The window expires into one held reminder, never into an interrupting delivery (§5.2). */
