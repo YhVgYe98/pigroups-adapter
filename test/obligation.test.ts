@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { send } from './support.ts';
+import { quiet, send, waitFor } from './support.ts';
 import { payloads, scenario } from './scenario.ts';
 
 test('an owed reply is nudged when the turn settles; after replying it is not', async (t) => {
@@ -53,6 +53,57 @@ test('@all produces exactly one obligation for that conversation, not one per me
     [s.group],
     'the conversation must be owed exactly once',
   );
+});
+
+// §2.3 invariant 2: one delivery per settle, `flush()` first and `nudge()` only when flush
+// delivered nothing. Nudge-first starves the queue — the nudge starts the turn, so the flush
+// behind it always no-ops and new messages never reach the member that is not answering.
+test('a settle delivers once: the queued message first, and the nudge only when nothing was queued', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  await send(s.platform, s.parent!.token, s.me.id, 'status please');
+  await s.cycle();
+  assert.equal(s.surface.deliveries.length, 1, 'the first DM must be delivered');
+  assert.equal(s.surface.deliveries[0].kind, 'message');
+  assert.deepEqual(s.loop.state().owed, [s.dm], 'an answered-nothing DM leaves the conversation owed');
+
+  // A turn is running, so the next DM is queued by pollOnce() and stays queued.
+  s.surface.beginTurn();
+  await send(s.platform, s.parent!.token, s.me.id, 'and the numbers');
+  await s.loop.pollOnce();
+  assert.equal(s.surface.deliveries.length, 1, 'nothing may be injected while a turn is running');
+
+  // That turn ends: the settle reaction runs with something queued *and* a nudge due.
+  const afterFirst = s.surface.mark();
+  s.surface.settle();
+  await waitFor(() => s.surface.since(afterFirst).length > 0, 'the settle reaction to deliver');
+  await quiet(300);
+
+  const first = s.surface.since(afterFirst);
+  assert.equal(
+    first.length,
+    1,
+    `one settle may deliver once, got ${first.length}: ${first.map((d) => d.kind).join(', ')}`,
+  );
+  assert.equal(first[0].kind, 'message', 'queued work must win over the nudge in the same settle');
+  assert.ok(first[0].text.includes('and the numbers'), `the queued message must be delivered: ${first[0].text}`);
+
+  // Next settle, nothing queued and the member has still said nothing: now the nudge.
+  const afterSecond = s.surface.mark();
+  s.surface.settle();
+  await waitFor(() => s.surface.since(afterSecond).length > 0, 'the next settle reaction to deliver');
+  await quiet(300);
+
+  const second = s.surface.since(afterSecond);
+  assert.equal(
+    second.length,
+    1,
+    `one settle may deliver once, got ${second.length}: ${second.map((d) => d.kind).join(', ')}`,
+  );
+  assert.equal(second[0].kind, 'nudge', 'with an empty queue and an owed reply, the settle must nudge');
+  assert.ok(second[0].text.includes(s.dm), `the nudge must name the conversation: ${second[0].text}`);
+  assert.deepEqual(s.loop.state().owed, [s.dm], 'the member never spoke, so the conversation is still owed');
 });
 
 test('three nudges without an outbound message produce an adapter-authored blocked report to the parent', async (t) => {
