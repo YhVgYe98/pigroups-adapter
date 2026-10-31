@@ -208,12 +208,16 @@ export class AdapterLoop {
     }
   }
 
-  /** One timer scan: obligations, telemetry window, stalled detection (§3, §5). */
+  /**
+   * One timer scan: owed replies, telemetry window, stalled detection (§3, §5).
+   * Decisions only; `flush()` is what delivers, so a test can advance the fake
+   * clock, call `tick()` and then `flush()` without sleeping.
+   */
   tick(): void {
     if (this.stopped) return;
     const now = this.now();
     this.evaluateAttention(now);
-    void this.remind();
+    this.queueReminder(now);
   }
 
   /** The only send path: keeps the owed table honest (§2.3). */
@@ -582,7 +586,8 @@ export class AdapterLoop {
     if (this.surface.isBusy()) return;
     await this.nudgeOwed();
     if (this.surface.isBusy()) return;
-    await this.remind();
+    this.queueReminder(this.now());
+    await this.flush();
   }
 
   private async nudgeOwed(): Promise<void> {
@@ -606,12 +611,12 @@ export class AdapterLoop {
     await this.flush();
   }
 
-  private async remind(): Promise<void> {
+  /** The window expires into one held reminder, never into an interrupting delivery (§5.2). */
+  private queueReminder(now: number): void {
     if (this.surface.isBusy()) return;
-    const decision = this.telemetry.due(this.now());
+    const decision = this.telemetry.due(now);
     if (decision.kind !== 'remind') return;
     this.pending.push({ text: decision.text, kind: 'nudge' });
-    await this.flush();
   }
 
   private async reportBlocked(text: string): Promise<void> {
