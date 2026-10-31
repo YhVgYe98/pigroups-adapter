@@ -95,6 +95,14 @@ const CONNECT_BACKOFF_MAX_MS = 30_000;
 const CONNECT_FAILURE_LIMIT = 20;
 /** §8: the exit report gives up after two seconds. */
 const REPORT_TIMEOUT_MS = 2000;
+/**
+ * §2.3: how long `stop()` waits for in-flight work. Deliberate, not defensive: a
+ * surface that never answers a held `deliver` is the surface's problem, and hanging
+ * the exit is worse — exit is the last step of the delete path. Hitting this bound is
+ * a give-up, not an error: the batch is still journalled (an entry is committed only
+ * after `deliver` returns), so the next start replays it (§3.1).
+ */
+const STOP_TIMEOUT_MS = 3000;
 const DEFAULT_INSPECT_TIMEOUT_MS = 10_000;
 const SPAWN_READY_MS = 120_000;
 
@@ -148,6 +156,8 @@ export class AdapterLoop {
   private settleUnsub: (() => void) | undefined;
   /** The flush currently delivering, so concurrent callers collapse into it (§2.3). */
   private flushInFlight: Promise<FlushOutcome> | undefined;
+  /** Every `surface.deliver` the surface has not answered yet, so `stop()` can wait (§2.3). */
+  private readonly deliveries = new Set<Promise<unknown>>();
   /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
   private aborting = false;
   /** Ends an in-flight abort wait when `stop()` runs (§3.2). */
@@ -185,7 +195,7 @@ export class AdapterLoop {
     this.runPromise = this.run();
   }
 
-  /** Stop and wait for in-flight work to finish. */
+  /** Stop and wait for in-flight work to finish (§2.3). */
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
@@ -200,22 +210,51 @@ export class AdapterLoop {
     // Nothing waits for a turn any more: a control item blocked on `abort()`
     // returns instead of holding the loop (§3.2).
     this.stopGate.abort();
+
+    // §2.3: `stop()` waits for in-flight work, and a `deliver` the surface is still
+    // holding *is* in-flight work — resolving before it settles would report a quiet
+    // loop while the agent is still being handed a batch. Everything outstanding is
+    // awaited together: the task loop, the single-flight flush that started the
+    // delivery, and any delivery started outside it (the nudge, §4.3).
+    const work: Promise<unknown>[] = [];
     const run = this.runPromise;
-    if (run && !this.inLoop) await run.catch(() => {});
+    if (run && !this.inLoop) work.push(run.catch(() => undefined));
+    const flush = this.flushInFlight;
+    if (flush) work.push(flush.catch(() => undefined));
+    for (const delivery of this.deliveries) work.push(delivery.catch(() => undefined));
+    if (work.length === 0) return;
+    // Bounded at `STOP_TIMEOUT_MS` (§2.3). Giving up is not an error: the loops are
+    // stopped, the delivery stays journalled, and the next start replays it (§3.1).
+    await withTimeout(Promise.all(work), STOP_TIMEOUT_MS).catch(() => undefined);
   }
 
   /** One pull: journal, classify, dispatch, then deliver whatever is held. */
   async pollOnce(): Promise<void> {
-    await this.ensureReady();
-    await this.flush();
+    try {
+      await this.ensureReady();
+      await this.flush();
 
-    this.pollAbort ??= new AbortController();
-    const batch = await this.pg.poll({
-      wait: this.config.pollWait,
-      limit: this.config.pollLimit,
-      signal: this.pollAbort.signal,
-    });
-    await this.ingest(batch);
+      this.pollAbort ??= new AbortController();
+      const batch = await this.pg.poll({
+        wait: this.config.pollWait,
+        limit: this.config.pollLimit,
+        signal: this.pollAbort.signal,
+      });
+      await this.ingest(batch);
+    } catch (err) {
+      // §9: a poll answered 410 `member_gone` is handled here, at the poll, not only
+      // in the task loop — `pollOnce()` is the documented manual drive (§2.3), so a
+      // caller driving it by hand must reach the same stop+shutdown instead of
+      // getting a thrown error and a member that keeps living. The whole pull is
+      // covered, so a member that is already gone when `whoami` runs ends the same
+      // way. Every other answer stays with `handlePollError`, which owns pacing,
+      // retrying and the 401 hand-off to a human.
+      if (err instanceof PgGone) {
+        await this.goneAndShutdown();
+        return;
+      }
+      throw err;
+    }
   }
 
   /**
@@ -258,7 +297,7 @@ export class AdapterLoop {
     const kind = batch.some((item) => item.kind === 'control') ? 'control' : batch[0].kind;
 
     try {
-      await this.surface.deliver(text, kind);
+      await this.trackDelivery(this.surface.deliver(text, kind));
     } catch {
       // Nothing was delivered: the batch and its journal entry stay queued so the
       // next settle retries (§9).
@@ -520,6 +559,14 @@ export class AdapterLoop {
   private async handleControl(item: PollControlItem, journalId?: string): Promise<void> {
     const payload = (item.payload ?? {}) as Record<string, unknown>;
 
+    // §6: `v` exists for compatibility only. A `pg.*` command carrying a higher
+    // version is a command this adapter does not know, so it is treated exactly like
+    // an unknown `cmd` — injected verbatim, never interpreted with v1's rules.
+    if (item.cmd.startsWith('pg.') && !isKnownPgVersion(payload.v)) {
+      await this.injectUnknownControl(item, payload, journalId);
+      return;
+    }
+
     switch (item.cmd) {
       case 'sys.terminated':
         // Only the platform speaks for `sys` (platform §7.2).
@@ -561,18 +608,24 @@ export class AdapterLoop {
         return;
 
       default:
-        // Unknown commands are injected verbatim as controls (§3.2): the adapter
-        // does not know the content, so it must not drop it.
-        this.enqueue({
-          text: `[control ${item.from_id}] ${item.cmd} ${JSON.stringify(payload)}`,
-          kind: 'control',
-          journalId,
-        });
-        await this.flush();
+        await this.injectUnknownControl(item, payload, journalId);
         return;
     }
 
     // A `sys.` command that did not come from `sys` is just an ordinary control.
+    await this.injectUnknownControl(item, payload, journalId);
+  }
+
+  /**
+   * §3.2: a command this adapter does not interpret — an unknown `cmd`, or a `pg.*`
+   * from a newer version (§6) — is injected verbatim as a control. The adapter does
+   * not know the content, so it must not drop it.
+   */
+  private async injectUnknownControl(
+    item: PollControlItem,
+    payload: Record<string, unknown>,
+    journalId?: string,
+  ): Promise<void> {
     this.enqueue({
       text: `[control ${item.from_id}] ${item.cmd} ${JSON.stringify(payload)}`,
       kind: 'control',
@@ -710,6 +763,20 @@ export class AdapterLoop {
     }
   }
 
+  /**
+   * Register a delivery the surface has in hand, so `stop()` can wait for it (§2.3).
+   * Both delivery paths — the batch and the nudge — go through here; the nudge has no
+   * single-flight of its own, so this set is the only thing that knows about it.
+   */
+  private trackDelivery<T>(delivery: Promise<T>): Promise<T> {
+    this.deliveries.add(delivery);
+    const settle = (): void => {
+      this.deliveries.delete(delivery);
+    };
+    void delivery.then(settle, settle);
+    return delivery;
+  }
+
   private async releaseJournal(journalId: string): Promise<void> {
     const left = (this.queuedByJournal.get(journalId) ?? 0) - 1;
     if (left > 0) {
@@ -800,9 +867,8 @@ export class AdapterLoop {
 
     const debts = due.map((entry) => `${entry.conv} #${entry.lastSeq}`).join(', ');
     try {
-      await this.surface.deliver(
-        `你在这些会话还有未回复的消息：${debts}。回复，或说明为什么不需要回。`,
-        'nudge',
+      await this.trackDelivery(
+        this.surface.deliver(`你在这些会话还有未回复的消息：${debts}。回复，或说明为什么不需要回。`, 'nudge'),
       );
     } catch {
       // The nudge never reached the model, so the budget is not spent: counting it
@@ -945,9 +1011,10 @@ export class AdapterLoop {
   }
 
   private async handlePollError(err: unknown): Promise<void> {
+    // A `PgGone` from any other stage of the pull means the same thing as a 410
+    // answer (§9): the member is gone, so nothing may keep running.
     if (err instanceof PgGone) {
-      await this.stop();
-      this.surface.shutdown('member_gone');
+      await this.goneAndShutdown();
       return;
     }
 
@@ -972,7 +1039,10 @@ export class AdapterLoop {
     }
 
     if (err instanceof PgError && err.status === 401) {
-      this.stop();
+      // §9: stop the loops, hand the agent one line, and wait for a human to replace
+      // the token. Not the poll's own business — a loop that is not running (no token
+      // at all, §7) delivers nothing.
+      await this.stop();
       this.pending.push({ text: 'PIGROUPS token 失效：请更新 token 并重启本 session。', kind: 'message' });
       await this.flush();
       return;
@@ -980,6 +1050,12 @@ export class AdapterLoop {
 
     console.warn(`[pigroups] poll failed: ${(err as Error)?.message ?? String(err)}`);
     await sleep(1000);
+  }
+
+  /** §9: a poll answered 410 `member_gone` — stop everything, then shut the member down. */
+  private async goneAndShutdown(): Promise<void> {
+    await this.stop();
+    this.surface.shutdown('member_gone');
   }
 }
 
@@ -1007,6 +1083,11 @@ function isDmConv(conv: string): boolean {
 function owesReply(input: { conv: string; mine: boolean; mentionsMe: boolean; fromParent: boolean }): boolean {
   if (input.mine) return false;
   return input.mentionsMe || input.fromParent || isDmConv(input.conv);
+}
+
+/** §6: `v` absent or 1 is the contract this adapter implements; anything else is unknown. */
+function isKnownPgVersion(value: unknown): boolean {
+  return value === undefined || value === 1;
 }
 
 function unknownInspect(): InspectResult {
