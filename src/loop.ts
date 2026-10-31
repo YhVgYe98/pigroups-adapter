@@ -103,6 +103,13 @@ const REPORT_TIMEOUT_MS = 2000;
  * after `deliver` returns), so the next start replays it (§3.1).
  */
 const STOP_TIMEOUT_MS = 3000;
+
+/** Hand one macrotask back to the event loop, so timers and sockets can run. */
+function yieldOnce(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+}
 const DEFAULT_INSPECT_TIMEOUT_MS = 10_000;
 const SPAWN_READY_MS = 120_000;
 
@@ -1004,6 +1011,12 @@ export class AdapterLoop {
           if (this.stopped || isAbort(err)) break;
           await this.handlePollError(err);
         }
+        // A round that completes without suspending on a macrotask spins the
+        // microtask queue: timers never fire, so no timeout anywhere can be
+        // observed and the whole pi session stops responding rather than slowing
+        // down. Every round yields once so that can never happen — the cost is one
+        // immediate callback per round, against a poll that waits seconds.
+        if (!this.stopped) await yieldOnce();
       }
     } finally {
       this.inLoop = false;
