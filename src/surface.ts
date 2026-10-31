@@ -20,8 +20,12 @@ export type PiEvent =
 export interface PiSurface {
   /** Hand a block of text to the agent as one turn. Returns when committed, not when done. */
   deliver(text: string, kind: DeliverKind): Promise<void>;
-  /** Cut the running turn and wait until idle. Returns at once when already idle. */
-  abort(): Promise<void>;
+  /**
+   * Cut the running turn and wait until idle. Returns at once when already idle.
+   * The wait is bounded by `ABORT_IDLE_TIMEOUT_MS` and giving up leaves the abort
+   * request standing; `signal` ends the wait early, which is how `stop()` cuts it.
+   */
+  abort(signal?: AbortSignal): Promise<void>;
   /** Is a turn running right now. */
   isBusy(): boolean;
   /** Call back when idle. Returns an unsubscribe function. */
@@ -93,6 +97,13 @@ const ARGS_PREVIEW_CHARS = 200;
 const IDLE_POLL_MS = 50;
 
 /**
+ * How long `abort()` waits for the turn to stop (§3.2). A control item is handled
+ * serially, so an unbounded wait would hold the loop for a whole turn — the next
+ * `pg.abort`, a `pg.steer` or `sys.terminated` would sit behind it.
+ */
+export const ABORT_IDLE_TIMEOUT_MS = 3000;
+
+/**
  * The real `PiSurface`. It is the whole of the pi-specific glue:
  * `pi.sendMessage(..., {triggerTurn:true})` to deliver, the session abort to cut
  * a turn, `ctx.shutdown()` to exit, and five pi events mapped onto `PiEvent`.
@@ -138,11 +149,18 @@ export class PiSurfaceAdapter implements PiSurface {
     );
   }
 
-  async abort(): Promise<void> {
+  async abort(signal?: AbortSignal): Promise<void> {
     const ctx = this.context;
     if (!ctx || ctx.isIdle()) return;
     ctx.abort();
-    while (!ctx.isIdle()) await sleep(IDLE_POLL_MS);
+    // Polling `isIdle` is the only way pi reports "that turn is over". Giving up is
+    // not an error: the abort is requested, the turn is still running, and the
+    // settle that eventually arrives delivers whatever is held.
+    const deadlineAt = Date.now() + ABORT_IDLE_TIMEOUT_MS;
+    while (!ctx.isIdle()) {
+      if (signal?.aborted || Date.now() >= deadlineAt) return;
+      await sleep(IDLE_POLL_MS);
+    }
   }
 
   isBusy(): boolean {

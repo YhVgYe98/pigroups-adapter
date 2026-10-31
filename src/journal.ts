@@ -8,6 +8,14 @@
  *
  * Replay can duplicate an injection; that is why injected text carries the
  * conversation and seq (`[g:m_abc#89]`), see 概念稿 §8 ②.
+ *
+ * One journal per member, keyed exactly like the injection watermark (§3.4):
+ * `<adapterDir>/journal/<memberId>/`. `PIGROUPS_ADAPTER_DIR` is handed down to
+ * spawned children (`spawnMember`), so a single directory is shared by a whole
+ * tree, and a DM's conversation id is the same string on both ends. One journal
+ * for the tree would let a child replay the parent's batches into its own
+ * context, then commit — deleting the parent's only copy — and `discard` would
+ * wipe every sibling's pending batches too.
  */
 
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -30,34 +38,46 @@ export interface JournalEntry {
 const JOURNAL_SUBDIR = 'journal';
 
 export class Journal {
-  private readonly dir: string;
+  private readonly root: string;
+  /** Set by `load`: `<adapterDir>/journal/<memberId>/`. */
+  private memberDir: string | undefined;
   private seq = 0;
 
-  /** @param adapterDir the `PIGROUPS_ADAPTER_DIR` root; the journal lives in `<adapterDir>/journal`. */
+  /** @param adapterDir the `PIGROUPS_ADAPTER_DIR` root; journals live in `<adapterDir>/journal/<memberId>/`. */
   constructor(adapterDir: string) {
-    this.dir = join(adapterDir, JOURNAL_SUBDIR);
+    this.root = join(adapterDir, JOURNAL_SUBDIR);
+  }
+
+  /**
+   * Key this journal to one member, before the first `append` / `pending`. Same
+   * shape as `Watermarks.load`: the member id is only known after `whoami`.
+   */
+  load(memberId: string): void {
+    this.memberDir = join(this.root, memberId);
   }
 
   /** Persist a batch before it is injected. Returns the entry id to pass to `commit`. */
   async append(batch: JournalBatch): Promise<string> {
-    await mkdir(this.dir, { recursive: true });
+    const dir = this.dir();
+    await mkdir(dir, { recursive: true });
     const id = this.nextId();
-    const tmp = join(this.dir, `.${id}.tmp`);
+    const tmp = join(dir, `.${id}.tmp`);
     await writeFile(tmp, JSON.stringify(batch), 'utf8');
-    await rename(tmp, join(this.dir, `${id}.json`));
+    await rename(tmp, join(dir, `${id}.json`));
     return id;
   }
 
   /** Drop one entry: the batch reached the agent (or is being discarded). */
   async commit(id: string): Promise<void> {
-    await rm(join(this.dir, `${id}.json`), { force: true });
+    await rm(join(this.dir(), `${id}.json`), { force: true });
   }
 
-  /** Entries still to be replayed, oldest first. */
+  /** This member's entries still to be replayed, oldest first. */
   async pending(): Promise<JournalEntry[]> {
+    const dir = this.dir();
     let names: string[];
     try {
-      names = await readdir(this.dir);
+      names = await readdir(dir);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;
@@ -65,7 +85,7 @@ export class Journal {
 
     const entries: JournalEntry[] = [];
     for (const name of names.filter((n) => n.endsWith('.json') && !n.startsWith('.')).sort()) {
-      const path = join(this.dir, name);
+      const path = join(dir, name);
       const id = name.slice(0, -'.json'.length);
       try {
         const batch = JSON.parse(await readFile(path, 'utf8')) as JournalBatch;
@@ -78,9 +98,19 @@ export class Journal {
     return entries;
   }
 
-  /** Discard every pending entry, e.g. on `sys.terminated` (§3.2). */
+  /**
+   * Discard this member's pending entries, e.g. on `sys.terminated` (§3.2).
+   * Member-scoped by construction: a child's termination never touches the
+   * parent's or a sibling's batches.
+   */
   async discard(): Promise<void> {
     for (const entry of await this.pending()) await this.commit(entry.id);
+  }
+
+  /** The member-scoped directory; an unkeyed journal cannot name a file. */
+  private dir(): string {
+    if (this.memberDir === undefined) throw new Error('journal used before load(memberId)');
+    return this.memberDir;
   }
 
   private nextId(): string {

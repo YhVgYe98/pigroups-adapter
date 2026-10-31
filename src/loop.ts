@@ -21,6 +21,7 @@ import type {
   PollItem,
 } from './pgclient.ts';
 import type { Herdr } from './herdr.ts';
+import { ABORT_IDLE_TIMEOUT_MS } from './surface.ts';
 import type { DeliverKind, PiEvent, PiSurface } from './surface.ts';
 
 export interface LoopConfig {
@@ -68,7 +69,20 @@ interface PendingDelivery {
   /** Conversation this item makes me owe a reply in (§4.2). */
   conv?: string;
   seq?: number;
+  /**
+   * `seq` is a backfill anchor, not a shown message (§3.3 gap line): it is checked
+   * against the watermark when enqueued, but delivery must not advance it (§3.4).
+   */
+  anchor?: true;
 }
+
+/**
+ * What one `flush` did (§2.3). `flush()` answers only "did something go out", which
+ * is what a caller needs; the settle reaction needs the difference between "the
+ * surface is busy, hold everything" and "nothing was pending", because only the
+ * latter leaves the turn to a nudge.
+ */
+type FlushOutcome = 'delivered' | 'busy' | 'empty' | 'failed';
 
 const TICK_MS = 5000;
 /** At most this many items per `deliver` (§3.4). */
@@ -133,7 +147,11 @@ export class AdapterLoop {
   private runPromise: Promise<void> | undefined;
   private settleUnsub: (() => void) | undefined;
   /** The flush currently delivering, so concurrent callers collapse into it (§2.3). */
-  private flushInFlight: Promise<boolean> | undefined;
+  private flushInFlight: Promise<FlushOutcome> | undefined;
+  /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
+  private aborting = false;
+  /** Ends an in-flight abort wait when `stop()` runs (§3.2). */
+  private readonly stopGate = new AbortController();
   private readonly eventUnsub: () => void;
   private timer: ReturnType<typeof setInterval> | undefined;
   private pollAbort: AbortController | undefined;
@@ -179,6 +197,9 @@ export class AdapterLoop {
     }
     this.eventUnsub();
     this.pollAbort?.abort();
+    // Nothing waits for a turn any more: a control item blocked on `abort()`
+    // returns instead of holding the loop (§3.2).
+    this.stopGate.abort();
     const run = this.runPromise;
     if (run && !this.inLoop) await run.catch(() => {});
   }
@@ -200,9 +221,8 @@ export class AdapterLoop {
   /**
    * Deliver what is held, if the agent is idle. A busy agent never gets a delivery (§3.4).
    *
-   * Returns whether this call actually delivered: `false` when the surface was busy,
-   * nothing was pending, or `deliver` failed. The settle reaction is the caller that
-   * needs it — a nudge may only take the turn when nothing was delivered (§2.3).
+   * Returns whether this call actually delivered. The settle reaction is the caller
+   * that needs it — a nudge may only take the turn when nothing was delivered (§2.3).
    *
    * Single-flight (§2.3): the constructor's settle subscription calls this on every
    * settle, so a tool, a test and the timer can call it at the same time. A second
@@ -210,20 +230,27 @@ export class AdapterLoop {
    * would re-concatenate the taken batch and append the chatter count twice.
    */
   async flush(): Promise<boolean> {
-    const inFlight = this.flushInFlight;
-    if (inFlight) return inFlight;
-    const run = this.deliverPending();
-    this.flushInFlight = run;
-    try {
-      return await run;
-    } finally {
-      if (this.flushInFlight === run) this.flushInFlight = undefined;
-    }
+    return (await this.flushOutcome()) === 'delivered';
   }
 
-  private async deliverPending(): Promise<boolean> {
-    if (this.surface.isBusy()) return false;
-    if (this.pending.length === 0) return false;
+  /** The same single-flight call, keeping *why* nothing went out (see `FlushOutcome`). */
+  private flushOutcome(): Promise<FlushOutcome> {
+    const inFlight = this.flushInFlight;
+    if (inFlight) return inFlight;
+    const tracked = this.deliverPending().finally(() => {
+      if (this.flushInFlight === tracked) this.flushInFlight = undefined;
+    });
+    this.flushInFlight = tracked;
+    return tracked;
+  }
+
+  private async deliverPending(): Promise<FlushOutcome> {
+    // §3.2: an abort is cutting the turn. Starting one now would be the very turn
+    // the abort then waits for — and the settle that fires *because* the turn ended
+    // is exactly the caller that would start it.
+    if (this.aborting) return 'busy';
+    if (this.surface.isBusy()) return 'busy';
+    if (this.pending.length === 0) return 'empty';
 
     const batch = this.pending.splice(0, DELIVER_BATCH);
     let text = batch.map((item) => item.text).join('\n');
@@ -234,9 +261,9 @@ export class AdapterLoop {
       await this.surface.deliver(text, kind);
     } catch {
       // Nothing was delivered: the batch and its journal entry stay queued so the
-      // settle can still nudge, and the next settle retries (§9).
+      // next settle retries (§9).
       this.pending.unshift(...batch);
-      return false;
+      return 'failed';
     }
 
     this.chatter = 0;
@@ -247,11 +274,15 @@ export class AdapterLoop {
         this.obligations.mark(item.conv, item.seq ?? 0, this.now());
         // §3.4: the watermark moves only now, after `deliver` committed the text, so a
         // failed delivery or a crash in between cannot make the message disappear.
-        if (item.seq !== undefined) await this.watermark.advance(item.conv, item.seq);
+        // A gap is the exception: its `seq` is a backfill anchor, and when nothing was
+        // retained the platform sets it to "newest skipped seq + 1" (platform §6.4) —
+        // the seq the next real message will carry. Writing it would drop that message
+        // as already-seen, and a gap never comes again.
+        if (item.seq !== undefined && item.anchor !== true) await this.watermark.advance(item.conv, item.seq);
       }
       if (item.journalId !== undefined) await this.releaseJournal(item.journalId);
     }
-    return true;
+    return 'delivered';
   }
 
   /**
@@ -362,9 +393,10 @@ export class AdapterLoop {
     this.selfId = who.member.id;
     this.selfName = who.member.name;
     this.parentId = who.member.parent_id;
-    // The watermark is this member's (§3.4), so it is keyed only now, and read before
-    // the first injection point below can decide anything.
+    // Both records are this member's (§3.4), so they are keyed only now — and read
+    // before the first injection point below can decide anything.
     await this.watermark.load(who.member.id);
+    this.journal.load(who.member.id);
     await this.injectBrief();
     await this.reconcileObligations();
     await this.replayJournal();
@@ -395,13 +427,20 @@ export class AdapterLoop {
     if (!self) return;
     const { items } = await this.pg.conversations();
     const now = this.now();
+    const parentId = this.parentId;
     for (const conv of items) {
       const last = await this.pg.messages({ to: conv.to, limit: 1 });
       const message = last.items[0];
       if (!message) continue;
-      const addressed =
-        message.mentions.includes(self) || (this.parentId !== null && message.sender_id === this.parentId);
-      if (message.sender_id !== self && addressed) this.obligations.mark(conv.to, message.seq, now);
+      // The same §4.1 predicate the poll classification uses, so the two cannot
+      // disagree — a DM with a sibling owes a reply here too (§4.1's third branch).
+      const owed = owesReply({
+        conv: conv.to,
+        mine: message.sender_id === self,
+        mentionsMe: message.mentions.includes(self),
+        fromParent: parentId !== null && message.sender_id === parentId,
+      });
+      if (owed) this.obligations.mark(conv.to, message.seq, now);
       else this.obligations.clear(conv.to);
     }
   }
@@ -409,8 +448,14 @@ export class AdapterLoop {
   /** §3.1: replay batches that were journalled but never delivered. */
   private async replayJournal(): Promise<void> {
     for (const entry of await this.journal.pending()) {
-      for (const item of entry.batch.items) await this.dispatch(item);
+      // The entry id goes through `dispatch` so its items register in
+      // `queuedByJournal`: without it `commitIfDrained` sees zero and commits a batch
+      // that a busy surface or a throwing `deliver` never took — the one copy of it.
+      for (const item of entry.batch.items) await this.dispatch(item, entry.id);
       await this.flush();
+      // Drained means every item of this entry either reached the agent (released in
+      // `deliverPending`) or was dropped by the watermark; anything still queued keeps
+      // the entry on disk for the next start (§3.1).
       await this.commitIfDrained(entry.id);
     }
   }
@@ -436,19 +481,24 @@ export class AdapterLoop {
     // queue still holds for it is the same message, not new input. `enqueue` then holds
     // the same line for a seq an earlier process already injected (§3.4).
     if (this.brief?.conv === item.to && this.brief.seq === item.seq) return;
-    if (item.mentions_me || item.from_parent || item.to.startsWith('dm:')) {
-      this.enqueue(
-        {
-          text: `[${item.to}#${item.seq}] ${item.from_name}: ${item.preview}`,
-          kind: 'message',
-          journalId,
-          conv: item.to,
-          seq: item.seq,
-        },
-      );
+    if (
+      !owesReply({
+        conv: item.to,
+        mine: item.from_id === this.selfId,
+        mentionsMe: item.mentions_me,
+        fromParent: item.from_parent,
+      })
+    ) {
+      this.chatter += 1;
       return;
     }
-    this.chatter += 1;
+    this.enqueue({
+      text: `[${item.to}#${item.seq}] ${item.from_name}: ${item.preview}`,
+      kind: 'message',
+      journalId,
+      conv: item.to,
+      seq: item.seq,
+    });
   }
 
   private classifyGap(item: PollGapItem, journalId?: string): void {
@@ -459,6 +509,8 @@ export class AdapterLoop {
         journalId,
         conv: item.to,
         seq: item.before,
+        // §3.4: `before` is where to backfill from, not something the model has seen.
+        anchor: true,
       });
       return;
     }
@@ -481,7 +533,7 @@ export class AdapterLoop {
           return;
         }
         // No prompt is injected after an interrupt: the cut transcript is the hint (§5.1, §3.2).
-        await this.surface.abort();
+        await this.abortTurn();
         return;
 
       case 'pg.steer': {
@@ -489,7 +541,7 @@ export class AdapterLoop {
           this.logIgnored(item);
           return;
         }
-        if (this.surface.isBusy()) await this.surface.abort();
+        if (this.surface.isBusy()) await this.abortTurn();
         const text = typeof payload.text === 'string' ? payload.text : '';
         this.enqueue({ text, kind: 'control', journalId });
         await this.flush();
@@ -536,6 +588,43 @@ export class AdapterLoop {
     await this.stop();
     const reason = typeof payload.reason === 'string' ? payload.reason : 'terminated';
     this.surface.shutdown(reason);
+  }
+
+  /**
+   * §3.2: cut the running turn without holding the loop.
+   *
+   * Control items are handled serially, so an abort that waits for the turn to end
+   * parks every later `pg.abort`, `pg.steer` and `sys.terminated` behind it — and the
+   * settle that fires *because* the turn ended would call `flush()`, start a new turn,
+   * and keep the wait from ever finishing. Two rules close that: nothing is delivered
+   * while `aborting` (`deliverPending` answers busy), and the wait itself is bounded —
+   * `surface.abort` gives up after `ABORT_IDLE_TIMEOUT_MS`, this race gives up then or
+   * earlier when `stop()` runs. Giving up is not an error: the abort is requested and
+   * the turn is still running, and the next settle delivers what is held.
+   */
+  private async abortTurn(): Promise<void> {
+    this.aborting = true;
+    const stop = this.stopGate.signal;
+    let onStop: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const cut = this.surface.abort(stop).catch((err: unknown) => {
+        if (!isAbort(err)) console.warn(`[pigroups] abort failed: ${(err as Error)?.message ?? String(err)}`);
+      });
+      const expired = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ABORT_IDLE_TIMEOUT_MS);
+      });
+      const stopped = new Promise<void>((resolve) => {
+        if (stop.aborted) return resolve();
+        onStop = () => resolve();
+        stop.addEventListener('abort', onStop, { once: true });
+      });
+      await Promise.race([cut, expired, stopped]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (onStop !== undefined) stop.removeEventListener('abort', onStop);
+      this.aborting = false;
+    }
   }
 
   private fromHigherUp(item: PollControlItem): boolean {
@@ -611,7 +700,9 @@ export class AdapterLoop {
   private enqueue(item: PendingDelivery): void {
     // §3.4: one rule for all three sources — the startup brief, a polled message and
     // a journal replay all end here, and `(conv, seq)` at or below the watermark was
-    // already shown to the model.
+    // already shown to the model. A gap's `seq` is a backfill anchor: it is checked
+    // against the watermark like anything else (a gap whose anchor is already covered
+    // is redundant), but `deliverPending` never writes it.
     if (item.conv !== undefined && item.seq !== undefined && this.watermark.seen(item.conv, item.seq)) return;
     this.pending.push(item);
     if (item.journalId !== undefined) {
@@ -629,6 +720,13 @@ export class AdapterLoop {
     await this.journal.commit(journalId);
   }
 
+  /**
+   * Commit an entry only when nothing of it is still queued (§3.1: the entry must
+   * outlive a delivery that did not happen). The count, not `flush()`'s return value,
+   * decides: a busy surface or a throwing `deliver` gives the items back to `pending`,
+   * so they are still counted here, while an entry whose items all reached the agent
+   * was already released in `deliverPending`.
+   */
   private async commitIfDrained(journalId: string): Promise<void> {
     if ((this.queuedByJournal.get(journalId) ?? 0) === 0) {
       this.queuedByJournal.delete(journalId);
@@ -665,8 +763,12 @@ export class AdapterLoop {
   private async onSettled(): Promise<void> {
     if (this.stopped) return;
     this.tick();
-    const delivered = await this.flush();
-    if (!delivered) await this.nudgeOwed();
+    // Only "nothing was pending" leaves this settle's single delivery to a nudge
+    // (§2.3). After a delivery the surface is busy; after a busy surface — including
+    // one held for an abort — or a failed delivery there is still something to
+    // deliver, and a nudge would land in a running turn and be refused silently.
+    if ((await this.flushOutcome()) !== 'empty') return;
+    await this.nudgeOwed();
   }
 
   /**
@@ -692,7 +794,6 @@ export class AdapterLoop {
         }
         continue;
       }
-      this.obligations.recordNudge(entry.conv);
       due.push(entry);
     }
     if (due.length === 0) return;
@@ -704,9 +805,14 @@ export class AdapterLoop {
         'nudge',
       );
     } catch {
-      // The obligations stay; the next settle nudges again (§9).
+      // The nudge never reached the model, so the budget is not spent: counting it
+      // would report a member `blocked` for a turn it was never woken for. The next
+      // settle tries again (§9).
       console.warn('[pigroups] nudge failed; retrying on the next settle');
+      return;
     }
+    // §4.3: only a delivered nudge counts against the budget.
+    for (const entry of due) this.obligations.recordNudge(entry.conv);
   }
 
   /** The window expires into one held reminder, never into an interrupting delivery (§5.2). */
@@ -880,6 +986,27 @@ export class AdapterLoop {
 function dmConv(a: string, b: string): string {
   const [first, second] = a < b ? [a, b] : [b, a];
   return `dm:${first}_${second}`;
+}
+
+/** A one-to-one conversation (§4.1): every message in it is addressed to the peer. */
+function isDmConv(conv: string): boolean {
+  return conv.startsWith('dm:');
+}
+
+/**
+ * §4.1, the whole definition: a conversation owes a reply when its last message is
+ * not mine and one of three holds — it mentions me, my parent sent it, or the
+ * conversation is one-to-one. The DM branch is not an optimisation: without it a DM
+ * between siblings reads as "said something, nobody owes a reply", which is the most
+ * common shape of a silent idle.
+ *
+ * Both seams use this one predicate — the poll classification (§3.3) and the start-up
+ * reconciliation. Two copies drift: the reconciliation used to omit the DM branch and
+ * therefore cleared the debt the poll had just set.
+ */
+function owesReply(input: { conv: string; mine: boolean; mentionsMe: boolean; fromParent: boolean }): boolean {
+  if (input.mine) return false;
+  return input.mentionsMe || input.fromParent || isDmConv(input.conv);
 }
 
 function unknownInspect(): InspectResult {
