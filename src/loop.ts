@@ -120,6 +120,8 @@ export class AdapterLoop {
   private inLoop = false;
   private runPromise: Promise<void> | undefined;
   private settleUnsub: (() => void) | undefined;
+  /** The flush currently delivering, so concurrent callers collapse into it (§2.3). */
+  private flushInFlight: Promise<void> | undefined;
   private readonly eventUnsub: () => void;
   private timer: ReturnType<typeof setInterval> | undefined;
   private pollAbort: AbortController | undefined;
@@ -135,6 +137,10 @@ export class AdapterLoop {
     this.journal = new Journal(deps.config.adapterDir);
     this.telemetry = new TelemetryTable({ windowMs: deps.config.remindWindowMs });
     this.eventUnsub = deps.surface.onEvent((event) => this.handleEvent(event));
+    // The settle reaction lives here, not in `start()` (§2.3): nudges (§4.3) and
+    // the reminder (§5.2) hang off it, so a caller that never starts the timers
+    // must still see it.
+    this.subscribeSettled();
   }
 
   /** Start the three tasks (poll / flush / tick). Idempotent. */
@@ -142,9 +148,7 @@ export class AdapterLoop {
     if (this.started) return;
     this.started = true;
     this.stopped = false;
-    this.settleUnsub = this.surface.onSettled(() => {
-      void this.onSettled();
-    });
+    this.subscribeSettled();
     this.timer = setInterval(() => this.tick(), TICK_MS);
     this.timer.unref?.();
     this.runPromise = this.run();
@@ -180,8 +184,30 @@ export class AdapterLoop {
     await this.ingest(batch);
   }
 
-  /** Deliver what is held, if the agent is idle. A busy agent never gets a delivery (§3.4). */
+  /**
+   * Deliver what is held, if the agent is idle. A busy agent never gets a delivery (§3.4).
+   *
+   * Single-flight (§2.3): the constructor's settle subscription calls this on every
+   * settle, so a tool, a test and the timer can call it at the same time. A second
+   * caller awaits the batch already in flight instead of splicing its own, which
+   * would re-concatenate the taken batch and append the chatter count twice.
+   */
   async flush(): Promise<void> {
+    const inFlight = this.flushInFlight;
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+    const run = this.deliverPending();
+    this.flushInFlight = run;
+    try {
+      await run;
+    } finally {
+      if (this.flushInFlight === run) this.flushInFlight = undefined;
+    }
+  }
+
+  private async deliverPending(): Promise<void> {
     if (this.surface.isBusy()) return;
     if (this.pending.length === 0) return;
 
@@ -580,16 +606,28 @@ export class AdapterLoop {
 
   // ---- settle: delivery, nudges, telemetry (§4.3, §5.2) ------------------
 
+  /** Subscribe once: a second `start()` must not react twice to one settle (§2.3). */
+  private subscribeSettled(): void {
+    if (this.settleUnsub !== undefined) return;
+    this.settleUnsub = this.surface.onSettled(() => {
+      void this.onSettled();
+    });
+  }
+
   private async onSettled(): Promise<void> {
     if (this.stopped) return;
     await this.flush();
-    if (this.surface.isBusy()) return;
     await this.nudgeOwed();
-    if (this.surface.isBusy()) return;
     this.queueReminder(this.now());
     await this.flush();
   }
 
+  /**
+   * §4.3: one `deliver(…, 'nudge')` per owed conversation per settle, straight from
+   * the settle — not folded into the injection batch, whose kind and batching
+   * (§3.4) belong to polled messages. The budget is per conversation and the
+   * adapter reports `blocked` itself when it runs out, without the model.
+   */
   private async nudgeOwed(): Promise<void> {
     const owed = this.obligations.entries();
     if (owed.length === 0) return;
@@ -603,12 +641,16 @@ export class AdapterLoop {
         continue;
       }
       this.obligations.recordNudge(entry.conv);
-      this.pending.push({
-        text: `你在 ${entry.conv} 还有未回复的消息 (#${entry.lastSeq})。回复，或说明为什么不需要回。`,
-        kind: 'nudge',
-      });
+      try {
+        await this.surface.deliver(
+          `你在 ${entry.conv} 还有未回复的消息 (#${entry.lastSeq})。回复，或说明为什么不需要回。`,
+          'nudge',
+        );
+      } catch {
+        // The obligation stays; the next settle nudges again (§9).
+        console.warn(`[pigroups] nudge for ${entry.conv} failed; retrying on the next settle`);
+      }
     }
-    await this.flush();
   }
 
   /** The window expires into one held reminder, never into an interrupting delivery (§5.2). */
