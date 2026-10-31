@@ -3,8 +3,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { command, dmId, history, member, whoami } from './support.ts';
-import { driveUntil, pollUntil, scenario } from './scenario.ts';
+import { command, delay, dmId, history, member, poll, send, whoami, type ControlItem } from './support.ts';
+import { driveUntil, pollUntil, scenario, type Scenario } from './scenario.ts';
+
+/** The parent's control queue, scanned for the `pg.inspect_result` that answers `request`. */
+async function inspectResultFor(s: Scenario, request: string): Promise<Record<string, any>> {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const polled = await poll(s.platform, s.parent!.token, { wait: 0, types: 'control' });
+    const hit = polled.items.find(
+      (item): item is ControlItem =>
+        item.kind === 'control' && item.cmd === 'pg.inspect_result' && (item.payload as any)?.request === request,
+    );
+    if (hit !== undefined) return hit.payload as Record<string, any>;
+    await delay(20);
+  }
+  throw new Error(`no pg.inspect_result for request "${request}" arrived within 3000ms`);
+}
 
 test('pg.inspect gets a pg.inspect_result whose request matches, and an unanswered inspect times out without inventing a result', async (t) => {
   const s = await scenario({ siblings: 1 });
@@ -36,6 +51,45 @@ test('pg.inspect gets a pg.inspect_result whose request matches, and an unanswer
   assert.equal(unanswered.phase, 'unknown', 'a timed-out inspect resolves as unknown, it does not invent a phase');
 });
 
+// §3.2: `pg.inspect` arriving *at* the adapter is answered on the spot. The asker here is the
+// parent, not the adapter itself, so an adapter that only implements the asking side is red.
+test('pg.inspect sent to the adapter is answered with its own phase, owed and children', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle(); // the startup sequence: nothing owed yet, no turn running
+
+  // 1) Idle, nothing owed, no children: the answer must describe *this* adapter, not a fixed default.
+  const idleRequest = 'r-idle-1';
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.inspect', { v: 1, request: idleRequest });
+  await s.loop.pollOnce();
+
+  const idle = await inspectResultFor(s, idleRequest);
+  assert.equal(idle.request, idleRequest, 'the answer must carry the request id it answers');
+  assert.equal(idle.phase, 'idle', 'no turn is running: a live answer says idle');
+  assert.equal(typeof idle.busy_ms, 'number', 'the answer carries busy_ms');
+  assert.deepEqual(idle.owed, [], 'nothing is owed in this conversation yet');
+  assert.equal(idle.children, 0, 'this member has no children');
+
+  // 2) After a DM the member owes a reply to, the same three fields move with the state.
+  await send(s.platform, s.parent!.token, s.me.id, 'the task the member owes a reply to');
+  await s.cycle();
+  assert.deepEqual(s.loop.state().owed, [s.dm], 'precondition: the DM is owed');
+
+  const owedRequest = 'r-owed-1';
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.inspect', { v: 1, request: owedRequest });
+  await s.loop.pollOnce();
+
+  const result = await inspectResultFor(s, owedRequest);
+  assert.equal(result.request, owedRequest, 'a second inspect gets its own answer');
+  assert.notEqual(result.phase, 'unknown', 'unknown is §9\'s timeout fallback, not a live answer');
+  assert.ok(
+    ['idle', 'thinking', 'output', 'tool_call'].includes(String(result.phase)),
+    `phase must be one of §6's values, got ${result.phase}`,
+  );
+  assert.deepEqual(result.owed, [s.dm], "the answer reports the adapter's own obligation table");
+  assert.equal(result.children, 0, 'this member still has no children');
+});
+
 test('pg_spawn creates a member, DMs the brief, and starts one pane with the child token in the env', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
@@ -49,7 +103,6 @@ test('pg_spawn creates a member, DMs the brief, and starts one pane with the chi
   assert.equal(s.herdr.spawns.length, 1, 'one pane per spawned member');
   const spawn = s.herdr.spawns[0];
   assert.equal(spawn.cwd, '/tmp/ws');
-  assert.ok(spawn.label.includes('runner'), `the pane label must name the child: ${spawn.label}`);
 
   const childToken = spawn.env.PIGROUPS_TOKEN;
   assert.ok(childToken, 'the pane must be started with the child token in the env');

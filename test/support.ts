@@ -10,7 +10,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import type { PiSurface } from '../src/surface.ts';
+import type { DeliverKind, PiEvent, PiSurface } from '../src/surface.ts';
 import type { Herdr } from '../src/herdr.ts';
 
 // ---------------------------------------------------------------------------
@@ -326,6 +326,23 @@ export function quiet(ms = 400): Promise<void> {
   return delay(ms);
 }
 
+/**
+ * Await `promise`, but fail with `what` instead of letting the whole run hang.
+ * Used where the promise is the thing under test (`stop()` must resolve): a hang is a red,
+ * not a timeout and not a silent pass.
+ */
+export async function within<T>(promise: Promise<T>, what: string, timeoutMs = 5000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`did not settle within ${timeoutMs}ms: ${what}`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** A clock the test moves by hand, injected as the loop's `now`. */
 export class FakeClock {
   #ms: number;
@@ -345,13 +362,10 @@ export class FakeClock {
 // Fake PiSurface — docs/设计说明.md §2.1
 // ---------------------------------------------------------------------------
 
-export type DeliverKind = 'message' | 'control' | 'nudge' | 'digest';
-
-export type PiEvent =
-  | { type: 'turn_start' }
-  | { type: 'turn_end'; error?: { message: string } }
-  | { type: 'tool_start'; name: string; argsPreview: string }
-  | { type: 'tool_end'; name: string; ok: boolean };
+// `DeliverKind` and `PiEvent` are imported from `src/surface.ts`, never re-declared here:
+// a union widened in `src` must reach this fake, otherwise the fake keeps compiling against
+// the old shape and the test suite would not see the new member at all.
+export type { DeliverKind, PiEvent };
 
 export interface Delivery {
   text: string;

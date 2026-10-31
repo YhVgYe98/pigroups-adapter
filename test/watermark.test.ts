@@ -104,3 +104,45 @@ test('a fresh adapter directory has no watermark, so the same message is injecte
     await rm(fresh.adapterDir, { recursive: true, force: true });
   }
 });
+
+// §3.4: "`gap` 项不推进水位". Platform §6.4's second shape is a gap for a conversation with no
+// retained item in the batch: `before` is then "newest skipped seq + 1", and the next real message
+// in that conversation gets exactly that seq. Advancing the watermark to the anchor drops it forever.
+test('a gap does not advance the injection watermark: the message at seq === gap.before is still injected', async (t) => {
+  // `pollLimit` 2 keeps the newest two items of a batch and folds the rest into per-conversation gaps.
+  const s = await scenario({ siblings: 1, pollLimit: 2 });
+  t.after(() => s.close());
+  const sibling = s.siblings[0];
+
+  await s.cycle(); // drain the startup sequence while the history is still empty
+
+  for (let i = 0; i < 3; i += 1) await send(s.platform, sibling.token, s.group, `skipped group ${i}`, [s.me.id]);
+  await send(s.platform, s.parent!.token, s.me.id, 'dm one');
+  await send(s.platform, s.parent!.token, s.me.id, 'dm two');
+
+  // The newest two slots are the DMs, so the group has no retained item: this is the second shape.
+  await s.cycle();
+
+  const batchText = s.surface.texts().join('\n');
+  const anchor = Number(/before=(\d+)/.exec(batchText)?.[1]);
+  assert.ok(Number.isFinite(anchor), `the gap hint must carry the re-read anchor: ${batchText}`);
+  assert.equal(anchor, 4, `three skipped group messages anchor the gap one past the newest: ${batchText}`);
+
+  // That batch started a turn. End it, and every nudge the settle reaction takes afterwards,
+  // until the member is idle again: only an idle member can be injected a new message.
+  for (let i = 0; i < 10 && s.surface.isBusy(); i += 1) await s.settle();
+  assert.equal(s.surface.isBusy(), false, 'precondition: the member is idle before the next poll');
+
+  const next = await send(s.platform, sibling.token, s.group, 'the first message after the gap', [s.me.id]);
+  assert.equal(next.seq, anchor, 'the next message in the conversation takes exactly the anchor seq');
+
+  await s.cycle();
+
+  const text = s.surface.texts().join('\n');
+  assert.equal(
+    injections(text, s.group, anchor),
+    1,
+    `seq === gap.before is a message nobody has seen yet, so it must be injected:\n${text}`,
+  );
+  assert.ok(text.includes('the first message after the gap'), `the message body must reach the member: ${text}`);
+});

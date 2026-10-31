@@ -24,6 +24,7 @@ import {
   type ControlItem,
   type MemberRef,
   type Platform,
+  within,
 } from './support.ts';
 
 export const DEFAULT_ATTENTION_TOOL_MS = 300_000;
@@ -107,7 +108,9 @@ export async function createLoop(
       await loop.flush();
     },
     async stop() {
-      await Promise.race([loop.stop(), delay(2000)]);
+      // Not `Promise.race(loop.stop(), delay(2000))`: that turns a hung `stop()` into "2 seconds
+      // elapsed" and the test passes. `within` fails instead, so a stop() that never resolves is red.
+      await within(loop.stop(), 'loop.stop() to resolve');
     },
   };
 }

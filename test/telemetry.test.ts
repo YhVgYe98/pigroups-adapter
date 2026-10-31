@@ -103,6 +103,46 @@ test('two children stalled in one window produce one consolidated nudge; a windo
   );
 });
 
+test('two attentions from one child build a real table entry: state, since, count and tool', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'coder');
+
+  assert.deepEqual(s.loop.children(), [], 'before any attention the table is empty: it is not the tree');
+
+  const since = s.clock.now() - 120_000;
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'stalled',
+    since,
+    tool: { name: 'bash', elapsed_ms: 720_000, preview: "find ~/ -name '*.ts'" },
+  });
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'stalled',
+    since,
+    tool: { name: 'edit', elapsed_ms: 90_000, preview: 'src/loop.ts' },
+  });
+  await s.cycle();
+
+  assert.equal(s.surface.deliveries.length, 0, 'attention updates the table, it is not injected');
+
+  const rows = s.loop.children();
+  assert.equal(rows.length, 1, `the telemetry table must hold the child, got ${JSON.stringify(rows)}`);
+  const [row] = rows;
+  assert.equal(row.id, child.id, 'the row is keyed by the child id');
+  assert.equal(row.name, child.name, 'the row carries the name the child reported');
+  assert.equal(row.state, 'stalled', 'the row carries the state the child reported');
+  assert.equal(row.since, since, "the row carries the child's own since, not the receipt time");
+  assert.equal(row.count, 2, 'two attentions mean two counted events');
+  assert.equal(row.tool?.name, 'edit', 'the row carries the tool of the latest event');
+  assert.ok(String(row.tool?.preview).includes('loop.ts'), `the row keeps the preview: ${JSON.stringify(row.tool)}`);
+});
+
 test('state gone bypasses the window and is delivered immediately', async (t) => {
   const s = await scenario({ role: 'root', remindWindowMs: 3_600_000 });
   t.after(() => s.close());
