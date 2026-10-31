@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Journal } from './journal.ts';
 import { ObligationTable, TelemetryTable } from './state.ts';
+import { Watermarks } from './watermark.ts';
 import type { AttentionEvent, AttentionState, AttentionTool, Obligation } from './state.ts';
 import { PgError, PgGone, PgPollBusy, PgUnavailable } from './pgclient.ts';
 import type {
@@ -93,6 +94,7 @@ export class AdapterLoop {
   private readonly now: () => number;
 
   private readonly journal: Journal;
+  private readonly watermark: Watermarks;
   private readonly obligations = new ObligationTable();
   private readonly telemetry: TelemetryTable;
   private readonly pending: PendingDelivery[] = [];
@@ -112,7 +114,8 @@ export class AdapterLoop {
   /**
    * The briefing message (§8.3.3), read from history at startup. A new member's poll
    * queue still holds that same message (platform §10.6), so the poll hands it again
-   * and one message would be injected twice. This is its identity.
+   * and one message would be injected twice. This is its identity — the in-process half
+   * of §3.4; the persisted watermark (`Watermarks`) covers the restart.
    */
   private brief: { conv: string; seq: number } | undefined;
   private selfId: string | undefined;
@@ -144,6 +147,7 @@ export class AdapterLoop {
     this.config = deps.config;
     this.now = deps.now;
     this.journal = new Journal(deps.config.adapterDir);
+    this.watermark = new Watermarks(deps.config.adapterDir);
     this.telemetry = new TelemetryTable({ windowMs: deps.config.remindWindowMs });
     this.eventUnsub = deps.surface.onEvent((event) => this.handleEvent(event));
     // The settle reaction lives here, not in `start()` (§2.3): nudges (§4.3) and
@@ -241,6 +245,9 @@ export class AdapterLoop {
         // `mark` keeps `nudges`, so it must not re-arm `blockedReported` either:
         // a blocked episode ends only when the member speaks (§4.3), not on inbound traffic.
         this.obligations.mark(item.conv, item.seq ?? 0, this.now());
+        // §3.4: the watermark moves only now, after `deliver` committed the text, so a
+        // failed delivery or a crash in between cannot make the message disappear.
+        if (item.seq !== undefined) await this.watermark.advance(item.conv, item.seq);
       }
       if (item.journalId !== undefined) await this.releaseJournal(item.journalId);
     }
@@ -355,6 +362,9 @@ export class AdapterLoop {
     this.selfId = who.member.id;
     this.selfName = who.member.name;
     this.parentId = who.member.parent_id;
+    // The watermark is this member's (§3.4), so it is keyed only now, and read before
+    // the first injection point below can decide anything.
+    await this.watermark.load(who.member.id);
     await this.injectBrief();
     await this.reconcileObligations();
     await this.replayJournal();
@@ -371,7 +381,7 @@ export class AdapterLoop {
     const brief = history.items[0];
     if (!brief || brief.sender_id !== parent) return;
     this.brief = { conv, seq: brief.seq };
-    this.pending.push({
+    this.enqueue({
       text: `[${conv}#${brief.seq}] ${brief.sender_name}: ${brief.body}`,
       kind: 'message',
       conv,
@@ -423,7 +433,8 @@ export class AdapterLoop {
 
   private classifyMessage(item: PollMessageItem, journalId?: string): void {
     // One message, one injection: the brief came from history, and the copy the poll
-    // queue still holds for it is the same message, not new input.
+    // queue still holds for it is the same message, not new input. `enqueue` then holds
+    // the same line for a seq an earlier process already injected (§3.4).
     if (this.brief?.conv === item.to && this.brief.seq === item.seq) return;
     if (item.mentions_me || item.from_parent || item.to.startsWith('dm:')) {
       this.enqueue(
@@ -598,6 +609,10 @@ export class AdapterLoop {
   // ---- delivery bookkeeping ---------------------------------------------
 
   private enqueue(item: PendingDelivery): void {
+    // §3.4: one rule for all three sources — the startup brief, a polled message and
+    // a journal replay all end here, and `(conv, seq)` at or below the watermark was
+    // already shown to the model.
+    if (item.conv !== undefined && item.seq !== undefined && this.watermark.seen(item.conv, item.seq)) return;
     this.pending.push(item);
     if (item.journalId !== undefined) {
       this.queuedByJournal.set(item.journalId, (this.queuedByJournal.get(item.journalId) ?? 0) + 1);
