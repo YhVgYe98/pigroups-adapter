@@ -318,8 +318,10 @@ export class AdapterLoop {
         // `mark` keeps `nudges`, so it must not re-arm `blockedReported` either:
         // a blocked episode ends only when the member speaks (§4.3), not on inbound traffic.
         this.obligations.mark(item.conv, item.seq ?? 0, this.now());
-        // §3.4: the watermark moves only now, after `deliver` committed the text, so a
-        // failed delivery or a crash in between cannot make the message disappear.
+        // §3.4: the watermark moves only now, after `deliver` returned, so a delivery
+        // that throws or a crash in between cannot make the message disappear. This is
+        // an acknowledgement that pi accepted the message, not that a run started
+        // (`sendMessage` is void and swallows start failures; see 设计说明 §3.4).
         // A gap is the exception: its `seq` is a backfill anchor, and when nothing was
         // retained the platform sets it to "newest skipped seq + 1" (platform §6.4) —
         // the seq the next real message will carry. Writing it would drop that message
@@ -856,6 +858,10 @@ export class AdapterLoop {
    * Only called when the settle delivered nothing (§2.3).
    */
   private async nudgeOwed(): Promise<void> {
+    // §3.2: an abort is cutting the turn, so starting a nudge now would be the very
+    // turn `surface.abort` then waits for. `onSettled` already refuses when the abort
+    // began before the settle; this covers a nudge that reaches here by another path.
+    if (this.aborting) return;
     const owed = this.obligations.entries();
     if (owed.length === 0) return;
 
@@ -871,6 +877,11 @@ export class AdapterLoop {
       due.push(entry);
     }
     if (due.length === 0) return;
+
+    // The blocked report above awaits the platform, which is long enough for a
+    // `pg.abort` to land in between. Delivering now would start a run during the
+    // abort; check again at the last moment (§3.2).
+    if (this.aborting) return;
 
     const debts = due.map((entry) => `${entry.conv} #${entry.lastSeq}`).join(', ');
     try {

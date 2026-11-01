@@ -324,3 +324,78 @@ test('an exhausted conversation reports blocked once while the live one keeps be
     'only the newly exhausted conversation reports blocked',
   );
 });
+
+// §3.2: an abort is cutting the turn, so a nudge must not start the very turn the
+// abort then waits for. `onSettled` already refuses while `aborting`, but the nudge
+// itself is reachable from a settle that began before the abort landed — and the
+// blocked report below awaits the platform, which leaves a second window right
+// before the delivery. Both guards are checked here through the loop's internals:
+// no public drive can hold the report open at a chosen instant.
+interface LoopInternals {
+  aborting: boolean;
+  obligations: { recordNudge(conv: string): number };
+  nudgeOwed(): Promise<void>;
+  pg: { sendControl(input: unknown): Promise<unknown> };
+}
+
+function internals(loop: unknown): LoopInternals {
+  return loop as LoopInternals;
+}
+
+test('nudgeOwed delivers nothing while an abort is already cutting the turn', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  await send(s.platform, s.parent!.token, s.me.id, 'status please');
+  await s.cycle();
+  const inner = internals(s.loop);
+  inner.aborting = true;
+
+  const mark = s.surface.mark();
+  await inner.nudgeOwed();
+
+  assert.equal(s.surface.since(mark).length, 0, 'a nudge during pg.abort would be the turn the abort is cutting');
+});
+
+test('an abort during the blocked report stops the nudge to the live conversation', async (t) => {
+  const s = await scenario({ nudgeMax: 1 });
+  t.after(() => s.close());
+  await s.cycle();
+
+  await send(s.platform, s.parent!.token, s.me.id, 'the dm that never gets answered');
+  await send(s.platform, s.parent!.token, s.group, 'the group task', [s.me.id]);
+  await s.cycle();
+  const inner = internals(s.loop);
+  assert.equal(
+    inner.obligations.recordNudge(s.dm),
+    s.config.nudgeMax,
+    'precondition: the DM has spent its budget, the group has not',
+  );
+
+  const pg = inner.pg;
+  const original = pg.sendControl.bind(pg);
+  let releaseReport: (() => void) | undefined;
+  pg.sendControl = () =>
+    new Promise((resolve) => {
+      releaseReport = () => resolve({});
+    });
+  t.after(() => {
+    pg.sendControl = original;
+  });
+
+  const mark = s.surface.mark();
+  const driving = inner.nudgeOwed();
+  await waitFor(() => releaseReport !== undefined, 'the blocked report to reach the platform');
+
+  // The report is in flight; this is the moment a `pg.abort` can land.
+  inner.aborting = true;
+  releaseReport!();
+  await driving;
+
+  assert.equal(
+    s.surface.since(mark).length,
+    0,
+    'the live conversation must not be nudged while the abort is cutting the turn',
+  );
+});
