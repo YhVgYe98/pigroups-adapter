@@ -108,6 +108,8 @@ const STOP_TIMEOUT_MS = 3000;
 const ROSTER_TTL_MS = 30_000;
 /** A slow roster must delay a settle's delivery no further than this. */
 const ROSTER_TIMEOUT_MS = 2000;
+/** A failed roster read is not retried on every settle; the platform may be down. */
+const ROSTER_RETRY_BACKOFF_MS = 5000;
 /**
  * A pane check is the same kind of cost (§5.3): a live child costs at most one
  * `GET /v1/members/{id}` per TTL, and a dead one is closed within that TTL.
@@ -205,6 +207,8 @@ export class AdapterLoop {
   private deliveredCount = 0;
   /** The live roster (§4.4), cached: an obligation check must not cost a request per settle. */
   private roster: RosterSnapshot | undefined;
+  /** After a failed roster read, the next attempt waits until this instant. */
+  private rosterRetryAt = 0;
   /** When each mapped child's status was last confirmed with `GET /v1/members/{id}` (§5.3). */
   private readonly paneCheckedAt = new Map<string, number>();
   /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
@@ -1083,8 +1087,13 @@ export class AdapterLoop {
 
   /**
    * The roster, with the instant it describes. Returns the cached snapshot while it is
-   * fresh, and `null` when no trustworthy snapshot exists — a failed read, a body that
-   * is not a roster, or one that does not contain this member.
+   * fresh; after a failure it returns the last good snapshot and backs off before
+   * asking again. `null` means no trustworthy snapshot exists — the first read failed,
+   * or its body was not a roster containing this member.
+   *
+   * A stale "alive" set is safe to prune with: it removes fewer debts, never more, and
+   * the `since >= at` guard still protects a peer created after that snapshot was taken.
+   * Discarding it instead would make every failed settle pay another two-second timeout.
    *
    * Validation is not paranoia: `{"nodes":[]}` is a 200 with a truthy body, and treating
    * it as "everyone is gone" clears every DM debt. An answer that does not contain the
@@ -1094,32 +1103,30 @@ export class AdapterLoop {
     const now = this.now();
     // `now >= at` rules out a backwards clock step pinning a stale snapshot forever.
     if (!fresh && this.roster && now >= this.roster.at && now - this.roster.at < ROSTER_TTL_MS) return this.roster;
+    if (!fresh && now < this.rosterRetryAt) return this.roster ?? null;
     try {
-      const tree: unknown = await withTimeout(this.pg.tree(), ROSTER_TIMEOUT_MS);
+      const tree: unknown = await withAbort((signal) => this.pg.tree(signal), ROSTER_TIMEOUT_MS);
       const nodes = (tree as { nodes?: unknown } | null | undefined)?.nodes;
-      if (!Array.isArray(nodes)) {
-        this.roster = undefined;
-        return null;
-      }
+      if (!Array.isArray(nodes)) return this.rejectRoster();
       const ids = new Set<string>();
       for (const node of nodes) {
         const id = (node as { id?: unknown } | null | undefined)?.id;
-        if (typeof id !== 'string' || id === '') {
-          this.roster = undefined;
-          return null;
-        }
+        if (typeof id !== 'string' || id === '') return this.rejectRoster();
         ids.add(id);
       }
-      if (this.selfId === undefined || !ids.has(this.selfId)) {
-        this.roster = undefined;
-        return null;
-      }
+      if (this.selfId === undefined || !ids.has(this.selfId)) return this.rejectRoster();
       this.roster = { at: now, ids };
+      this.rosterRetryAt = 0;
       return this.roster;
     } catch {
-      this.roster = undefined;
-      return null;
+      return this.rejectRoster();
     }
+  }
+
+  /** One bad roster answer: keep the last good one and delay the next request. */
+  private rejectRoster(): RosterSnapshot | null {
+    this.rosterRetryAt = this.now() + ROSTER_RETRY_BACKOFF_MS;
+    return this.roster ?? null;
   }
 
   /**
@@ -1452,6 +1459,31 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout')), ms);
     promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
+ * The same bound, but for a request that can be cancelled. `withTimeout` only abandons
+ * the promise: an HTTP fetch keeps its socket and can hold the process open. This hands
+ * the request an AbortSignal and aborts it when the timeout fires, so the bound is real.
+ */
+function withAbort<T>(run: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error('timeout'));
+    }, ms);
+    run(controller.signal).then(
       (value) => {
         clearTimeout(timer);
         resolve(value);

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AdapterLoop } from '../src/loop.ts';
-import { PgGone, type PgClient } from '../src/pgclient.ts';
+import { PgClient, PgGone } from '../src/pgclient.ts';
 import { FakeClock, FakeSurface, createMember, dmId, poll, removeMember, send, waitFor } from './support.ts';
 import { payloads, scenario } from './scenario.ts';
 
@@ -564,7 +564,7 @@ interface FakeLoop {
  * conversation that owes a reply. Draining the clock afterwards makes the debt older
  * than the snapshot the settle takes, so only the roster's content can decide it.
  */
-async function makeLoop(tree: () => Promise<unknown>): Promise<FakeLoop> {
+async function makeLoop(tree: (signal?: AbortSignal) => Promise<unknown>): Promise<FakeLoop> {
   const surface = new FakeSurface();
   const clock = new FakeClock(1_000_000);
   const dir = await mkdtemp(join(tmpdir(), 'pigroups-roster-'));
@@ -655,6 +655,124 @@ test('a failed roster read keeps every debt', async () => {
   });
   assert.deepEqual(owed, [PEER_DM], 'a read that failed proves nothing about the peer');
   assert.equal(surface.textsOfKind('nudge').length, 1, 'and the debt is still owed to a living peer');
+});
+
+test('a failed roster read keeps the last good snapshot and prunes nothing', async () => {
+  let reads = 0;
+  let failing = false;
+  const f = await makeLoop(async () => {
+    reads += 1;
+    if (failing) throw new Error('platform down');
+    return { nodes: [{ id: SELF_ID }, { id: PEER_ID }] };
+  });
+  try {
+    await f.loop.pollOnce(); // startup: a good snapshot containing the peer
+    assert.equal(reads, 1, 'precondition: the startup read succeeded');
+
+    f.clock.advance(60_000); // the snapshot is stale, so a settle must ask again
+    failing = true;
+    f.surface.settle();
+    await f.loop.settled();
+
+    assert.deepEqual(f.loop.state().owed, [PEER_DM], 'a failed read proves nothing about the peer');
+    assert.equal(reads, 2, 'precondition: the settle really attempted the read');
+    const inner = f.loop as unknown as { roster?: { ids: Set<string> } };
+    assert.ok(inner.roster?.ids.has(PEER_ID), 'the last good snapshot must be kept, not discarded');
+  } finally {
+    await f.loop.stop();
+    await rm(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('a roster read is not retried before the retry backoff elapses', async () => {
+  let reads = 0;
+  let failing = false;
+  let peerAlive = true;
+  const f = await makeLoop(async () => {
+    reads += 1;
+    if (failing) throw new Error('platform down');
+    return { nodes: peerAlive ? [{ id: SELF_ID }, { id: PEER_ID }] : [{ id: SELF_ID }] };
+  });
+  try {
+    await f.loop.pollOnce(); // startup read: the peer is alive
+    f.clock.advance(60_000);
+    failing = true;
+    f.surface.settle();
+    await f.loop.settled(); // the failed read starts the backoff
+    const afterFailure = reads;
+    assert.equal(afterFailure, 2, 'precondition: the settle attempted one read');
+
+    f.clock.advance(4_999); // one millisecond short of the 5 s backoff
+    f.surface.settle();
+    await f.loop.settled();
+    assert.equal(reads, afterFailure, 'no roster request may be made inside the backoff');
+    assert.deepEqual(f.loop.state().owed, [PEER_DM], 'the stale snapshot keeps pruning conservative');
+
+    f.clock.advance(1);
+    failing = false;
+    peerAlive = false;
+    f.surface.settle();
+    await f.loop.settled();
+    assert.equal(reads, afterFailure + 1, 'the first settle after the backoff asks again');
+    assert.deepEqual(f.loop.state().owed, [], 'the fresh roster now prunes the dead peer');
+  } finally {
+    await f.loop.stop();
+    await rm(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('the roster timeout aborts the request instead of abandoning it', async () => {
+  let seen: AbortSignal | undefined;
+  const f = await makeLoop(
+    (signal) =>
+      new Promise((_resolve, reject) => {
+        seen = signal;
+        signal?.addEventListener('abort', () => {
+          const err = new Error('aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+      }),
+  );
+  try {
+    const startup = f.loop.pollOnce();
+    await waitFor(() => seen !== undefined, 'the roster request to start');
+    assert.equal(seen?.aborted, false, 'precondition: the request is still in flight');
+    await startup; // the 2 s roster bound expires and must cancel the request
+    assert.equal(seen?.aborted, true, 'the timeout must abort the request, not only stop waiting for it');
+  } finally {
+    await f.loop.stop();
+    await rm(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('PgClient.tree passes its signal through to fetch and aborts the request', async () => {
+  const original = globalThis.fetch;
+  let requestSignal: AbortSignal | undefined;
+  globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+    requestSignal = init?.signal ?? undefined;
+    return new Promise<Response>((_resolve, reject) => {
+      requestSignal?.addEventListener('abort', () => {
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        reject(err);
+      });
+    });
+  }) as typeof fetch;
+  try {
+    const pg = new PgClient({ url: 'http://127.0.0.1:1', token: 't' });
+    const controller = new AbortController();
+    const reading = pg.tree(controller.signal);
+    assert.equal(requestSignal, controller.signal, 'the signal must reach fetch');
+    controller.abort();
+    await assert.rejects(
+      reading,
+      (err: unknown) => (err as Error).name === 'AbortError',
+      'aborting the signal must abort the request',
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test('a healthy roster missing the peer prunes the debt', async () => {

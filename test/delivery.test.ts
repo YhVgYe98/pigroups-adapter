@@ -131,6 +131,8 @@ test('a settle nudges only when nothing was delivered while it was asking the pl
   const deliveries: Array<{ text: string; kind: string }> = [];
   let fireSettled: (() => void) | undefined;
   let releaseTree: ((tree: unknown) => void) | undefined;
+  let treeReads = 0;
+  let now = 1_000_000;
   let polls = 0;
 
   // pi 1.4.0's contract: `sendMessage` is void, so `deliver` resolves before `isIdle()`
@@ -167,10 +169,15 @@ test('a settle nudges only when nothing was delivered while it was asking the pl
       ],
       next: null,
     }),
-    tree: () =>
-      new Promise((resolve) => {
+    // The startup prune reads a healthy roster first. Only the settle under test
+    // gets the held read, which is what `releaseTree` exposes.
+    tree: () => {
+      treeReads += 1;
+      if (treeReads === 1) return Promise.resolve({ nodes: [{ id: SELF }, { id: PEER }] });
+      return new Promise((resolve) => {
         releaseTree = resolve;
-      }),
+      });
+    },
     poll: async () => {
       polls += 1;
       if (polls === 1) return { items: [], control_pending: 0 };
@@ -214,11 +221,12 @@ test('a settle nudges only when nothing was delivered while it was asking the pl
       nudgeMax: 3,
       spawnCmd: 'pi',
     },
-    now: () => 1_000_000,
+    now: () => now,
   });
   try {
     await loop.pollOnce(); // initialise: selfId + the DM debt, exactly as a real start would
     assert.deepEqual(loop.state().owed, [dm], 'precondition: the reconciliation found the debt');
+    now += 31_000; // the startup roster snapshot is stale, so the settle must read again
 
     fireSettled?.(); // the settle under test starts and waits inside pruneUnanswerableDms()
     await delay(20);

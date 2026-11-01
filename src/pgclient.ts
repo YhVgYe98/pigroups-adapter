@@ -217,8 +217,8 @@ export class PgClient {
   }
 
   /** §4.4 the roster: only living members, which is what an obligation needs (§4.1). */
-  async tree(): Promise<{ nodes: { id: string }[] }> {
-    return this.request<{ nodes: { id: string }[] }>('GET', '/v1/tree');
+  async tree(signal?: AbortSignal): Promise<{ nodes: { id: string }[] }> {
+    return this.request<{ nodes: { id: string }[] }>('GET', '/v1/tree', { signal });
   }
 
   async conversations(): Promise<{ items: Conversation[] }> {

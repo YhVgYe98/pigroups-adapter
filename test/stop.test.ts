@@ -84,6 +84,8 @@ test('stop() waits for a settle that is still reading the roster, and nothing is
   let fired = false;
   let fireSettled: (() => void) | undefined;
   let releaseTree: ((tree: unknown) => void) | undefined;
+  let treeReads = 0;
+  let now = 1_000_000;
 
   const surface: PiSurface = {
     deliver: async (text) => {
@@ -117,10 +119,15 @@ test('stop() waits for a settle that is still reading the roster, and nothing is
       ],
       next: null,
     }),
-    tree: () =>
-      new Promise((resolve) => {
+    // The startup prune reads a healthy roster first. Only the settle under test
+    // gets the held read, which is what `releaseTree` exposes.
+    tree: () => {
+      treeReads += 1;
+      if (treeReads === 1) return Promise.resolve({ nodes: [{ id: SELF }, { id: PEER }] });
+      return new Promise((resolve) => {
         releaseTree = resolve;
-      }),
+      });
+    },
     poll: async () => {
       if (fired) return { items: [], control_pending: 0 };
       fired = true;
@@ -164,7 +171,7 @@ test('stop() waits for a settle that is still reading the roster, and nothing is
       nudgeMax: 3,
       spawnCmd: 'pi',
     },
-    now: () => 1_000_000,
+    now: () => now,
   });
   try {
     // The polled message stays queued: the surface is inside a turn.
@@ -172,6 +179,7 @@ test('stop() waits for a settle that is still reading the roster, and nothing is
     await loop.pollOnce();
     busy = false;
     assert.deepEqual(deliveries, [], 'precondition: the message is queued, not delivered');
+    now += 31_000; // the startup roster snapshot is stale, so the settle must read again
 
     fireSettled?.(); // the settle starts and stops inside `pruneUnanswerableDms()`
     await delay(30);
