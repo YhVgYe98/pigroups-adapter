@@ -13,7 +13,39 @@
 
 - **一次发布记一对号。** 两个仓库当作一个系统开发，标签记的是**这一对**。两边都动就两边同号（`v0.2.0` = 平台 `SERVER_VERSION` 0.2.0 + 适配器 `ADAPTER_VERSION` 0.2.0）；只有一侧动时只动那一侧，另一侧保持原号——`v0.2.1` 是适配器单独一笔，与平台 0.2.0 配套。适配器的 `v<号>` 里永远是适配器自己的号。
 - **版本号只有一个来源**：`src/version.ts` 的 `ADAPTER_VERSION`。`package.json`（和 lockfile）必须与之一致；`test/version.test.ts` 在二者不一致时变红。不要再造第二个数字。
+- **build metadata 记录测试对象，不参与判定**：`0.4.0+platform.0.2.0` 里的 `+platform.0.2.0` 只说明这一版验证过平台 `0.2.0`。平台以后变了而适配器不用改，就重发同一个数字、换 metadata，不升号。兼容性由平台 major.minor 的启动 warning 与 `pg.*` 的 `v` 字段决定。
 - 0.1.0 只是脚手架留在 `package.json` 里的一个字符串：没有版本常量、没有 tag、没有任何地方报告它。本文件从 0.2.0 开始记账。
+
+---
+
+## v0.4.0+platform.0.2.0（2026-11-01，与平台 0.2.0 配套）
+
+**一次只动适配器的 minor。** `PIGROUPS_SPAWN_CMD` 的默认值变了，这是操作者可见的行为变化，所以 `0.3.0 → 0.4.0`；平台不动，仍是 `0.2.0`。版本串带 build metadata `+platform.0.2.0`，只记录这一版验证过的平台，不参与任何判定。
+
+### 自加载的 spawn 默认
+
+- `PIGROUPS_SPAWN_CMD` 不再默认成裸 `pi`。`src/extension.ts` 用 `import.meta.url` 取自己被加载的路径，默认 `pi -ne -e '<绝对路径>'`。忘掉 `-e` 不再会得到一个“建了成员、开了 pane、但不说话”的空子进程。
+- 默认带 `-ne`：不继承操作者的全局扩展（也不加载 pi 内置扩展；显式 `-e` 仍加载）。第一次第 4 级 run 里一个全局扩展把消息转进了操作者主会话，干净子进程更可预测。`PIGROUPS_SPAWN_CMD` 仍是逃生口，显式值完全替换默认。
+- 命令按 shell 引号规则切词（新增 `src/command.ts`），路径含空格时仍是一个参数；`pane send-text` 兜底也把同一条命令交给 shell。
+- 测试 3 条：默认含自身绝对路径与 `pi`、显式 env 获胜、含空格的路径不被拆开。变异：撤掉默认（回到 `pi`）→ 默认用例红在 `the child starts without the operator’s global extensions`；换回朴素按空白切词 → 空格用例红在 `herdr must receive the spaced path as one argument, not four`（actual 被拆成 4 段）。
+
+### 启动兼容性 warning
+
+- 平台答完后，`src/version.ts` 的 `platformCompatibilityWarning()` 把 `who.server.version` 的 major.minor 与 `SUPPORTED_PLATFORM_MINORS = ['0.2']` 比较。不在列表只打一条 warning，同时写平台版本和适配器版本，然后继续；匹配什么都不打；平台不可达不在此处 warn，由循环的退避/上报处理。
+- 判定是纯函数；`init()` 只负责调用一次。测试 3 条：纯判定、支持平台启动无 warning、不支持平台启动恰好一条 warning 且第二次 cycle 不重复。变异：删掉启动调用 → 不支持用例红在 `exactly one warning, got []`；让支持版本也命中 warning → 2 条红（`the supported major.minor logs nothing`、`a matching platform must not add noise to the one startup line`）。
+
+### Pi 包与版本
+
+- `package.json` 增加 `pi.extensions = ["./src/extension.ts"]`、`keywords: ["pi-package"]`、`description`、`license`、`repository`，`files` 只留 `src` / `README.md` / `CHANGELOG.md` / `docs`；仍是 `private: true`、无运行时依赖。
+- `package.json`、`src/version.ts`、`package-lock.json` 三处都是 `0.4.0+platform.0.2.0`。版本漂移测试保持原样；三条变异分别改 package、常量、lock，各自 1/1 红（`package.json must say what src/version.ts says` / 同一条 / `the lockfile carries the same version`）。
+- `npm pack` 成功，tarball `pigroups-adapter-pi-0.4.0+platform.0.2.0.tgz`（16 个文件，含 src/docs/README/CHANGELOG，不含 test/probe/lockfile）。
+
+**测试与变异证明。** 88 → 96 条，`npm run typecheck` 干净，`npm test` 96/96。行为测试都做了“撤掉 src 就红”：spawn 默认 2 条、启动兼容性 3 条，原文在对应小节；包清单 1 条也做过同样的红/绿检查。文档同步：`docs/设计说明.md` §2.2/§5.3/§7/§8，`docs/handoff.md` §2.3/§7（及当前版本号/测试数）。
+
+### 没做的
+
+- 真机第 4 级还没复跑“操作者完全不设 `PIGROUPS_SPAWN_CMD`、子成员跑一个工具并说话”这一条；本轮只证明默认命令的形状和参数切分，真机证明留给验收阶段。
+- 平台兼容性只是 warning；`SUPPORTED_PLATFORM_MINORS` 仍要随实际验证过的平台手动扩展。
 
 ---
 

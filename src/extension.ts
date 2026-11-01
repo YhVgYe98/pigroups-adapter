@@ -8,7 +8,9 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+import { shellQuote } from './command.ts';
 import { AdapterLoop } from './loop.ts';
 import type { LoopConfig } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
@@ -19,6 +21,27 @@ import { ADAPTER_VERSION } from './version.ts';
 
 const EXIT_REPORT_TIMEOUT_MS = 2000;
 const INSPECT_TIMEOUT_MS = 10_000;
+
+/** The file pi loaded, not a path guessed from cwd or an install location. */
+export const EXTENSION_ENTRY = fileURLToPath(import.meta.url);
+
+/**
+ * §2.2: a spawned child must load this adapter. `-ne` keeps the child clean: the
+ * operator's global extensions are not inherited, so one of them cannot steer the
+ * child (or the operator's own session) by accident. `PIGROUPS_SPAWN_CMD` is the
+ * escape hatch when a child needs other flags, such as an explicit model.
+ */
+export function defaultSpawnCmd(extensionPath: string = EXTENSION_ENTRY): string {
+  return ['pi', '-ne', '-e', shellQuote(extensionPath)].join(' ');
+}
+
+/** The operator's explicit command always wins over the self-loading default. */
+export function resolveSpawnCmd(
+  env: NodeJS.ProcessEnv = process.env,
+  extensionPath: string = EXTENSION_ENTRY,
+): string {
+  return env.PIGROUPS_SPAWN_CMD ?? defaultSpawnCmd(extensionPath);
+}
 
 export default function pigroupsExtension(pi: PiLike): void {
   // §7: the same extension is installed in every session; only members pull.
@@ -65,7 +88,7 @@ function readConfig(): LoopConfig | null {
     attentionToolMs: envInt('PIGROUPS_ATTENTION_TOOL_MS', 300_000),
     remindWindowMs: envInt('PIGROUPS_REMIND_WINDOW_MS', 300_000),
     nudgeMax: envInt('PIGROUPS_NUDGE_MAX', 3),
-    spawnCmd: process.env.PIGROUPS_SPAWN_CMD ?? 'pi',
+    spawnCmd: resolveSpawnCmd(),
   };
 }
 

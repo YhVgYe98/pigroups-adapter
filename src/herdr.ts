@@ -7,6 +7,8 @@
 
 import { execFile } from 'node:child_process';
 
+import { shellQuote, splitCommand } from './command.ts';
+
 export interface HerdrCloseResult {
   /**
    * True when the agent was still listed when the exit wait expired and `pane close`
@@ -31,7 +33,7 @@ export interface Herdr {
 }
 
 export interface HerdrCliOptions {
-  /** `PIGROUPS_SPAWN_CMD`, default `pi`. */
+  /** `PIGROUPS_SPAWN_CMD`; defaults to this extension loaded with `pi -ne -e <own path>`. */
   spawnCmd: string;
   /** The executable to run, default `herdr` on PATH. */
   command?: string;
@@ -242,15 +244,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 }
 
-function splitCommand(command: string): string[] {
-  return command.trim().split(/\s+/).filter((part) => part.length > 0);
-}
-
 function baseName(path: string): string {
   const parts = path.split('/');
   return parts[parts.length - 1];
-}
-
-function shellQuote(value: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }

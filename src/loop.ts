@@ -22,6 +22,7 @@ import type {
 } from './pgclient.ts';
 import type { Herdr } from './herdr.ts';
 import { ABORT_IDLE_TIMEOUT_MS } from './surface.ts';
+import { platformCompatibilityWarning } from './version.ts';
 import type { DeliverKind, PiEvent, PiSurface } from './surface.ts';
 
 export interface LoopConfig {
@@ -198,6 +199,8 @@ export class AdapterLoop {
 
   private started = false;
   private stopped = false;
+  /** §8: the compatibility warning is emitted once per process, even if startup retries. */
+  private compatibilityChecked = false;
   private inLoop = false;
   private runPromise: Promise<void> | undefined;
   private settleUnsub: (() => void) | undefined;
@@ -614,6 +617,14 @@ export class AdapterLoop {
   /** §8 startup: identity, briefing, owed reconciliation, journal replay, then the first prune. */
   private async init(): Promise<void> {
     const who = await this.pg.whoami();
+    // §8: after the platform answers, a major.minor outside the supported list is
+    // one warning, not a refusal. A platform that cannot be reached never gets here;
+    // the loop's unreachability reporting owns that case.
+    if (!this.compatibilityChecked && typeof who.server?.version === 'string') {
+      this.compatibilityChecked = true;
+      const warning = platformCompatibilityWarning(who.server.version);
+      if (warning !== undefined) console.warn(warning);
+    }
     this.selfId = who.member.id;
     this.selfName = who.member.name;
     this.parentId = who.member.parent_id;
