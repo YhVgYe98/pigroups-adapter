@@ -30,7 +30,8 @@ test('close() treats pane_not_found as a closed pane', async () => {
       1,
     );
     const herdr = new HerdrCli({ spawnCmd: 'pi', command });
-    await assert.doesNotReject(herdr.close('wE:pX'), 'a pane that is already gone is a success');
+    const result = await herdr.close('wE:pX');
+    assert.equal(result.forced, false, 'a pane that is already gone is a clean close');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -71,7 +72,8 @@ esac
     await chmod(command, 0o755);
 
     const herdr = new HerdrCli({ spawnCmd: 'pi', command });
-    await herdr.close('wE:pX');
+    const result = await herdr.close('wE:pX');
+    assert.equal(result.forced, false, 'the agent left inside the bound: the close was not forced');
 
     const calls = (await readFile(join(dir, 'invocations'), 'utf8')).trim().split('\n');
     const closeAt = calls.indexOf('pane close wE:pX');
@@ -85,6 +87,60 @@ esac
       calls.filter((call) => call === 'pane close wE:pX').length,
       1,
       'the pane is closed exactly once, after the agent is gone',
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('close() reports a forced close when the agent is still running at the bound', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    // The pane's agent never leaves: every `pane list` says it is working. The bound is
+    // shortened only in the test; production keeps `PANE_AGENT_EXIT_TIMEOUT_MS`.
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+printf '%s\n' "$*" >> "$DIR/invocations"
+case "$1 $2" in
+  "pane list")
+    printf '%s\n' '{"id":"cli:pane:list","result":{"panes":[{"pane_id":"wE:pX","agent":"pi","agent_status":"working"}]}}'
+    ;;
+  "pane close")
+    printf '%s\n' '{"id":"cli:pane:close","result":{"ok":true}}'
+    ;;
+  *)
+    printf '%s\n' '{"error":{"code":"unexpected_command","message":"unexpected"},"id":"cli"}' >&2
+    exit 1
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    const herdr = new HerdrCli({
+      spawnCmd: 'pi',
+      command,
+      paneAgentExitTimeoutMs: 80,
+      paneAgentExitPollMs: 10,
+    });
+    const result = await herdr.close('wE:pX');
+
+    assert.equal(result.forced, true, 'a live agent at the bound must not look like a clean close');
+    const calls = (await readFile(join(dir, 'invocations'), 'utf8')).trim().split('\n');
+    const closeAt = calls.indexOf('pane close wE:pX');
+    assert.ok(closeAt > 0, `pane close must happen after the wait, got ${JSON.stringify(calls)}`);
+    assert.ok(
+      calls.slice(0, closeAt).filter((call) => call === 'pane list').length >= 2,
+      `the agent must be polled until the bound, got ${JSON.stringify(calls)}`,
+    );
+    assert.equal(
+      calls.filter((call) => call === 'pane close wE:pX').length,
+      1,
+      'the pane is still closed exactly once after a forced wait',
     );
   } finally {
     await rm(dir, { recursive: true, force: true });

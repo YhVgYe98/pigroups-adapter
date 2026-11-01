@@ -158,7 +158,7 @@ test('stop() waits for a settle that is still reading the roster, and nothing is
       spawn: async () => ({ pane: 'pane-x' }),
       waitReady: async () => undefined,
       read: async () => '',
-      close: async () => undefined,
+      close: async () => ({ forced: false }),
     },
     config: {
       url: 'http://127.0.0.1:1',

@@ -136,8 +136,31 @@ test('pg_terminate closes the pane of the child it spawned, and only after the d
 
   assert.deepEqual(result.terminated, [child.id], 'the platform deleted exactly the child');
   assert.deepEqual(result.pane_close_failed, [], 'the pane close succeeded');
+  assert.deepEqual(result.pane_close_forced, [], 'the agent left cleanly, so the close was not forced');
   assert.equal(statusAtClose, 'gone', 'the delete must be committed before herdr closes the pane');
   assert.deepEqual(s.herdr.closed, ['pane-1'], 'the pane of the terminated child must be closed');
+});
+
+
+// §5.3: a pane close that had to cut a still-working agent is a success, but it must not
+// look like a clean one. The answer names the panes that were forced.
+test('pg_terminate reports a pane close that was forced past a still-running agent', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  const child = await s.loop.spawnMember({ name: 'runner', brief: 'implement Y' });
+  s.herdr.forceClose = true;
+
+  const result = await s.loop.terminate(child.id);
+
+  assert.deepEqual(result.terminated, [child.id], 'the delete still commits');
+  assert.deepEqual(result.pane_close_failed, [], 'a forced close is not a retryable failure');
+  assert.deepEqual(
+    result.pane_close_forced,
+    [{ member: child.id, pane: 'pane-1' }],
+    'the answer must name the member whose live agent was cut off',
+  );
+  assert.deepEqual(s.herdr.closed, ['pane-1'], 'the pane was still closed');
 });
 
 // §5.3: the delete is the fact; closing the pane is cleanup. A herdr that is down must

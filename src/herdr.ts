@@ -7,6 +7,15 @@
 
 import { execFile } from 'node:child_process';
 
+export interface HerdrCloseResult {
+  /**
+   * True when the agent was still listed when the exit wait expired and `pane close`
+   * had to cut it off. A pane that was already gone, or whose agent exited within the
+   * bound, is a clean close (`forced: false`).
+   */
+  forced: boolean;
+}
+
 export interface Herdr {
   /** Create a pane in the workspace and start a pi in it. Returns the pane id. */
   spawn(opts: { label: string; env: Record<string, string>; cwd?: string }): Promise<{ pane: string }>;
@@ -14,8 +23,11 @@ export interface Herdr {
   waitReady(pane: string, timeoutMs: number): Promise<void>;
   /** Read the raw text of that pane (diagnostics and reporting only). */
   read(pane: string, lines: number): Promise<string>;
-  /** Close the pane. A pane that is already gone is a success, not an error. */
-  close(pane: string): Promise<void>;
+  /**
+   * Close the pane. A pane that is already gone is a success, not an error. The result
+   * says whether the close was forced past a still-working agent.
+   */
+  close(pane: string): Promise<HerdrCloseResult>;
 }
 
 export interface HerdrCliOptions {
@@ -23,6 +35,10 @@ export interface HerdrCliOptions {
   spawnCmd: string;
   /** The executable to run, default `herdr` on PATH. */
   command?: string;
+  /** Test seam: override the agent-exit bound; production uses `PANE_AGENT_EXIT_TIMEOUT_MS`. */
+  paneAgentExitTimeoutMs?: number;
+  /** Test seam: override the agent-exit poll interval. */
+  paneAgentExitPollMs?: number;
 }
 
 /** `agent start` waits for the agent to become interactive. */
@@ -40,10 +56,14 @@ const PANE_AGENT_EXIT_POLL_MS = 200;
 export class HerdrCli implements Herdr {
   private readonly spawnCmd: string;
   private readonly command: string;
+  private readonly paneAgentExitTimeoutMs: number;
+  private readonly paneAgentExitPollMs: number;
 
   constructor(opts: HerdrCliOptions) {
     this.spawnCmd = opts.spawnCmd;
     this.command = opts.command ?? 'herdr';
+    this.paneAgentExitTimeoutMs = opts.paneAgentExitTimeoutMs ?? PANE_AGENT_EXIT_TIMEOUT_MS;
+    this.paneAgentExitPollMs = opts.paneAgentExitPollMs ?? PANE_AGENT_EXIT_POLL_MS;
   }
 
   /**
@@ -78,11 +98,11 @@ export class HerdrCli implements Herdr {
     return typeof read?.text === 'string' ? read.text : '';
   }
 
-  async close(pane: string): Promise<void> {
+  async close(pane: string): Promise<HerdrCloseResult> {
     // The platform has already marked the member gone and sent `sys.terminated`. Give
     // that pi time to consume it and finish its own shutdown before the hard close;
     // otherwise the pane disappears under a session that is still writing its file.
-    await this.waitForAgentExit(pane);
+    const forced = await this.waitForAgentExit(pane);
     try {
       await this.run(['pane', 'close', pane]);
     } catch (err) {
@@ -90,27 +110,29 @@ export class HerdrCli implements Herdr {
       // hand, or its shell exited — the outcome close() wants is already true. This is
       // a delivered fact, not a failure: it must not turn a committed delete into an
       // error the caller retries forever (loop.ts §5.3).
-      if (err instanceof HerdrCommandError && err.code === 'pane_not_found') return;
+      if (err instanceof HerdrCommandError && err.code === 'pane_not_found') return { forced };
       throw err;
     }
+    return { forced };
   }
 
   /**
    * Poll `pane list` until the pane is gone or its agent has exited (herdr drops the
    * `agent` key and reports `agent_status: unknown` once the process is gone). A list
    * that fails is not a reason to wait: `close` is the hard stop the concept allows.
+   * Returns whether the bound expired with the agent still listed.
    */
-  private async waitForAgentExit(pane: string): Promise<void> {
-    const deadline = Date.now() + PANE_AGENT_EXIT_TIMEOUT_MS;
+  private async waitForAgentExit(pane: string): Promise<boolean> {
+    const deadline = Date.now() + this.paneAgentExitTimeoutMs;
     for (;;) {
       try {
-        if (!agentStillRunning(await this.run(['pane', 'list']), pane)) return;
+        if (!agentStillRunning(await this.run(['pane', 'list']), pane)) return false;
       } catch {
-        return;
+        return false;
       }
-      if (Date.now() >= deadline) return;
+      if (Date.now() >= deadline) return true;
       await new Promise<void>((resolve) => {
-        setTimeout(resolve, PANE_AGENT_EXIT_POLL_MS);
+        setTimeout(resolve, this.paneAgentExitPollMs);
       });
     }
   }

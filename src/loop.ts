@@ -122,12 +122,20 @@ interface RosterSnapshot {
   ids: Set<string>;
 }
 
-/** What `terminate()` did: the delete, and any pane it could not take with it (§5.3). */
+/** What `terminate()` did: the delete, and what happened to the panes it took with it (§5.3). */
 export interface TerminateResult {
   /** The platform's cascade answer (`DELETE /v1/members/{id}`). */
   terminated: string[];
   /** Panes whose close failed for a reason a retry may fix; the member is gone either way. */
   pane_close_failed: Array<{ member: string; pane: string; error: string }>;
+  /** Panes that had to be closed while their agent was still running at the bound. */
+  pane_close_forced: Array<{ member: string; pane: string }>;
+}
+
+/** One pane close: nothing to report, a retryable failure, or a close forced past a live agent. */
+interface PaneCloseOutcome {
+  failure?: { member: string; pane: string; error: string };
+  forced?: { member: string; pane: string };
 }
 
 /** Hand one macrotask back to the event loop, so timers and sockets can run. */
@@ -522,11 +530,13 @@ export class AdapterLoop {
       );
     }
     const pane_close_failed: TerminateResult['pane_close_failed'] = [];
+    const pane_close_forced: TerminateResult['pane_close_forced'] = [];
     for (const id of new Set([member, ...terminated])) {
-      const failure = await this.closePane(id);
-      if (failure !== undefined) pane_close_failed.push(failure);
+      const outcome = await this.closePane(id);
+      if (outcome.failure !== undefined) pane_close_failed.push(outcome.failure);
+      if (outcome.forced !== undefined) pane_close_forced.push(outcome.forced);
     }
-    return { terminated, pane_close_failed };
+    return { terminated, pane_close_failed, pane_close_forced };
   }
 
   /**
@@ -536,19 +546,20 @@ export class AdapterLoop {
    * A `pane_not_found` is success: the shell the child left behind is already gone, or
    * someone closed it by hand. Any other failure (herdr down, a timeout) leaves the
    * mapping in place so the next `terminate()`/settle tries again, and is reported as
-   * `pane_close_failed` instead of failing the committed delete.
+   * `pane_close_failed` instead of failing the committed delete. A close that had to
+   * cut a still-working agent is a success too, but it is reported as forced.
    */
-  private async closePane(member: string): Promise<{ member: string; pane: string; error: string } | undefined> {
+  private async closePane(member: string): Promise<PaneCloseOutcome> {
     const pane = this.panes.get(member);
-    if (pane === undefined) return undefined;
+    if (pane === undefined) return {};
     try {
-      await this.herdr.close(pane);
+      const result = await this.herdr.close(pane);
+      this.panes.delete(member);
+      this.paneCheckedAt.delete(member);
+      return result.forced ? { forced: { member, pane } } : {};
     } catch (err) {
-      return { member, pane, error: (err as Error)?.message ?? String(err) };
+      return { failure: { member, pane, error: (err as Error)?.message ?? String(err) } };
     }
-    this.panes.delete(member);
-    this.paneCheckedAt.delete(member);
-    return undefined;
   }
 
   /**
@@ -573,9 +584,11 @@ export class AdapterLoop {
         // the poll/settle path into an unbounded wait.
         const detail = await withTimeout(this.pg.getMember(member), ROSTER_TIMEOUT_MS);
         if (detail.status === 'gone') {
-          const failure = await this.closePane(member);
-          if (failure !== undefined) {
-            console.warn(`[pigroups] could not close the pane of gone member ${member}: ${failure.error}`);
+          const outcome = await this.closePane(member);
+          if (outcome.failure !== undefined) {
+            console.warn(`[pigroups] could not close the pane of gone member ${member}: ${outcome.failure.error}`);
+          } else if (outcome.forced !== undefined) {
+            console.warn(`[pigroups] closed the pane of gone member ${member} while its agent was still running`);
           }
           continue;
         }
@@ -812,13 +825,25 @@ export class AdapterLoop {
     await this.flush();
   }
 
+  /**
+   * §3.2: termination is a cut, not a pause. Abort the running turn before anything
+   * else, so pi does not keep waiting for a tool nobody wants any more while the pane
+   * is closed underneath it. `aborting` stays set through the discard, stop and
+   * shutdown, so a settle that arrives in between cannot deliver a new turn.
+   */
   private async discardAndShutdown(payload: Record<string, unknown>): Promise<void> {
-    await this.journal.discard();
-    this.pending.length = 0;
-    this.queuedByJournal.clear();
-    await this.stop();
-    const reason = typeof payload.reason === 'string' ? payload.reason : 'terminated';
-    this.surface.shutdown(reason);
+    this.aborting = true;
+    try {
+      await this.cutTurn();
+      await this.journal.discard();
+      this.pending.length = 0;
+      this.queuedByJournal.clear();
+      await this.stop();
+      const reason = typeof payload.reason === 'string' ? payload.reason : 'terminated';
+      this.surface.shutdown(reason);
+    } finally {
+      this.aborting = false;
+    }
   }
 
   /**
@@ -835,6 +860,15 @@ export class AdapterLoop {
    */
   private async abortTurn(): Promise<void> {
     this.aborting = true;
+    try {
+      await this.cutTurn();
+    } finally {
+      this.aborting = false;
+    }
+  }
+
+  /** The bounded cut itself; the caller owns the `aborting` guard. */
+  private async cutTurn(): Promise<void> {
     const stop = this.stopGate.signal;
     let onStop: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -854,7 +888,6 @@ export class AdapterLoop {
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       if (onStop !== undefined) stop.removeEventListener('abort', onStop);
-      this.aborting = false;
     }
   }
 

@@ -17,6 +17,23 @@
 
 ---
 
+## v0.3.0（2026-11-01，与平台 0.2.0 配套）
+
+**一次只动适配器的 minor。** 这次改了文档里冻结的 `Herdr` 接口，不是 patch：`close()` 的返回值、`pg_terminate` 的返回字段都变了。平台不动，仍是 `0.2.0`。
+
+### 对 `Herdr` 实现者的变化
+
+- `close(pane)` 从 `Promise<void>` 变成 `Promise<{ forced: boolean }>`。`forced: true` 表示等待 agent 退出的上限到点时，它仍在 `pane list` 里，pane 是强行切掉的；agent 在限内自己退出、pane 已不存在、或 `pane list` 读失败（没有观察到活 agent）都是 `false`。
+- `pane_not_found` 仍然是成功，不抛错；返回值同样带上这次等待的 `forced`。
+- 所有实现与假实现必须返回这个对象。`AdapterLoop.terminate()` 现在返回 `{ terminated, pane_close_failed, pane_close_forced }`，`pg_terminate` 的答案原样带三个字段；`pane_close_forced` 的每一项是 `{ member, pane }`。祖先删除路径上的 settle/poll 复核如果遇到强制关闭，会打一条 warn。
+
+### 修了什么
+
+- **`sys.terminated` 先切断正在跑的那一轮，再收尾（E）。** 以前 `discardAndShutdown()` 直接丢 journal、停循环、`shutdown()`；pi 的 shutdown 会等正在跑的工具，于是子成员卡在 `bash sleep 40` 里，父进程 5 s 后把 pane 从它还活着的时候切掉。现在终止路径先按 `pg.abort` 同一条规则 `abort()`：设置同一个 `aborting` 守卫，等待以 `ABORT_IDLE_TIMEOUT_MS`（3 s，没有第二个数字）为上限；abort 期间不投递，然后才丢 journal、清队列、停循环、shutdown。abort 是“切断”不是“暂停”：不补提示，被切的那一轮留在 transcript 里，和 §3.2 的 `pg.abort` 一致。测试：`sys.terminated cuts the running turn before discarding the journal and shutting down`；`sys.terminated reaches shutdown at the abort bound when the surface abort never returns`。
+- **强制关 pane 不再伪装成干净关闭（F）。** `HerdrCli.close()` 的上限到点时如果 agent 还在 `pane list` 里，照样关 pane，但返回 `forced: true`；`pg_terminate` 把它列进 `pane_close_forced`，而不是只报 `pane_close_failed: []`。真机 `bash sleep 40` 那次“子成员被切断、调用者却只看到成功”的洞因此可见。测试：`close() reports a forced close when the agent is still running at the bound`；`pg_terminate reports a pane close that was forced past a still-running agent`；原来的 clean 用例也断言 `forced: false`。
+
+**测试与变异证明。** 84 → 88 条，`npm run typecheck` 干净。两条行为都做了“撤掉 src 就红”：撤 E 的 abort（回到先丢 journal、直接 stop/shutdown）→ 3 条 `sys.terminated` 里 2 条红，`sys.terminated cuts...` 红在 `timed out after 5000ms waiting for: the termination to cut the running turn`，`...reaches shutdown at the abort bound` 红在 `the termination asks for the cut / 0 !== 1`；撤 F 的 forced 回报（`HerdrCli` 固定回 `false`，loop 不读 `forced`）→ 11 条里 2 条红，`close() reports...` 红在 `a live agent at the bound must not look like a clean close / actual: false, expected: true`，`pg_terminate reports...` 红在 `actual: [], expected: [{ member: …, pane: 'pane-1' }]`。恢复后 88/88。
+
 ## v0.2.1（2026-11-01，与平台 0.2.0 配套）
 
 **一次只动适配器的 patch。** 端点、字段、工具名都没变，`PiSurface` 与 `Herdr` 的成员没变，`pg_terminate` 的返回形状也没变。四条都是 `docs/handoff.md` §7 里记着的洞（A–D），没有一条是契约变化。`Herdr.close()` 的契约仍然只是“关掉 pane；已经不在的 pane 算成功”；A 加的是实现里的有界等待，`docs/设计说明.md` §2.2 / §5.3 同步写清它等多久、以及 5 s 到点仍会切掉活 agent——那条原本记的是“已知缺口”，不是对调用者的承诺。

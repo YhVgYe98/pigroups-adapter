@@ -2,8 +2,10 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 
-import { command, poll, removeMember, send, waitFor } from './support.ts';
+import { command, poll, removeMember, send, waitFor, within } from './support.ts';
 import { scenario } from './scenario.ts';
 
 test('pg.abort from the parent calls abort() and delivers nothing; a pg.steer behind it waits for the abort', async (t) => {
@@ -61,6 +63,76 @@ test('sys.terminated stops the member: shutdown() is called and nothing further 
   await s.loop.flush();
   assert.equal(s.surface.since(mark).length, 0, 'nothing may be delivered after the shutdown');
   assert.equal(s.surface.textsOfKind('nudge').length, 0, 'a stopped member must not keep nudging');
+});
+
+
+test('sys.terminated cuts the running turn before discarding the journal and shutting down', async (t) => {
+  const s = await scenario({ siblings: 1 });
+  t.after(() => s.close());
+  await s.cycle();
+
+  const sibling = s.siblings[0];
+  s.surface.beginTurn();
+  await send(s.platform, sibling.token, s.group, 'queued until the cut', [s.me.id]);
+  await s.loop.pollOnce();
+
+  const journalDir = join(s.adapterDir, 'journal', s.me.id);
+  const journalEntries = async (): Promise<string[]> =>
+    (await readdir(journalDir).catch(() => [])).filter((name) => name.endsWith('.json'));
+  const journalsBeforeTermination = await journalEntries();
+  assert.equal(journalsBeforeTermination.length, 1, 'precondition: the queued batch is still journalled');
+
+  const deliveriesMark = s.surface.mark();
+  const lifecycleMark = s.surface.lifecycle.length;
+  s.surface.holdAbort = true;
+  await removeMember(s.platform, s.parent!.token, s.me.id);
+  const drive = s.loop.pollOnce();
+  await waitFor(() => s.surface.aborts.length === 1, 'the termination to cut the running turn');
+
+  // A settle in the middle of the cut is the path that used to start a fresh turn.
+  s.surface.settle();
+  await s.loop.settled();
+  await s.loop.flush();
+  assert.equal(s.surface.since(deliveriesMark).length, 0, 'nothing may be delivered after the abort starts');
+  assert.ok(
+    (await journalEntries()).length >= journalsBeforeTermination.length,
+    'the journal is discarded after the abort, not while waiting for it',
+  );
+
+  s.surface.releaseAbort();
+  await drive;
+
+  assert.deepEqual(
+    s.surface.lifecycle.slice(lifecycleMark),
+    ['abort', 'shutdown'],
+    'the surface must record the cut before shutdown, with no delivery in between',
+  );
+  assert.equal(s.surface.shutdowns.length, 1, 'termination still shuts the member down');
+  assert.equal((await journalEntries()).length, 0, 'the journal is still discarded');
+
+  const afterShutdown = s.surface.mark();
+  await s.settle();
+  await s.loop.flush();
+  assert.equal(s.surface.since(afterShutdown).length, 0, 'nothing may be delivered after the shutdown');
+});
+
+test('sys.terminated reaches shutdown at the abort bound when the surface abort never returns', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  s.surface.beginTurn();
+  s.surface.holdAbort = true;
+  await removeMember(s.platform, s.parent!.token, s.me.id);
+
+  const started = Date.now();
+  await within(s.loop.pollOnce(), 'the termination to reach shutdown at the abort bound', 5000);
+  const elapsed = Date.now() - started;
+
+  assert.equal(s.surface.aborts.length, 1, 'the termination asks for the cut');
+  assert.equal(s.surface.shutdowns.length, 1, 'a surface that never answers abort must not hold shutdown forever');
+  assert.ok(elapsed >= 2900, `shutdown must wait for the abort bound, took ${elapsed}ms`);
+  assert.ok(elapsed < 5000, `shutdown must not wait past the abort bound, took ${elapsed}ms`);
 });
 
 // §9: "`poll` 410 `member_gone` | 停止一切，`shutdown()`". `sys.terminated` is the other trigger:

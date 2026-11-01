@@ -253,8 +253,9 @@ function buildTools(
       execute: async (_id, params) => {
         const result = await requireLoop().terminate(String(params.member));
         // The delete is committed either way. `pane_close_failed` is the cleanup that
-        // did not happen yet (herdr down, a timeout); reporting it in the same answer
-        // keeps the tool honest without pretending the delete failed (§5.3).
+        // did not happen yet (herdr down, a timeout); `pane_close_forced` names panes
+        // that were closed while their agent was still running. Reporting both in the
+        // same answer keeps the tool honest without pretending the delete failed (§5.3).
         return text(JSON.stringify(result));
       },
     },

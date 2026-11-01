@@ -382,6 +382,8 @@ export class FakeSurface implements PiSurface {
   readonly aborts: number[] = [];
   readonly shutdowns: string[] = [];
   readonly settles: number[] = [];
+  /** Every surface call in order, so a test can assert the termination sequence. */
+  readonly lifecycle: Array<'deliver' | 'abort' | 'shutdown'> = [];
   readonly #settledCallbacks = new Set<() => void>();
   readonly #eventCallbacks = new Set<(e: PiEvent) => void>();
   readonly events: PiEvent[] = [];
@@ -419,6 +421,7 @@ export class FakeSurface implements PiSurface {
 
   async deliver(text: string, kind: DeliverKind): Promise<void> {
     this.#busy = true;
+    this.lifecycle.push('deliver');
     this.deliveries.push({ text, kind, at: Date.now() });
     if (this.holdDeliveries) {
       await new Promise<void>((res) => this.#held.push(res));
@@ -426,6 +429,7 @@ export class FakeSurface implements PiSurface {
   }
 
   async abort(): Promise<void> {
+    this.lifecycle.push('abort');
     this.aborts.push(Date.now());
     this.#busy = false;
     if (this.holdAbort) {
@@ -436,6 +440,7 @@ export class FakeSurface implements PiSurface {
   }
 
   shutdown(reason: string): void {
+    this.lifecycle.push('shutdown');
     this.shutdowns.push(reason);
   }
 
@@ -509,6 +514,8 @@ export class FakeHerdr implements Herdr {
   failWait = false;
   /** When set, `close` rejects with this after recording the attempt (herdr down / a timeout). */
   failClose: Error | undefined;
+  /** When set, `close` reports that it cut off an agent still running at the bound. */
+  forceClose = false;
   /** Runs before a close is recorded: lets a test read platform state at that exact moment. */
   onClose: ((pane: string) => Promise<void> | void) | undefined;
 
@@ -527,9 +534,10 @@ export class FakeHerdr implements Herdr {
     return this.paneText;
   }
 
-  async close(pane: string): Promise<void> {
+  async close(pane: string): Promise<{ forced: boolean }> {
     if (this.onClose !== undefined) await this.onClose(pane);
     if (this.failClose !== undefined) throw this.failClose;
     this.closed.push(pane);
+    return { forced: this.forceClose };
   }
 }

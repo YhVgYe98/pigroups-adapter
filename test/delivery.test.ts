@@ -208,7 +208,7 @@ test('a settle nudges only when nothing was delivered while it was asking the pl
       spawn: async () => ({ pane: 'pane-x' }),
       waitReady: async () => undefined,
       read: async () => '',
-      close: async () => undefined,
+      close: async () => ({ forced: false }),
     },
     config: {
       url: 'http://127.0.0.1:1',
