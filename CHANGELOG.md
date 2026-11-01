@@ -18,6 +18,39 @@
 
 ---
 
+## v0.5.1+platform.0.2.0（2026-11-02，与平台 0.2.0 配套）
+
+**适配器的 patch。** `0.5.0 → 0.5.1`，平台不动，接口与文档化的行为不变——只修一个投递层的 bug。
+
+**丢了什么、什么时候丢的。** 0.5.0 的“abort 兜底”只有一个副本槽位（`lastDelivered`）。同一轮里
+两个窗口各投了一批时，第二个成功投递会覆盖第一个；这时 abort，只有最后一批被放回队首。
+前一批的 journal 已提交、水位已推进、平台已取走，于是**永久消失**。触发条件是一轮活得比一个
+窗口还长（长工具）且中途来了两批消息。第一次测到是 2026-11-01 的 v3 验证
+（`probe/logs/v3-20261101T173805Z/extra-multibatch-loss.txt`：`#2` 出现两次，`#1` 一次都没有），
+当时按“取证阶段不改 `src/`”记成已知缺口。
+
+**修法。** 槽位换成**未确认批次表**（`unacknowledged: PendingDelivery[][]`，按投递顺序）：
+
+- 每次成功 `deliver` 追加一批；
+- `turn_end` 干净结束 → 清空整张表（pi 落盘了）；
+- `turn_end` 带 provider error → 保留整张表（没证明落盘就不丢，下一次 abort 一起重投）；
+- `turn_end` aborted → 每一批按投递顺序平铺回队首、窗口标成立即到期、绕过水位，和原来的单槽位路径一样；
+- 上限 8 批（默认窗口下约八个窗口、最多 80 条），超出丢**最旧**的一批并 `console.warn`——
+  不设上限则一个永不结束的回合会让内存无限长大。
+
+**测试。** 123 → 125 条，`npm run typecheck` 干净，`npm test` 125/125。新增两条，都在旧单槽位上真红过：
+
+- `two batches steered into one still-running turn are both re-sent, in delivery order, when that turn is aborted`
+  ——旧代码上重投只有 `[dm:…#2] root: batch two`，断言 `batch one must be re-delivered` 红；
+- `the unacknowledged list is capped: a turn that outlives the cap loses only the oldest copy`
+  ——九批进一轮，abort 后只重投第 2–9 批。
+
+**真机复验。** `probe/logs/requeue-multi-20261101T175812Z/`：60 s 的 bash 工具里两次投递（水位 1 → 2），
+`pg.abort` 后 54 ms pi 落盘**一条** `custom_message`，`#1` 在 `#2` 前面；模型正文点名了两个 marker。
+清理后 pane 列表与运行前一致。
+
+---
+
 ## v0.5.0+platform.0.2.0（2026-11-02，与平台 0.2.0 配套）
 
 **适配器的 minor。** `0.4.0 → 0.5.0`，平台不动（仍是 `0.2.0`）。依据是概念稿 v3（§7 工具面、§8 投递）
