@@ -1,0 +1,30 @@
+npm notice
+npm notice 📦  pigroups-adapter-pi@0.4.0+platform.0.2.0
+npm notice Tarball Contents
+npm notice 22.6kB CHANGELOG.md
+npm notice 1.3kB README.md
+npm notice 93.8kB docs/handoff.md
+npm notice 7.5kB docs/概念稿.md
+npm notice 38.9kB docs/设计说明.md
+npm notice 724B package.json
+npm notice 2.4kB src/command.ts
+npm notice 13.1kB src/extension.ts
+npm notice 10.8kB src/herdr.ts
+npm notice 4.4kB src/journal.ts
+npm notice 64.2kB src/loop.ts
+npm notice 9.5kB src/pgclient.ts
+npm notice 8.0kB src/state.ts
+npm notice 9.8kB src/surface.ts
+npm notice 2.1kB src/version.ts
+npm notice 4.0kB src/watermark.ts
+npm notice Tarball Details
+npm notice name: pigroups-adapter-pi
+npm notice version: 0.4.0+platform.0.2.0
+npm notice filename: pigroups-adapter-pi-0.4.0+platform.0.2.0.tgz
+npm notice package size: 106.3 kB
+npm notice unpacked size: 293.2 kB
+npm notice shasum: 0b5cf0dbb227560c893cab6842d83401edf27b60
+npm notice integrity: sha512-/jnIBmsR4cK9e[...]MFFhBQuQQIk6g==
+npm notice total files: 16
+npm notice
+pigroups-adapter-pi-0.4.0+platform.0.2.0.tgz

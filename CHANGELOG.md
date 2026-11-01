@@ -20,32 +20,43 @@
 
 ## v0.4.0+platform.0.2.0（2026-11-01，与平台 0.2.0 配套）
 
-**一次只动适配器的 minor。** `PIGROUPS_SPAWN_CMD` 的默认值变了，这是操作者可见的行为变化，所以 `0.3.0 → 0.4.0`；平台不动，仍是 `0.2.0`。版本串带 build metadata `+platform.0.2.0`，只记录这一版验证过的平台，不参与任何判定。
+**一次只动适配器的 minor。** `PIGROUPS_SPAWN_CMD` 的默认值变了，这是操作者可见的行为变化，所以 `0.3.0 → 0.4.0`；平台不动，仍是 `0.2.0`。版本串带 build metadata `+platform.0.2.0`：**它只记录这一版在哪个平台上验过，不参与任何判定**——兼容性由启动 warning 和 `pg.*` 的 `v` 字段决定，平台以后变了而适配器不用改，就重发同一个数字、换 metadata。
 
-### 自加载的 spawn 默认
+**关于两个标签。** `0.4.0` 当天先切过一版（标签 `v0.4.0`，spawn 默认带 `-ne`，`pg_spawn` 镜像 pi 的七个启动旗标）。那一版的设计被否掉了：镜像整组删除、`-ne` 也去掉。所以最终内容用同一个数字重切，标签带上 metadata：**`v0.4.0+platform.0.2.0`**。旧标签不移动、不删除（它记录的是被否掉的那次尝试），对外认这一版就看新标签；`git describe --tags` 现在是 `v0.4.0+platform.0.2.0`。
 
-- `PIGROUPS_SPAWN_CMD` 不再默认成裸 `pi`。`src/extension.ts` 用 `import.meta.url` 取自己被加载的路径，默认 `pi -ne -e '<绝对路径>'`。忘掉 `-e` 不再会得到一个“建了成员、开了 pane、但不说话”的空子进程。
-- 默认带 `-ne`：不继承操作者的全局扩展（也不加载 pi 内置扩展；显式 `-e` 仍加载）。第一次第 4 级 run 里一个全局扩展把消息转进了操作者主会话，干净子进程更可预测。`PIGROUPS_SPAWN_CMD` 仍是逃生口，显式值完全替换默认。
-- 命令按 shell 引号规则切词（新增 `src/command.ts`），路径含空格时仍是一个参数；`pane send-text` 兜底也把同一条命令交给 shell。
-- 测试 3 条：默认含自身绝对路径与 `pi`、显式 env 获胜、含空格的路径不被拆开。变异：撤掉默认（回到 `pi`）→ 默认用例红在 `the child starts without the operator’s global extensions`；换回朴素按空白切词 → 空格用例红在 `herdr must receive the spaced path as one argument, not four`（actual 被拆成 4 段）。
+### 操作者得到什么
 
-### 启动兼容性 warning
+- **零配置 spawn。** `PIGROUPS_SPAWN_CMD` 不再默认成裸 `pi`。`src/extension.ts` 用 `import.meta.url` 取自己被加载的绝对路径，默认 `pi -e '<绝对路径>'`。忘掉 `-e` 不会再得到一个“建了成员、开了 pane、但不说话”的空子进程。`PIGROUPS_SPAWN_CMD` 仍是逃生口，显式值完全替换默认（连空格路径的引号一起）。命令按 shell 引号规则切词（`src/command.ts`），路径含空格时仍是一个参数；`pane send-text` 兜底把同一条命令交给 shell，追加的每个 `args` 元素也按同一规则加引号。
+- **子成员是一个正常 agent，不是被剥过皮的 worker。** 默认命令**不剥离任何东西**——`-ne` 只出现在被否掉的旧设计里。子成员按正常 pi 启动，继承操作者的扩展、技能、prompt template、MCP server 与 `AGENTS.md` 等上下文——它就是坐在 pane 里的另一个你，只是带着 `pg_*` 工具和成员身份。第一次第 4 级 run 里某个全局扩展把消息转进了主会话，那是探针环境噪声（操作者已禁用那个扩展），不值得为它牺牲整套继承。
+- **`pg_spawn` 只透穿，不镜像。** 参数集合是 `{ name?, brief, cwd?, args?: string[] }`，`args` 是原始 pi argv 尾巴，按顺序追加在基础命令之后：**基础命令 → 每一项 `args`**，不是字符串拼接。`model` / `thinking` / `tools` / `exclude_tools` / `extensions` / `skills` / `prompt_templates` 这层镜像整组删掉了：多一层翻译没有增加信息，而 pi 的旗标远多于任何一张我们会维护的表——每加一个旗标都要适配器发版。模型不知道怎么写旗标就去读 **`pi --help`**，那才是 pi 的手册，不是这个 schema。
+- **`args` 不消毒。** 调用方可以传 `-p`、`--` 或任何改变子进程启动方式的旗标，适配器不拦也不改写——透穿就是契约，选择权在调用方。代价要说清：`--tools read` 这类允许清单也会把适配器自己的 `pg_*` 工具挡掉，于是那个成员**只能听、不能说**（真机 case 2 就是这样，它自己也这么解释）。传错旗标时子进程可能起不来或进入非交互模式，错误由子进程自己的输出暴露，适配器不预检。
+- **启动兼容性 warning。** 平台答完后，`platformCompatibilityWarning()` 把 `who.server.version` 的 major.minor 与 `SUPPORTED_PLATFORM_MINORS = ['0.2']` 比较：不在列表只打一条 warning（同时写平台版本和适配器版本）然后继续，匹配则什么都不打。判定是纯函数，`init()` 只调用一次；平台不可达不在这里 warn，交给循环的退避/上报。
+- **pi 包清单。** `package.json` 有 `pi.extensions = ["./src/extension.ts"]`、`keywords: ["pi-package"]`、`description`、`license`、`repository`，`files` 只留 `src` / `README.md` / `CHANGELOG.md` / `docs`；仍是 `private: true`、无运行时依赖。
 
-- 平台答完后，`src/version.ts` 的 `platformCompatibilityWarning()` 把 `who.server.version` 的 major.minor 与 `SUPPORTED_PLATFORM_MINORS = ['0.2']` 比较。不在列表只打一条 warning，同时写平台版本和适配器版本，然后继续；匹配什么都不打；平台不可达不在此处 warn，由循环的退避/上报处理。
-- 判定是纯函数；`init()` 只负责调用一次。测试 3 条：纯判定、支持平台启动无 warning、不支持平台启动恰好一条 warning 且第二次 cycle 不重复。变异：删掉启动调用 → 不支持用例红在 `exactly one warning, got []`；让支持版本也命中 warning → 2 条红（`the supported major.minor logs nothing`、`a matching platform must not add noise to the one startup line`）。
+### 真机验过什么（2026-11-01，pi 1.4.0 / herdr 0.9.5 / node v26.12.1）
 
-### Pi 包与版本
+一次性平台 `0.2.0`，端口 41777 / 41778，**全程未设 `PIGROUPS_SPAWN_CMD`**，所以走的就是上面的默认。两个 case 都 **PASS**，证据在 `probe/logs/spawn-args-20261101T142926/report.md`（主，run B）与 `probe/logs/spawn-args-20261101T142109/`（run A）：
 
-- `package.json` 增加 `pi.extensions = ["./src/extension.ts"]`、`keywords: ["pi-package"]`、`description`、`license`、`repository`，`files` 只留 `src` / `README.md` / `CHANGELOG.md` / `docs`；仍是 `private: true`、无运行时依赖。
-- `package.json`、`src/version.ts`、`package-lock.json` 三处都是 `0.4.0+platform.0.2.0`。版本漂移测试保持原样；三条变异分别改 package、常量、lock，各自 1/1 红（`package.json must say what src/version.ts says` / 同一条 / `the lockfile carries the same version`）。
-- `npm pack` 成功，tarball `pigroups-adapter-pi-0.4.0+platform.0.2.0.tgz`（16 个文件，含 src/docs/README/CHANGELOG，不含 test/probe/lockfile）。
+| case | 观测 |
+|---|---|
+| 只给 `name`+`brief` | root 的 toolCall 实参只有这两个键；子成员启动行是 `pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts`（pane 自己的回滚，不是 `/proc` 猜的；pi 启动会把 `process.title` 改成 `pi`，`/proc/<pid>/cmdline` 只剩 `pi`）；它收到 brief、调 `read`、`pg_say`，human API 读到那句话 |
+| `args:["--tools","read"]` | 启动行是 `pi -e …/src/extension.ts --tools read`；子成员的 `builtinTools` 只剩 `read`，`toolCalls` 为空，`touch` 的标记文件不存在，它用自己的话解释“没有 bash 工具所以跑不了” |
 
-**测试与变异证明。** 88 → 96 条，`npm run typecheck` 干净，`npm test` 96/96。行为测试都做了“撤掉 src 就红”：spawn 默认 2 条、启动兼容性 3 条，原文在对应小节；包清单 1 条也做过同样的红/绿检查。文档同步：`docs/设计说明.md` §2.2/§5.3/§7/§8，`docs/handoff.md` §2.3/§7（及当前版本号/测试数）。
+“继承”是**看见的**，不是推的：不隔离的子成员启动 banner 列 11 个扩展（只有 `extension.ts` 来自适配器）、会话启用 15 个内置工具；同一台机器上用 `-ne` 的对照只列 `extension.ts` 与 `read,bash,edit,write`。`-ne` 会关掉发现但保留显式 `-e`，所以这份对照同时证明“`-e` 生效”和“没有加 `-ne`”。
 
-### 没做的
+另有一种比真机更省事的打包证明，随标签一起提交：`probe/logs/release-0.4.0-plat0.2.0-20261101T224511/`。tarball `pigroups-adapter-pi-0.4.0+platform.0.2.0.tgz`（16 个文件；shasum 记在该目录的 `NOTE.md`——tarball 里装着这份 `CHANGELOG.md`，把 shasum 写进来就会改掉它）解包后：20 条相对 import 全部解析到包内文件、入口 `default` 是扩展函数；再用 pi 直接加载解包副本，verbose banner 的 `[Extensions] → path` 列出那份 `src/extension.ts`，`--mode json` 的 stderr 打出 `[pigroups] adapter 0.4.0+platform.0.2.0 starting against …`（退出 0）——说明整条模块图在 pi 里真的 import 并执行了。
 
-- 真机第 4 级还没复跑“操作者完全不设 `PIGROUPS_SPAWN_CMD`、子成员跑一个工具并说话”这一条；本轮只证明默认命令的形状和参数切分，真机证明留给验收阶段。
-- 平台兼容性只是 warning；`SUPPORTED_PLATFORM_MINORS` 仍要随实际验证过的平台手动扩展。
+### 测试与变异证明
+
+- **96 → 103 条**，`npm run typecheck` 干净，`npm test` 103/103。新增的 7 条在 `b49e410`（当时是镜像旗标 + 子成员不剥离的覆盖）；`1d3e689` 删掉镜像后总数不变：spawn 套件 7 → 7。删掉三条（逐旗标映射、空旗标时什么也不加且可复现、旧的封闭 schema）；留下并把宿主字符用例改成空格/`$`/引号/分号；新增两条：schema 恰好是 `name`/`brief`/`cwd`/`args` 且指向 `pi --help`、`command.ts` 只剩引号与切词不再导出旗标镜像。
+- 删镜像的变异：只把 `src/command.ts`、`src/extension.ts` 退回 HEAD（保留测试），两条新用例立刻红——`the pg_spawn schema is exactly name, brief, cwd and args…` 的 actual 是 11 个参数（`exclude_tools` … `tools`）、`the command module exposes quoting only…` 的 actual 是 `['SPAWN_THINKING_LEVELS','shellQuote','spawnFlagArgs','splitCommand']`。恢复后两条复绿。
+- 0.4.0 原有的变异也留着：撤掉自加载默认 → `the child starts without the operator’s global extensions` 红；换回朴素按空白切词 → 空格用例红在“4 段而不是 1 段”；删掉启动 warning 的调用 → 不支持平台用例红在 `exactly one warning, got []`；让支持版本也命中 warning → 2 条红；改三处版本号之一 → 各自 1 条红（`package.json must say what src/version.ts says` / `the lockfile carries the same version`）。
+
+### 没做的（都记在 `docs/handoff.md` §7）
+
+- **`pg_spawn` 对健康的子成员报错。** 两次真机调用都返回 `isError=true` / `timed out waiting for agent status`（134 s、124 s），而子成员当场正常工作。根因是 `HerdrCli.waitReady()` 只发 `--until idle`，pi 跑完一轮后 herdr 记的是 `agent_status:"done"`；`--until idle --until done` 立即返回。修法短，但是行为改动 + 一条测试，留给下一轮。
+- **收窄工具会连 `pg_*` 一起收窄**：`--tools` 是允许清单，`args:["--tools","read"]` 的成员只能听、不能说。这是调用者的选择，文档写清，不改实现。
+- 平台兼容性只是 warning；`SUPPORTED_PLATFORM_MINORS` 仍要随实际验证过的平台手动扩展。`ctx.shutdown()` 的 print/json 模式路径仍未实测（TUI/SIGTERM 与 `sys.terminated` 自调用都验过）。
 
 ---
 

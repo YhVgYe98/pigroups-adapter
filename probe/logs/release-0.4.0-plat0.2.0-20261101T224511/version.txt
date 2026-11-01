@@ -1,0 +1,4 @@
+package.json: 0.4.0+platform.0.2.0
+src/version.ts: 0.4.0+platform.0.2.0
+lockfile top: 0.4.0+platform.0.2.0
+lockfile packages["\"]: 0.4.0+platform.0.2.0
