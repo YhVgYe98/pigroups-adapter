@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { shellQuote } from './command.ts';
+import { SPAWN_THINKING_LEVELS, shellQuote, spawnFlagArgs } from './command.ts';
 import { AdapterLoop } from './loop.ts';
 import type { LoopConfig } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
@@ -26,13 +26,14 @@ const INSPECT_TIMEOUT_MS = 10_000;
 export const EXTENSION_ENTRY = fileURLToPath(import.meta.url);
 
 /**
- * §2.2: a spawned child must load this adapter. `-ne` keeps the child clean: the
- * operator's global extensions are not inherited, so one of them cannot steer the
- * child (or the operator's own session) by accident. `PIGROUPS_SPAWN_CMD` is the
- * escape hatch when a child needs other flags, such as an explicit model.
+ * §2.2: a spawned member is a normal pi session, not a disposable worker. The
+ * default loads this adapter on top of the operator's own environment: extensions,
+ * skills, prompt templates, MCP servers and context files are inherited exactly as
+ * if a person had started pi in that pane. `PIGROUPS_SPAWN_CMD` overrides the whole
+ * base command; `pg_spawn`'s own parameters are appended to it, never spliced in.
  */
 export function defaultSpawnCmd(extensionPath: string = EXTENSION_ENTRY): string {
-  return ['pi', '-ne', '-e', shellQuote(extensionPath)].join(' ');
+  return ['pi', '-e', shellQuote(extensionPath)].join(' ');
 }
 
 /** The operator's explicit command always wins over the self-loading default. */
@@ -90,6 +91,14 @@ function readConfig(): LoopConfig | null {
     nudgeMax: envInt('PIGROUPS_NUDGE_MAX', 3),
     spawnCmd: resolveSpawnCmd(),
   };
+}
+
+function stringArrayParam(value: unknown, name: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw new Error(`${name} must be an array of strings`);
+  }
+  return value as string[];
 }
 
 function envInt(name: string, fallback: number): number {
@@ -250,6 +259,34 @@ function buildTools(
           name: { type: 'string', description: 'Optional member name.' },
           brief: { type: 'string', description: 'Task brief, sent as the first direct message.' },
           cwd: { type: 'string', description: 'Working directory for the child.' },
+          model: { type: 'string', description: 'Pi model pattern or ID (`--model`).' },
+          thinking: {
+            type: 'string',
+            enum: [...SPAWN_THINKING_LEVELS],
+            description: 'Pi thinking level (`--thinking`).',
+          },
+          tools: { type: 'string', description: 'Comma-separated tool allowlist (`--tools`).' },
+          exclude_tools: { type: 'string', description: 'Comma-separated tool denylist (`--exclude-tools`).' },
+          extensions: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Extra extension paths (`--extension`), each in addition to this adapter.',
+          },
+          skills: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Skill files or directories (`--skill`), one flag per entry.',
+          },
+          prompt_templates: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Prompt template files or directories (`--prompt-template`), one flag per entry.',
+          },
+          args: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Raw pi argv appended last, verbatim; the escape hatch for later pi flags.',
+          },
         },
         required: ['brief'],
         additionalProperties: false,
@@ -259,6 +296,16 @@ function buildTools(
           name: typeof params.name === 'string' ? params.name : undefined,
           brief: String(params.brief),
           cwd: typeof params.cwd === 'string' ? params.cwd : undefined,
+          args: spawnFlagArgs({
+            model: typeof params.model === 'string' ? params.model : undefined,
+            thinking: typeof params.thinking === 'string' ? params.thinking : undefined,
+            tools: typeof params.tools === 'string' ? params.tools : undefined,
+            exclude_tools: typeof params.exclude_tools === 'string' ? params.exclude_tools : undefined,
+            extensions: stringArrayParam(params.extensions, 'extensions'),
+            skills: stringArrayParam(params.skills, 'skills'),
+            prompt_templates: stringArrayParam(params.prompt_templates, 'prompt_templates'),
+            args: stringArrayParam(params.args, 'args'),
+          }),
         });
         return text(JSON.stringify(spawned));
       },

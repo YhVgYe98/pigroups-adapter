@@ -9,6 +9,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { splitCommand } from '../src/command.ts';
 import { HerdrCli, HerdrCommandError } from '../src/herdr.ts';
 
 /** A stand-in for the herdr binary: writes `stderr` and exits with `code`. */
@@ -164,6 +165,99 @@ test('close() still reports any other herdr failure', async () => {
         err.message.includes('daemon is not running'),
       'a herdr that could not close anything must not look like a closed pane',
     );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('spawn() appends extra argv after the configured base command, one word per element', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+case "$1 $2" in
+  "pane split")
+    printf '%s\n' '{"id":"cli:pane:split","result":{"pane":{"pane_id":"wE:pX"}}}'
+    ;;
+  "agent start")
+    for arg in "$@"; do printf '%s\n' "$arg" >> "$DIR/start-argv"; done
+    printf '%s\n' '{"id":"cli:agent:start","result":{"ok":true}}'
+    ;;
+  *)
+    printf '%s\n' '{"error":{"code":"unexpected_command","message":"unexpected"},"id":"cli"}' >&2
+    exit 1
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    const spawnCmd = "pi -e '/opt/base extension.ts'";
+    const extra = ['--model', 'vendor/model', '--extension', '/tmp/extra extension.ts', '--future', 'raw'];
+    const herdr = new HerdrCli({ spawnCmd, command });
+    await herdr.spawn({ label: 'child', env: { PIGROUPS_TOKEN: 'token' }, cwd: '/tmp/ws', args: extra });
+
+    const argv = (await readFile(join(dir, 'start-argv'), 'utf8')).trimEnd().split('\n');
+    assert.ok(argv.length > 2, 'the fake herdr logged the agent start argv');
+    const separator = argv.indexOf('--');
+    assert.ok(separator > 0, `agent start must pass the argv after --, got ${JSON.stringify(argv)}`);
+    assert.deepEqual(
+      argv.slice(separator + 1),
+      [...splitCommand(spawnCmd).slice(1), ...extra],
+      'the base command is split, then the extra argv is appended unchanged',
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the pane send-text fallback shell-quotes every appended word, including metacharacters', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+case "$1 $2" in
+  "pane split")
+    printf '%s\n' '{"id":"cli:pane:split","result":{"pane":{"pane_id":"wE:pX"}}}'
+    ;;
+  "agent start")
+    printf '%s\n' '{"error":{"code":"agent_start_failed","message":"no"},"id":"cli"}' >&2
+    exit 1
+    ;;
+  "pane send-text")
+    printf '%s' "$4" > "$DIR/fallback-command"
+    printf '%s\n' '{"id":"cli:pane:send-text","result":{"ok":true}}'
+    ;;
+  *)
+    printf '%s\n' '{"error":{"code":"unexpected_command","message":"unexpected"},"id":"cli"}' >&2
+    exit 1
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    const spawnCmd = "pi -e '/opt/base extension.ts'";
+    const nasty = '/tmp/pi groups/$(touch pwned)/ext (beta).ts';
+    const env = { PIGROUPS_TOKEN: "tok en'$(touch pwned)" };
+    const extra = ['--extension', nasty, '--future', nasty];
+    const herdr = new HerdrCli({ spawnCmd, command });
+    await herdr.spawn({ label: 'child', env, args: extra });
+
+    const line = await readFile(join(dir, 'fallback-command'), 'utf8');
+    assert.deepEqual(
+      splitCommand(line),
+      [...Object.entries(env).map(([key, value]) => `${key}=${value}`), ...splitCommand(spawnCmd), ...extra],
+      'the shell reads back the env assignments, base command and extra argv as separate words',
+    );
+    assert.ok(line.includes(`'${nasty}'`), 'the metacharacter path is one single-quoted word');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

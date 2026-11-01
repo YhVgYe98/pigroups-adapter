@@ -501,6 +501,7 @@ export interface SpawnRecord {
   label: string;
   env: Record<string, string>;
   cwd?: string;
+  args?: string[];
 }
 
 export class FakeHerdr implements Herdr {
@@ -519,7 +520,7 @@ export class FakeHerdr implements Herdr {
   /** Runs before a close is recorded: lets a test read platform state at that exact moment. */
   onClose: ((pane: string) => Promise<void> | void) | undefined;
 
-  async spawn(opts: { label: string; env: Record<string, string>; cwd?: string }): Promise<{ pane: string }> {
+  async spawn(opts: { label: string; env: Record<string, string>; cwd?: string; args?: string[] }): Promise<{ pane: string }> {
     this.spawns.push(opts);
     return { pane: `pane-${this.spawns.length}` };
   }

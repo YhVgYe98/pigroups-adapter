@@ -20,7 +20,13 @@ export interface HerdrCloseResult {
 
 export interface Herdr {
   /** Create a pane in the workspace and start a pi in it. Returns the pane id. */
-  spawn(opts: { label: string; env: Record<string, string>; cwd?: string }): Promise<{ pane: string }>;
+  spawn(opts: {
+    label: string;
+    env: Record<string, string>;
+    cwd?: string;
+    /** Extra pi argv appended to the configured spawn command (already split into words). */
+    args?: string[];
+  }): Promise<{ pane: string }>;
   /** Wait until the agent in that pane is ready/idle. */
   waitReady(pane: string, timeoutMs: number): Promise<void>;
   /** Read the raw text of that pane (diagnostics and reporting only). */
@@ -33,7 +39,7 @@ export interface Herdr {
 }
 
 export interface HerdrCliOptions {
-  /** `PIGROUPS_SPAWN_CMD`; defaults to this extension loaded with `pi -ne -e <own path>`. */
+  /** `PIGROUPS_SPAWN_CMD`; defaults to `pi -e <own path>`. Extra spawn args are appended. */
   spawnCmd: string;
   /** The executable to run, default `herdr` on PATH. */
   command?: string;
@@ -79,12 +85,18 @@ export class HerdrCli implements Herdr {
    * fallback below types the env-prefixed command into the pane instead
    * (`herdr pane send-text`) and the interface is unchanged.
    */
-  async spawn(opts: { label: string; env: Record<string, string>; cwd?: string }): Promise<{ pane: string }> {
+  async spawn(opts: {
+    label: string;
+    env: Record<string, string>;
+    cwd?: string;
+    args?: string[];
+  }): Promise<{ pane: string }> {
     const pane = await this.splitPane(opts);
+    const extraArgs = opts.args ?? [];
     try {
-      await this.startAgent(pane, opts.label);
+      await this.startAgent(pane, opts.label, extraArgs);
     } catch {
-      await this.run(['pane', 'send-text', pane, this.commandLine(opts.env)]);
+      await this.run(['pane', 'send-text', pane, this.commandLine(opts.env, extraArgs)]);
     }
     return { pane };
   }
@@ -151,8 +163,8 @@ export class HerdrCli implements Herdr {
     return paneId;
   }
 
-  private async startAgent(pane: string, label: string): Promise<void> {
-    const argv = splitCommand(this.spawnCmd);
+  private async startAgent(pane: string, label: string, extraArgs: string[]): Promise<void> {
+    const argv = [...splitCommand(this.spawnCmd), ...extraArgs];
     const executable = argv[0] ?? 'pi';
     if (baseName(executable) !== 'pi') {
       // Not a pi invocation: herdr cannot detect it as an agent, so run it as a
@@ -164,9 +176,9 @@ export class HerdrCli implements Herdr {
     await this.run(args);
   }
 
-  private commandLine(env: Record<string, string>): string {
+  private commandLine(env: Record<string, string>, extraArgs: string[]): string {
     const assigned = Object.entries(env).map(([key, value]) => `${key}=${shellQuote(value)}`);
-    return [...assigned, this.spawnCmd].join(' ');
+    return [...assigned, this.spawnCmd, ...extraArgs.map(shellQuote)].join(' ');
   }
 
   private async run(args: string[]): Promise<Record<string, unknown> | null> {

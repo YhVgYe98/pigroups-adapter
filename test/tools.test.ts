@@ -115,6 +115,19 @@ test('pg_spawn creates a member, DMs the brief, and starts one pane with the chi
   assert.equal(brief.items[0].sender_id, s.me.id, 'the brief comes from the spawning member');
 });
 
+// §2.2: pg_spawn's pi flags reach the pane as extra argv, appended to the configured
+// base command rather than replacing or string-splicing it.
+test('spawnMember carries the extra pi argv to the pane', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  const args = ['--model', 'vendor/model', '--extension', '/tmp/extra extension.ts', '--future', 'raw'];
+  await s.loop.spawnMember({ name: 'flags', brief: 'implement W', args });
+
+  assert.equal(s.herdr.spawns.length, 1);
+  assert.deepEqual(s.herdr.spawns[0].args, args, 'the loop passes the argv tail through unchanged');
+});
+
 // 概念稿 §5.1: deleting a member is how a stuck pane is stopped. The platform marks
 // it gone and tells its pi to exit; the shell the pane falls back to is still there,
 // so the adapter that spawned it has to close that pane.

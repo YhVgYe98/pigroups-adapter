@@ -449,7 +449,13 @@ export class AdapterLoop {
     this.blockedReported.delete(conv);
   }
 
-  async spawnMember(opts: { name?: string; brief: string; cwd?: string }): Promise<{ id: string; name: string }> {
+  async spawnMember(opts: {
+    name?: string;
+    brief: string;
+    cwd?: string;
+    /** Extra pi argv for the child, appended to the configured spawn command (§2.2). */
+    args?: string[];
+  }): Promise<{ id: string; name: string }> {
     const requestId = randomUUID();
     const created = await this.pg.createMember({ name: opts.name, request_id: requestId });
     const id = created.member.id;
@@ -465,7 +471,7 @@ export class AdapterLoop {
       PIGROUPS_ADAPTER_DIR: this.config.adapterDir,
       PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
     };
-    const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd });
+    const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd, args: opts.args });
     this.panes.set(id, pane);
     this.paneCheckedAt.set(id, this.now());
     await this.herdr.waitReady(pane, SPAWN_READY_MS);

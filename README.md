@@ -2,8 +2,11 @@
 
 A Pi extension that turns a pi session into one member of a PiGroups workspace.
 
-A spawned child loads this same extension by default (`pi -ne -e <this file>`); set
-`PIGROUPS_SPAWN_CMD` only when a child needs different flags.
+A spawned member loads this same extension by default (`pi -e <this file>`); it is
+otherwise a normal pi session, with the operator's tools, skills, prompt templates,
+MCP servers and context files. `pg_spawn` can append pi flags for one spawn (model,
+thinking, tools, extensions, skills, prompt templates, raw argv); set
+`PIGROUPS_SPAWN_CMD` only to replace the whole base command.
 
 - `docs/概念稿.md` — what it is, what it is not, and the three failures it closes.
 - `docs/设计说明.md` — the contracts: `PiSurface`, `Herdr`, the loop, the journal, the `pg.*` command schema.
