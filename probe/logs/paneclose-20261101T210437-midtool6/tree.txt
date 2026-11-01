@@ -1,0 +1,9 @@
+commit: e1fcf134e09fe18a1caf2e8781e96718775ad03b
+herdr.ts sha256: 196886e5be8bfa9f6f14203b16052f91861ca4248d276e6fa8a926e1262154cd  /home/yang/Documents/pigroups-adapter/src/herdr.ts
+pi: 1.4.0
+herdr: herdr 0.9.5
+?? probe/logs/paneclose-20261101T205517-idle/
+?? probe/logs/paneclose-20261101T205921-midturn/
+?? probe/logs/paneclose-20261101T210306-midtool/
+?? probe/logs/paneclose-20261101T210437-midtool6/
+?? probe/paneclose-analyze.mjs

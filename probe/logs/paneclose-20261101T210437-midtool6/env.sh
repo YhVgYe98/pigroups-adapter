@@ -1,0 +1,15 @@
+PORT=40777
+MODEL=deepseek/deepseek-flash
+SPAWN_CMD=pi -ne -e /home/yang/Documents/pigroups-adapter/src/extension.ts --model deepseek/deepseek-flash --session-dir /tmp/pgpc-childsess.cV9kmX --name probe-child
+DATA=/tmp/pgpc-data.L7YlvV
+ADIR=/tmp/pgpc-adir.CW83Jo
+SCRATCH=/tmp/pgpc-scratch.dMhAA1
+ROOTSESS=/tmp/pgpc-rootsess.Bx1FL3
+CHILDSESS=/tmp/pgpc-childsess.cV9kmX
+PLATFORM_PID=131095
+ROOT_ID=m_6e1726
+ROOT_PANE=wE:p1G
+CHILD_ID=m_771744
+CHILD_PANE=wE:p1H
+CHILD_PID=131625
+CHILD_SESSION=/tmp/pgpc-childsess.cV9kmX/2026-11-01T13-04-43-386Z_01a19736-577a-7460-a97a-53e3abfadf2f.jsonl

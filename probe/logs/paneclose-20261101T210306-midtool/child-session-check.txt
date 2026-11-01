@@ -1,0 +1,4 @@
+lines=31 bad=0 endsWithNewline=true
+last.type=message role=assistant stopReason=toolUse
+entry types: session,session_info,model_change,thinking_level_change,message,custom_message,message,message,message,custom_message,message,message,message,message,message,message,message,custom_message,message,custom_message,message,message,message,custom_message,message,custom_message,message,message,message,custom_message,message
+pg_say tool results: 5

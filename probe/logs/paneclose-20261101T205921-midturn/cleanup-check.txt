@@ -1,0 +1,16 @@
+# cleanup check 2026-11-01T13:02:26.682Z
+
+## herdr pane list
+wD:p1E	agent=hermes	status=idle	cwd=/home/yang
+wE:pB	agent=pi	status=idle	cwd=/home/yang
+wE:p1	agent=pi	status=idle	cwd=/home/yang
+wE:p12	agent=-	status=unknown	cwd=/home/yang/Documents/PiGroups
+
+## baseline pane ids (panes-baseline.json, taken before the run)
+wD:p1E wE:pB wE:p1 wE:p12 
+
+## leftover probe processes (tmp dirs named pgpc-*)
+(none)
+
+## platform on 40777
+(down)

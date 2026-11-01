@@ -147,6 +147,39 @@ herdr agent prompt "$PANE" "Call pg_terminate with the member id returned by pg_
 > `probe/logs/level4-fix-20261101T193945/tree.txt`（树 = `9453f6d`），驱动命令在
 > `commands.md`。`run.log` 本身不改——它是当时打印的。
 
+## fix A 真机验证：关 pane 与子成员退出的先后
+
+`7ae1adc` 让 `HerdrCli.close()` 先轮询 `herdr pane list`，等窗格里的 agent 退出
+（最多 `PANE_AGENT_EXIT_TIMEOUT_MS = 5000`）再 `pane close`。这件事只能在真机上验：
+两个进程、两个时钟、一个 5 s 上限。
+
+每个 `probe/logs/paneclose-<时间戳>-<变体>/` 是一次运行，内容自足：
+
+| 文件 | 内容 |
+|---|---|
+| `driver.sh` | 当次运行的完整驱动：一次性平台 + root pane + `pg_spawn`/`pg_terminate` + 采样 + 收尾 |
+| `pane-sampler.mjs` / `pid-sampler.mjs` | 每 40 ms 采 `herdr pane list`；每 20 ms 采 `/proc/<子 pi pid>`；agent 一消失立刻抓窗格回滚 |
+| `run.txt` / `env.sh` / `timeline.txt` | 当次打印的日志、端口与 id、分析结果 |
+| `report.md` | 当次结论与原始证据行 |
+
+分析：
+
+```bash
+node probe/paneclose-analyze.mjs probe/logs/paneclose-20261101T210306-midtool
+```
+
+它按 `sys.terminated` receipt、`/proc` 消失、`pane list` 的 agent 状态、herdr 服务端日志里的
+`pane.close` 时间戳排出时间线，逐项给 PASS/FAIL（退出码 1 = 有失败）。
+
+四次运行（idle / 删除时正在一轮 turn 里 / `bash sleep 40` 中 / `bash sleep 6` 中）与结论在
+`probe/logs/paneclose-summary.md`：**子成员能在 5 s 内退出时成立，卡在长工具里时
+`pane close` 仍会切掉一个活着的 agent**。失败那次是 `paneclose-20261101T210306-midtool`。
+
+> 子成员的 `PIGROUPS_SPAWN_CMD` 里加了 `--session-dir`，只为把会话文件落到可预测目录，便于
+> 取“最后一次写入—进程退出”的时间关系；默认路径是 `~/.pi/agent/sessions/--<cwd>--/`。
+> pi 会把自己的 argv 重写成 `pi`，所以 `ps`/`pgrep -f` 认不出它，探针用
+> `herdr pane process-info` 的 pid 加 `/proc/<pid>/environ` 的 `HERDR_PANE_ID` 认。
+
 ## 日志格式
 
 `$PROBE_LOG` 是 JSONL，每行一个对象，两个公共字段在前：

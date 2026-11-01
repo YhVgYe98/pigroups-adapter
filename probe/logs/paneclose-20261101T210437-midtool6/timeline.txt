@@ -1,0 +1,31 @@
+evidence: probe/logs/paneclose-20261101T210437-midtool6
+child: member m_771744, pane wE:p1H, pi pid 131625
+
+timeline (all times UTC, epoch ms in parentheses; samplers: pid every 20 ms, pane every 40 ms)
+  2026-11-01T13:05:15.239Z  DELETE committed on the platform, sys.terminated written (1793538315239)
+  2026-11-01T13:05:15.239Z  the child's poll took that notice (receipt state=delivered) (1793538315239)
+  2026-11-01T13:05:13.579Z  pid sampler saw pi running from here (state changes only) (1793538313579)
+  2026-11-01T13:05:18.926Z  first pid sample: pi gone (1793538318926)
+  2026-11-01T13:05:18.948Z  pane list first reported the pane with no agent (1793538318948)
+  2026-11-01T13:05:19.064Z  herdr pane.close request (from the herdr server log) (1793538319064)
+  2026-11-01T13:05:19.072Z  pane list first reported the pane absent (1793538319072)
+
+PASS  O1 the child pi ran and its session file is complete
+      child-session.jsonl: 27 entries, 0 unparseable lines, endsWithNewline=true, last entry message/assistant stopReason=stop at 2026-11-01T13:05:18.809Z
+PASS  O2 the last session write precedes the pi process exit
+      last session entry 2026-11-01T13:05:18.809Z <= pi gone 2026-11-01T13:05:18.926Z (117 ms); the file cannot have been cut mid-write
+PASS  O3 the child consumed sys.terminated before it exited
+      receipt delivered at 2026-11-01T13:05:15.239Z, pi gone at 2026-11-01T13:05:18.926Z (3687 ms)
+PASS  O4 the pane was still listed after pi exited, and closed only after that
+      pane list: agent gone at 2026-11-01T13:05:18.948Z; pane.close at 2026-11-01T13:05:19.064Z (116 ms later)
+PASS  O5 pi reached its graceful interactive exit path, not a killed TUI
+      the pane scrollback captured at the moment the agent vanished contains pi's graceful-exit line ("To resume this session: ...", printed after session_shutdown and immediately before process.exit(0)) and the shell prompt below it
+PASS  O6 the pane is gone and no child pi process remains
+      pane "wE:p1H" in panes-after-terminate.json: absent; ps for pid 131625: absent; member status gone
+PASS  O7 the adapter reported no pane_close_failed
+      root's pg_terminate tool result: 2026-11-01T13:05:19.068Z [{"type":"text","text":"{\"terminated\":[\"m_771744\"],\"pane_close_failed\":[]}"}] -> 1 result(s), pane_close_failed contents: [""]
+PASS  O8 the close waited for the child, inside the 5 s hard bound
+      DELETE 2026-11-01T13:05:15.239Z -> pane.close 2026-11-01T13:05:19.064Z: 3825 ms of the 5000 ms PANE_AGENT_EXIT_TIMEOUT_MS (margin 1175 ms); pi exited at 2026-11-01T13:05:18.926Z, 138 ms before the close
+NOTE  counterfactual: before 7ae1adc the pane would have been closed at 2026-11-01T13:05:15.239Z (3687 ms before pi exited); 2 session entries written after the DELETE would have been lost or cut: 2026-11-01T13:05:17.742Z(message/toolResult), 2026-11-01T13:05:18.809Z(message/assistant)
+
+VERDICT: PASS (8/8 observations)

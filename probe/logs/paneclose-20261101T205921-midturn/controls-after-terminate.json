@@ -1,0 +1,1 @@
+{"items":[{"seq":1,"id":"terminate:m_31b9f8","from_id":"sys","to":"m_31b9f8","cmd":"sys.terminated","payload":{"reason":"deleted","terminated_by":"m_fea2df"},"reply_to":null,"receipts":[{"to_id":"m_31b9f8","state":"delivered","delivered_at":1793538015495}],"created_at":1793538015495}],"next":null,"server_version":"0.2.0"}

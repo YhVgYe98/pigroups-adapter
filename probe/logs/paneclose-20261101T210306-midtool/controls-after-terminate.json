@@ -1,0 +1,1 @@
+{"items":[{"seq":1,"id":"terminate:m_11953b","from_id":"sys","to":"m_11953b","cmd":"sys.terminated","payload":{"reason":"deleted","terminated_by":"m_570ee1"},"reply_to":null,"receipts":[{"to_id":"m_11953b","state":"delivered","delivered_at":1793538224335}],"created_at":1793538224335}],"next":null,"server_version":"0.2.0"}

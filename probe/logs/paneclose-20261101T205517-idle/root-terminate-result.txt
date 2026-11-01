@@ -1,0 +1,2 @@
+2026-11-01T12:59:04.525Z [{"type":"text","text":"{\"terminated\":[\"m_a763f5\"],\"pane_close_failed\":[]}"}]
+2026-11-01T12:59:05.332Z [{"type":"text","text":"{\"terminated\":[\"m_a763f5\"],\"pane_close_failed\":[]}"}]

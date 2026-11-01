@@ -1,0 +1,34 @@
+[paneclose] 2026-11-01T12:55:20.156Z == 0. baseline ==
+[paneclose] 2026-11-01T12:55:20.281Z baseline panes: wD:p1E wE:pB wE:p1 wE:p12 
+[paneclose] 2026-11-01T12:55:20.283Z commit e1fcf13, herdr.ts 196886e5be8bfa9f
+[paneclose] 2026-11-01T12:55:20.283Z == 1. throwaway platform ==
+[paneclose] 2026-11-01T12:55:20.397Z platform pid 120049 healthy at http://127.0.0.1:40777 (data /tmp/pgpc-data.6To0nY)
+[paneclose] 2026-11-01T12:55:20.398Z == 2. root member (bootstrap, once) ==
+[paneclose] 2026-11-01T12:55:20.432Z root member m_8365bd
+[paneclose] 2026-11-01T12:55:20.451Z == 3. root pane (env rides on pane split) ==
+[paneclose] 2026-11-01T12:55:20.469Z root pane wE:p16
+[paneclose] 2026-11-01T12:55:24.385Z agent start root -> {"id":"cli:agent:start","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgpc-scratch.rJQjG0","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.rJQjG0","interactive_ready":true,"nam
+[paneclose] 2026-11-01T12:55:24.387Z root idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgpc-scratch.rJQjG0","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.rJQjG0","interactive_ready":true,"name
+[paneclose] 2026-11-01T12:55:24.388Z == 4. root spawns the child ==
+[paneclose] 2026-11-01T12:55:24.388Z prompt(spawn): Call the pg_spawn tool exactly once with name=probe-child and this brief: "You are probe-child. Do exactly this and nothing else: call the pg_say tool once with to=g:m_8365bd and text=probe-child here. Then stop." Then stop.
+[paneclose] 2026-11-01T12:55:40.901Z spawn turn settled at 1793537740900 (2026-11-01T12:55:40.900Z): {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":130,"cwd":"/tmp/pgpc-scratch.rJQjG0","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.rJQjG0","intera
+[paneclose] 2026-11-01T12:55:40.902Z == 5. identify the child (platform tree + pane diff) ==
+[paneclose] 2026-11-01T12:55:40.923Z child member m_5bdb4f
+[paneclose] 2026-11-01T12:55:40.938Z new panes vs baseline: 'wE:p17'
+[paneclose] 2026-11-01T12:55:40.941Z child pane wE:p17: "agent":"pi" "agent_status":"working" 
+[paneclose] 2026-11-01T12:55:40.942Z == 6. wait until the child is genuinely running and has spoken ==
+[paneclose] 2026-11-01T12:55:40.944Z child session /tmp/pgpc-childsess.NRtUwq/2026-11-01T12-55-26-447Z_01a1972d-d7ee-73a2-a7b5-eb674efd338a.jsonl (16 lines)
+[paneclose] 2026-11-01T12:55:40.958Z child pg_say result: "toolName":"pg_say","content":[{"type":"text","text":"{\"conv\":\"dm:m_5bdb4f_m_8365bd\",\"seq\":2}"}],"isError":false,"durationMs":2,"timestamp":1793537733615}}
+[paneclose] 2026-11-01T12:55:40.978Z group messages: probe-child:1:probe-child here
+[paneclose] 2026-11-01T12:55:44.282Z child idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":132,"cwd":"/tmp/pgpc-scratch.rJQjG0","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.rJQjG0","interact
+[paneclose] 2026-11-01T12:55:44.549Z child pane tail (before terminate): ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── /tmp/pgpc-scratch.rJQjG0 • probe-child ↑1.7k ↓1.0k R29k CH94.
+[paneclose] 2026-11-01T12:55:44.565Z child running pane entry: {"pane_id":"wE:p17","agent":"pi","agent_status":"idle","title":"π - probe-child - pgpc-scratch.rJQjG0"}
+[paneclose] 2026-11-01T12:55:44.580Z child pi pid 120722 (argv is rewritten to 'pi'; /proc/120722/environ PI_SESSION_FILE=)
+[paneclose] 2026-11-01T12:55:44.581Z FATAL: pid 120722 is not the child pi (PI_SESSION_FILE mismatch)
+[paneclose] 2026-11-01T12:55:44.581Z == cleanup ==
+[paneclose] 2026-11-01T12:55:44.582Z preserved child session in cleanup
+[paneclose] 2026-11-01T12:55:44.606Z closed pane wE:p17 (exit 0)
+[paneclose] 2026-11-01T12:55:44.631Z closed pane wE:p16 (exit 0)
+[paneclose] 2026-11-01T12:55:44.635Z platform stopped (pid 120049)
+[paneclose] 2026-11-01T12:55:44.637Z final panes: wD:p1E wE:pB wE:p1 wE:p12 
+[paneclose] 2026-11-01T12:55:44.638Z driver exit 2

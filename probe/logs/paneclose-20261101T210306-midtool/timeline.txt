@@ -1,0 +1,32 @@
+evidence: probe/logs/paneclose-20261101T210306-midtool
+child: member m_11953b, pane wE:p1F, pi pid 129090
+
+timeline (all times UTC, epoch ms in parentheses; samplers: pid every 20 ms, pane every 40 ms)
+  2026-11-01T13:03:44.335Z  DELETE committed on the platform, sys.terminated written (1793538224335)
+  2026-11-01T13:03:44.335Z  the child's poll took that notice (receipt state=delivered) (1793538224335)
+  2026-11-01T13:03:41.552Z  pid sampler saw pi running from here (state changes only) (1793538221552)
+  2026-11-01T13:03:49.375Z  first pid sample: pi gone (1793538229375)
+  ?  pane list first reported the pane with no agent (?)
+  2026-11-01T13:03:49.366Z  herdr pane.close request (from the herdr server log) (1793538229366)
+  2026-11-01T13:03:49.381Z  pane list first reported the pane absent (1793538229381)
+
+PASS  O1 the child pi ran and its session file is complete
+      child-session.jsonl: 31 entries, 0 unparseable lines, endsWithNewline=true, last entry message/assistant stopReason=toolUse at 2026-11-01T13:03:40.446Z
+PASS  O2 the last session write precedes the pi process exit
+      last session entry 2026-11-01T13:03:40.446Z <= pi gone 2026-11-01T13:03:49.375Z (8929 ms); the file cannot have been cut mid-write
+PASS  O3 the child consumed sys.terminated before it exited
+      receipt delivered at 2026-11-01T13:03:44.335Z, pi gone at 2026-11-01T13:03:49.375Z (5040 ms)
+FAIL  O4 the pane was still listed after pi exited, and closed only after that
+      pane list: agent gone at ?; pane.close at 2026-11-01T13:03:49.366Z (? later)
+FAIL  O5 pi reached its graceful interactive exit path, not a killed TUI
+      no "To resume this session:" line in child-pane-at-exit.txt — pi did not reach the end of its own shutdown path
+PASS  O6 the pane is gone and no child pi process remains
+      pane "wE:p1F" in panes-after-terminate.json: absent; ps for pid 129090: absent; member status gone
+PASS  O7 the adapter reported no pane_close_failed
+      root's pg_terminate tool result: 2026-11-01T13:03:49.390Z [{"type":"text","text":"{\"terminated\":[\"m_11953b\"],\"pane_close_failed\":[]}"}] -> 1 result(s), pane_close_failed contents: [""]
+FAIL  O8 the close waited for the child, inside the 5 s hard bound
+      DELETE 2026-11-01T13:03:44.335Z -> pane.close 2026-11-01T13:03:49.366Z: 5031 ms of the 5000 ms PANE_AGENT_EXIT_TIMEOUT_MS (margin -31 ms); pi exited at 2026-11-01T13:03:49.375Z, -9 ms before the close
+NOTE  in-flight at the end: the session's last entry is an assistant toolUse with no toolResult after it: the turn was still running when the file stopped changing, so the child never wrote the end of that turn
+NOTE  counterfactual: before 7ae1adc the pane would have been closed at 2026-11-01T13:03:44.335Z (5040 ms before pi exited); 0 session entries written after the DELETE would have been lost or cut: none
+
+VERDICT: FAIL (3/8 observations failed)

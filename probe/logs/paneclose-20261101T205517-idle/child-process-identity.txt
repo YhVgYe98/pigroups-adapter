@@ -1,0 +1,4 @@
+HERDR_PANE_ID=wE:p1B
+PIGROUPS_URL=http://127.0.0.1:40777
+PIGROUPS_SPAWN_CMD=pi -ne -e /home/yang/Documents/pigroups-adapter/src/extension.ts --model deepseek/deepseek-flash --session-dir /tmp/pgpc-childsess.JSdIL0 --name probe-child
+PIGROUPS_TOKEN matches root token: no

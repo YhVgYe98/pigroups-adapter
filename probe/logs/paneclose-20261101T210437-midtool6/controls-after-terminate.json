@@ -1,0 +1,1 @@
+{"items":[{"seq":1,"id":"terminate:m_771744","from_id":"sys","to":"m_771744","cmd":"sys.terminated","payload":{"reason":"deleted","terminated_by":"m_6e1726"},"reply_to":null,"receipts":[{"to_id":"m_771744","state":"delivered","delivered_at":1793538315239}],"created_at":1793538315239}],"next":null,"server_version":"0.2.0"}

@@ -1,0 +1,40 @@
+# 更正：run.txt 里“bash call seen / waiting for the child's bash tool call”这一段的含义
+
+run.txt 原样保留（探针当时打印的）。这里记清楚实际发生了什么，以及探针判断错在哪。
+
+## 1. 判据太松（探针 bug）
+
+driver.sh 用 `grep '"name":"bash"'` 判断子成员是否开始执行 bash 工具。这个模式也匹配
+**系统提示里的工具声明**（`sections.tools` 里每个工具都有 name），所以它在子成员还没调
+bash 的时候就先报了“看到了”。真正的 toolCall 判据是
+`"type":"toolCall","id":"…","name":"bash"`。
+
+用严格判据重查：
+
+```
+$ grep -c '"type":"toolCall","id":"[^"]*","name":"bash"' child-session.jsonl
+1
+$ grep -o '"type":"toolCall","id":"[^"]*","name":"pg_say"' child-session.jsonl | wc -l
+2
+```
+
+## 2. bash 真的跑了，但早于删除 16 秒
+
+子成员确实执行了 `bash {"command":"sleep 25","timeout":30}`：
+
+```
+2026-11-01T12:59:34.283Z  assistant stop=toolUse calls: bash({"command":"sleep 25","timeout":30})
+2026-11-01T12:59:59.287Z  toolResult bash "(no output)"
+```
+
+而 `sys.terminated` 是 `13:00:15.495Z` 写下的——那时 bash 早已结束。原因不在模型：
+`pg_spawn` 要等 `herdr agent wait --until idle`，root 的 spawn turn 要到子成员第一轮
+（含这 25 s 的 sleep）结束才返回，driver 拿到 child id 去发 terminate 时工具早就跑完了。
+
+所以这次运行不是“删除时正在跑工具”，而是“删除时正在一轮 nudge turn 里”（见 report.md
+的时间线：15.495 删除，19.807 才写下那条 turn 的 assistant 消息）。它仍然是有效的第二次观测
+（删除落在 turn 中途），但不要把它读成“工具运行中被删除”。
+
+## 3. 真要“工具运行中被删除”，得先 idle 再让 root 用 pg_say 命令子成员跑长工具
+
+见下一个目录 `paneclose-…-midtool`。
