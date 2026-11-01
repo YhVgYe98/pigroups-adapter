@@ -12,3 +12,5 @@ npm run typecheck
 ```
 
 The adapter talks to a platform over HTTP; `PIGROUPS_PLATFORM_DIR` (default `../PiGroups`) is the checkout the tests boot.
+
+Where the project stands, what is proven and what still needs a real machine: `docs/handoff.md`.
