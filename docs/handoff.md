@@ -1,8 +1,11 @@
 # 交接文档
 
-> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据在记录那次 run 的提交里改过两次——两处改动都记在 §3.6。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12）。
+> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12）。
+>
 > 两个人（或一个人隔几天回来）之间交接用。
 > 面向：接手「把 PiGroups 在 herdr + pi 上真机跑起来」这件事的人。
+>
+> **本文档描述的是 `v0.2.0` 这一对**：平台与适配器都是 `0.2.0`，各有一个未签名的 annotated 标签指向写作时的 HEAD。号住在哪、怎么发下一版、以及本轮实测到的问题，见 §8。
 
 ---
 
@@ -10,14 +13,16 @@
 
 **两个仓库都已建成、全绿、经过五轮独立评审和变异测试（第四、五轮留痕见 §11，第五轮修复见 §12）；三条 pi 接口假设已于 2026-11-01 在真机（pi 1.4.0 / herdr 0.9.5）上验过：第 1 级通过；第 2 级只对“配合的工具”通过（pi 不会杀一个忽略 abort signal 的工具）；第 3 级只过了 SIGTERM/tui 这一条路径，且这次用 3 s 异步体 + `process.on('exit')` 证明了处理器确实被 await；第 4 级端到端主链路通过（整级仍是部分通过，理由见 §3.6）。** 抓到的真偏离（`pg.abort` 之后没有 turn_end）已由 `abecc76` / `fff2418` 修掉。
 
-**第 4 级不是“全过”，状态统一为“部分通过”。** 第一次真机 run 抓出两处：模型侧没有 `pg_report` 工具（只有 9 个工具，规范也只列了 9 个），以及删除后子 pane 没人关。后者已由 `9453f6d` 修掉并在真机复跑确认；前者是产品缺口，但**不是**第 4 级的判据——那次 run 的判据被改过两次（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说了一句话），两次改动原先没有记录，现在逐条记在 §3.6。整级仍是部分通过，因为只跑了 1 个子成员，判据也是在记录那次 run 的同一个提交里改的。详见 §3.6 与 §4。
+**第 4 级不是“全过”，状态统一为“部分通过”。** 第一次真机 run 抓出两处：模型侧没有 `pg_report` 工具（只有 9 个工具，规范也只列了 9 个），以及删除后子 pane 没人关。后者已由 `9453f6d` 修掉并在真机复跑确认；前者是产品缺口，但**不是**第 4 级的判据——那次 run 的判据被改过两次（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说了一句话），两处都在事后单独的 `de48904` 里，**不在**记录那次 run 的 `3919467` 里（`3919467` 连判据那一行都没动，§3.6 原先把它记成“记录 run 的同一个提交”，本版改正）。整级仍是部分通过，因为只跑了 1 个子成员，判据也是事后改的。详见 §3.6 与 §4。
 
 下一步：**先把 `pg_report` 定为“加第 10 个工具”还是保持“汇报=说话”**（它不再是第 4 级的判据，但仍是产品缺口）；补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘；再把第 4 级从 1 个子成员扩到 2 个并验重启/级联。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
 
 ```
-平台仓库  ~/Documents/PiGroups          55 tests   typecheck 干净  已定稿
-适配器    ~/Documents/pigroups-adapter  75 tests   typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
+平台仓库  ~/Documents/PiGroups          0.2.0  v0.2.0  56 tests   typecheck 干净  已定稿
+适配器    ~/Documents/pigroups-adapter  0.2.0  v0.2.0  78 tests   typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
 ```
+
+两个仓库必须是同一个号，`v0.2.0` 标签记录这一对；本文档描述的就是它。号住在哪、怎么发下一版见 §8。
 
 ---
 
@@ -29,9 +34,10 @@
 
 | | |
 |---|---|
+| 版本 | `0.2.0`，标签 `v0.2.0`（annotated、未签名）。`package.json` 是唯一真值：`src/version.ts` 直接 import 它，`GET /v1/health` 与每个响应的 `server_version` 都报这个数，没有第二个常量 |
 | 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（实现伴稿）、`docs/参考/`（原始讨论稿） |
 | 代码 | `src/` 2105 行，15 个 HTTP 端点，TypeScript + `node:sqlite`；运行时依赖 `hono`、`@hono/node-server`、`zod` |
-| 测试 | `test/` 2681 行，55 个黑盒 HTTP 测试 |
+| 测试 | `test/` 2681 行，56 个黑盒 HTTP 测试 |
 | 运行 | `npm run serve`（`PORT` 默认 7717，`PIGROUPS_DATA`，`PIGROUPS_ADMIN_TOKEN`） |
 | 提交 | `master`（数量见 `git log`） |
 
@@ -43,9 +49,10 @@
 
 | | |
 |---|---|
+| 版本 | `0.2.0`，标签 `v0.2.0`（annotated、未签名）。`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`、lockfile 三处必须相等（`test/version.test.ts` 会红）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它 |
 | 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（含 `PiSurface`、`Herdr`、循环、journal、`pg.*` 契约） |
 | 代码 | `src/` 2995 行，8 个模块（见下），**无运行时依赖**（只用 `node:*` 和 `fetch`） |
-| 测试 | `test/` 3249 行，75 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
+| 测试 | `test/` 3249 行，78 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
 | 提交 | `master`（数量见 `git log`） |
 
 ```
@@ -117,17 +124,18 @@ herdr agent start root --kind pi --pane "$PANE" --timeout 60000 \
 
 ### 3.2 平台侧的具体数字
 
-- 55 个黑盒测试，覆盖 15 个端点的全部承诺
+- 56 个黑盒测试，覆盖 15 个端点的全部承诺
 - 变异测试 16 个错误实现，**全部被抓**（含幂等查表顺序、名字唯一索引是否为 partial）
 - 我自己另写了 17 + 24 + 10 项探针，独立复核过越权路径（成员带 `all=true` 的 8 种写法全部 403）
 
 ### 3.3 适配器侧的具体数字
 
-- 75 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
+- 78 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
 - 新补的 15 条（44 → 59，之后又补 3 条到 62）：`test/surface.test.ts` 新增 3 条（幂等门；该文件共 9 条）、
   `test/surface.abort.test.ts` 10 条（abort/isBusy/shutdown/退订/preview，含 3 s 放弃分支）、
   `test/obligation.test.ts` 新增 2 条（`nudgeOwed` 的 abort 竞态）；三组都做过撤掉源码再跑红的验证
 - 第五轮再补 13 条到 75（`obligation` 7、`herdr` 2、`tools` 2、`delivery` 1、`stop` 1），清单与变异证明见 §12
+- 版本工作再补 3 条到 78（`test/version.test.ts`：常量与 `package.json`/lockfile 一致、`pg_whoami` 报 `adapter_version`、启动日志那一行）
 - 变异测试 17 个，抓 12 个；存活 5 个里 3 个已被后补测试覆盖，剩 2 个（水位按成员、`flush()` 返回值）已补并有变异证明
 - 本轮另做 3 个反向变异，全被抓：撤 `turnOpen` 门 → `surface.test.ts` 9 条里 2 条红；撤 `abort()` 放弃时的 warn → `surface.abort.test.ts` 1 条红；撤 `nudgeOwed` 的两处 `aborting` 检查 → `obligation.test.ts` 2 条红。恢复后全绿
 - 此前的两轮独立评审：源码侧 3 blocking + 9 should-fix 全部修完；测试侧 11 条覆盖缺口补了 9 条（2 条判定为文档信息不足，明确跳过）
@@ -245,8 +253,11 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 
 **判据改动记录（两处，都是“先改判据、后按新判据算通过”，所以整级不能算全过）：**
 
-1. `3919467`（记录这次 run 的提交）把通过标准里的“**2 个子成员**”改成“子成员”。实际只起了
-   1 个。这不是把结果改到判据上——它就是判据被降了一档；要按原清单算通过，还得补第二个子成员。
+1. “**2 个子成员**”被改成“子成员”。实际只起了 1 个。这不是把结果改到判据上——它就是判据被
+   降了一档；要按原清单算通过，还得补第二个子成员。**两处判据改动都在 `de48904`，不在记录
+   这次 run 的 `3919467` 里**：`3919467` 只把这一行从“未验证”写成“部分通过”，判据仍原样写着
+   “根 + 2 个子成员”与“根收到 `pg.report`”。本节原先把 `3919467` 记成改判据的那个提交，已改正；
+   `probe/README.md` 里是同一个错，本次没改（只提交本文档）。
 2. `de48904` 把“根收到模型主动发的 `pg.report`”改成“子成员说了一句话（`pg_say`）”。这条改动
    有事实依据：模型侧根本没有 `pg_report` 工具（`searchTools("pg")` 只找到 9 个），而子成员
    确实说了话（`transcripts/alpha.md` 11:32:32.951 → `pg_say` → `{"conv":"g:m_d1becc","seq":1}`）。
@@ -448,6 +459,24 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 
 ## 8. 怎么重跑一切
 
+**先确认你手里是哪一版。** 两个仓库都是 `0.2.0`，各有一个未签名 annotated 标签 `v0.2.0`（平台 `1d68dd4`、适配器 `f340f25`，都指向写作时的 HEAD），`git describe --tags` 两边都应输出 `v0.2.0`；本文档描述的就是这一对。
+
+**号住在哪。** 平台只有一处：`package.json`；`src/version.ts` 直接 import 它，`/v1/health` 与每个响应的 `server_version` 都是这个数，没有第二个常量。适配器两处必须一致：`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`（`test/version.test.ts` 也会比对 lockfile）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。**平台的 `package-lock.json` 仍是 `0.1.0`**——生成文件没跟上，真值以 `package.json` 与标签为准，平台的版本守卫不查 lockfile。
+
+**发一次版**（两个仓库同一个号，缺一不可）：
+
+```bash
+# 1) 两边的 package.json 改成同一个新号；适配器再 npm install --package-lock-only 让 lock 跟上
+# 2) 两边 CHANGELOG.md 各写一条，并写明按 0.x 口径这次是 patch 还是 minor
+# 3) 提交，然后各打一个未签名标签（annotated，不要 -s）
+git tag --no-sign -a v0.3.0 -m "v0.3.0: adapter 0.3.0 + platform 0.3.0, one release of the pair"
+git cat-file -p v0.3.0 | grep -c gpgsig     # 期望 0
+```
+
+口径（`CHANGELOG.md` 里也写着）：0.x 阶段按本项目自己的定义，不按 semver 默认——patch（`0.x.N+1`）只修 bug，端点、字段、工具名都不变；minor（`0.X+1.0`）是契约变化：加/删字段、端点、工具，改已记录的行为，数据迁移，新增接口成员。两个仓库一起走到同一个号，标签记录这一对。
+
+**本轮实测到、没修的问题**：平台的变异守卫清单里“只改 `package.json` 看测试变红”这一条按字面做不到（单源，改它不会红；把 `SERVER_VERSION` 写死成 `0.1.0` 才会红，实测 1 条失败），适配器那份按字面有效（`0.2.1` ≠ `0.2.0`，实测 1 条失败）；平台 `CHANGELOG.md` 写 `sys.terminated` 的入队与唤醒都在同一事务——入队确实在（`src/routes/org.ts:82-125`），`wakeMembers` 在事务提交之后（同文件 `:127`）。
+
 **以人身份读全部内容，三步，别想当然**（第 4 级真机跑时踩过）：
 
 ```bash
@@ -466,11 +495,11 @@ curl -s 'localhost:7717/v1/messages?to=g:m_xxx&limit=50' -H "Authorization: Bear
 ```bash
 # 平台
 cd ~/Documents/PiGroups
-npm run typecheck && npm test          # 55 tests，约 2 秒
+npm run typecheck && npm test          # 56 tests，约 2.3 秒
 
 # 适配器（会自己拉起一个平台子进程）
 cd ~/Documents/pigroups-adapter
-npm run typecheck && npm test          # 75 tests，约 7.6 秒
+npm run typecheck && npm test          # 78 tests，约 8.3 秒
 PIGROUPS_PLATFORM_DIR=~/Documents/PiGroups   # 默认是 ../PiGroups
 
 # 手动起一个平台
@@ -484,7 +513,7 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 9. 接手的第一件事
 
-1. 跑一遍上面两个 `npm test`，确认 55 / 75 全绿
+1. 跑一遍上面两个 `npm test`，确认 56 / 78 全绿（`v0.2.0` 的数）
 2. 读 `pigroups-adapter/docs/设计说明.md` §2.1（`PiSurface`）和 §2.2（`Herdr`）——那是真机验证的靶子
 3. 重跑 `probe/run.sh`（对照组应 PASS）与 `PROBE_IGNORE_SIGNAL=1 probe/run.sh`（硬变体应 FAIL 在 P2.5/P2.7，这是 pi 的已知边界）
 4. 补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘；`pg.abort` 的 turn_end 已修，不要再动
@@ -496,15 +525,15 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 10. 交接清单
 
-- [x] 两个仓库 `git status` 干净（2026-11-01 第五轮修复后：adapter HEAD 见 `git log`；PiGroups `e03af1a` + 本轮修复提交）
-- [x] `PiGroups`: 55/55，typecheck 干净（2026-11-01 第五轮实测，约 2.4 s）
-- [x] `pigroups-adapter`: 75/75，typecheck 干净（2026-11-01 第五轮实测，约 7.6 s）
+- [x] 两个仓库 `git status` 干净；都在 `0.2.0`，都有未签名 annotated 标签 `v0.2.0`（平台 `1d68dd4`、适配器 `f340f25`，详见 §8）
+- [x] `PiGroups`: 56/56，typecheck 干净（2026-11-01 版本工作实测，约 2.3 s）
+- [x] `pigroups-adapter`: 78/78，typecheck 干净（2026-11-01 版本工作实测，约 8.3 s）
 - [x] `grep -c 'pi-coding-agent' pigroups-adapter/src/loop.ts` = 0（实测 0）
 - [x] herdr 版本记下（本机 0.9.5，`herdr --version` 2026-11-01 复核），三个旗标形状与 §3.4 一致
 - [x] 第 1 级探针通过（2026-11-01，`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮）
 - [ ] 第 2 级探针**部分通过**（对照组 2 ms 切断；`PROBE_IGNORE_SIGNAL=1` 的硬变体 P2.5/P2.7 失败：pi 不杀忽略 signal 的工具；`bash sleep 60` 未验）
 - [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；`ctx.shutdown()` 自调用、print/json 模式、session 落盘、shutdown 正在跑的一轮都未验）
-- [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**只能记部分通过**：只跑了 1 个子成员，且两条判据在记录那次 run 的提交里改过（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话，见 §3.6）。`pg_report` 工具缺失是产品缺口（§7），不是这一级的判据；重启/级联未验）
+- [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**只能记部分通过**：只跑了 1 个子成员，且两条判据事后在 `de48904` 里改过（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话，不在记录那次 run 的 `3919467` 里，见 §3.6）。`pg_report` 工具缺失是产品缺口（§7），不是这一级的判据；重启/级联未验）
 
 ---
 
