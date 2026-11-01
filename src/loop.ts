@@ -132,6 +132,16 @@ const TICK_MS = 5000;
  * (概念稿 §8.1: count may be a safety valve, never the thing that starts a delivery).
  */
 const DELIVER_BATCH = 10;
+/**
+ * How many delivered-but-unacknowledged batches one turn may hold (§8.3 ②). At most
+ * one batch joins per delivery window, so eight entries cover a turn that spans eight
+ * windows — eight minutes at the default 60 s window — with at most 80 items in memory.
+ * A turn older than that is already outliving anything this adapter has measured, and
+ * unbounded growth is the only alternative. The oldest entry goes first, so the list
+ * stays a recovery for recent windows rather than a second journal; a drop is logged,
+ * because it is a lost copy, not a silent trim.
+ */
+const UNACKNOWLEDGED_BATCH_LIMIT = 8;
 /** §13.5: the last assistant text travels truncated; the tool preview is already 200. */
 const LAST_TEXT_CHARS = 500;
 /** §7.5 / §13.2: the bounds of `pg_schedule`. */
@@ -235,12 +245,14 @@ export class AdapterLoop {
    */
   private windowImmediate = false;
   /**
-   * The batch handed to pi by the last successful delivery, kept until the turn it
-   * entered ends. pi can drop a still-queued steer when an abort lands (§8.3); the copy
-   * is in memory only, because losing it on a crash costs at most one re-delivery and
-   * the injected text already carries `[conv#seq]` markers against duplicates.
+   * Every batch pi accepted and the turn has not acknowledged yet, in delivery order.
+   * pi can drop a still-queued steer when an abort lands (§8.3); the copies are in
+   * memory only, because losing them on a crash costs at most one re-delivery and the
+   * injected text already carries `[conv#seq]` markers against duplicates. One entry
+   * per delivery — not one slot — because two windows can steer into the same turn,
+   * and an abort takes back both.
    */
-  private lastDelivered: PendingDelivery[] | undefined;
+  private readonly unacknowledged: PendingDelivery[][] = [];
   /** One-shot wakes, in memory only: a restart drops them (§7.5). */
   private schedules: ScheduledWake[] = [];
   /**
@@ -530,8 +542,16 @@ export class AdapterLoop {
     }
     this.chatter = 0;
     // §8.3 ②: "pi accepted it" is not "the model saw it". Keep the batch in memory so
-    // an aborted turn can put it back (`handleEvent` → `requeueLastDelivered`).
-    this.lastDelivered = batch;
+    // an aborted turn can put it back (`handleEvent` → `requeueUnacknowledged`).
+    this.unacknowledged.push(batch);
+    if (this.unacknowledged.length > UNACKNOWLEDGED_BATCH_LIMIT) {
+      const dropped = this.unacknowledged.shift() ?? [];
+      console.warn(
+        `[pigroups] ${UNACKNOWLEDGED_BATCH_LIMIT} delivered batches are still unacknowledged ` +
+          `(one turn spanning that many windows); dropping the oldest, ${dropped.length} item(s): ` +
+          `an abort will not replay it`,
+      );
+    }
     for (const item of batch) {
       if (item.conv !== undefined) {
         // `mark` keeps `nudges`, so it must not re-arm `blockedReported` either:
@@ -1095,7 +1115,7 @@ export class AdapterLoop {
       this.queuedByJournal.clear();
       // Nothing is re-delivered after a termination: the member is gone, so a copy
       // that an abort would normally requeue has nowhere to go.
-      this.lastDelivered = undefined;
+      this.unacknowledged.length = 0;
       await this.stop();
       const reason = typeof payload.reason === 'string' ? payload.reason : 'terminated';
       this.surface.shutdown(reason);
@@ -1507,11 +1527,12 @@ export class AdapterLoop {
         // A provider error sticks until a later turn ends cleanly.
         this.errorNote = event.error ? event.error.message : undefined;
         // 概念稿 §8.3 ②: an aborted turn can swallow a steer that was still queued —
-        // the only measured way a delivered message disappears. Put the batch back.
-        // A clean end proves pi persisted it, so the copy is dropped; an errored end
-        // proves neither, so the copy waits for a later abort rather than vanishing.
-        if (event.aborted === true) this.requeueLastDelivered();
-        else if (event.error === undefined) this.lastDelivered = undefined;
+        // the only measured way a delivered message disappears. Put every batch back.
+        // A clean end proves pi persisted them all, so the copies are dropped; an
+        // errored end proves neither, so they wait for a later abort rather than
+        // vanishing — a recovery attempt, not a claim that they were unseen.
+        if (event.aborted === true) this.requeueUnacknowledged();
+        else if (event.error === undefined) this.unacknowledged.length = 0;
         this.evaluateAttention(now);
         return;
       case 'tool_start':
@@ -1535,19 +1556,21 @@ export class AdapterLoop {
   }
 
   /**
-   * Put the last delivered batch back in front of the queue (概念稿 §8.3 ②). It must
-   * bypass `enqueue`: the watermark already advanced past these items when pi accepted
-   * them, and that acceptance is exactly what the abort took back.
+   * Put every unacknowledged batch back in front of the queue, in delivery order
+   * (概念稿 §8.3 ②). It must bypass `enqueue`: the watermark already advanced past
+   * these items when pi accepted them, and that acceptance is exactly what the abort
+   * took back.
    *
    * The window is set to "due now" so the next opportunity — the tick, or the forced
-   * flush at the end of the abort — delivers it. Duplicates are acceptable; the
+   * flush at the end of the abort — delivers them. Duplicates are acceptable; the
    * injected text already carries `[conv#seq]` markers.
    */
-  private requeueLastDelivered(): void {
-    const batch = this.lastDelivered;
-    this.lastDelivered = undefined;
-    if (batch === undefined || batch.length === 0) return;
-    this.pending.unshift(...batch);
+  private requeueUnacknowledged(): void {
+    const batches = this.unacknowledged.splice(0);
+    if (batches.length === 0) return;
+    // One unshift of the flattened list keeps the batches in order; unshifting each
+    // batch in turn would reverse them.
+    this.pending.unshift(...batches.flat());
     this.windowStart = this.now() - this.config.deliveryWindowMs;
   }
 

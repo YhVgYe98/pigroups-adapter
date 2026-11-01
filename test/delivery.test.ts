@@ -246,3 +246,64 @@ test('a batch delivered into an aborted turn is put back and delivered again; a 
   await s.loop.flush();
   assert.equal(s.surface.deliveries.length, 2, 'a clean end clears the copy');
 });
+
+test('two batches steered into one still-running turn are both re-sent, in delivery order, when that turn is aborted', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  // One long tool: the turn stays open across both windows, so both deliveries are
+  // steers into the same turn — the case one `lastDelivered` slot cannot cover.
+  s.surface.beginTurn();
+
+  await send(s.platform, s.parent!.token, s.me.id, 'batch one');
+  await s.cycle();
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 1, 'precondition: batch one reached the turn');
+
+  await send(s.platform, s.parent!.token, s.me.id, 'batch two');
+  await s.cycle();
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 2, 'precondition: batch two was steered into the same turn');
+
+  // The abort takes back both steers, not just the last one.
+  s.surface.settleAborted();
+  await s.loop.settled();
+  await s.loop.flush();
+
+  assert.equal(s.surface.deliveries.length, 3, 'the aborted turn must hand the batches back');
+  const replay = s.surface.deliveries[2].text;
+  assert.ok(replay.includes('batch one'), `batch one must be re-delivered, got:\n${replay}`);
+  assert.ok(replay.includes('batch two'), replay);
+  assert.ok(
+    replay.indexOf('batch one') < replay.indexOf('batch two'),
+    `the batches must be re-delivered in delivery order, got:\n${replay}`,
+  );
+});
+
+test('the unacknowledged list is capped: a turn that outlives the cap loses only the oldest copy', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+  s.surface.beginTurn();
+
+  // One delivery per window; nine is one more than the cap of eight (§8.3 ②).
+  const batches = 9;
+  for (let i = 1; i <= batches; i += 1) {
+    await send(s.platform, s.parent!.token, s.me.id, `batch ${i}`);
+    await s.cycle();
+    await s.timer(WINDOW);
+  }
+  assert.equal(s.surface.deliveries.length, batches, 'precondition: one delivery per window');
+
+  s.surface.settleAborted();
+  await s.loop.settled();
+  await s.loop.flush();
+
+  assert.equal(s.surface.deliveries.length, batches + 1, 'the abort replays the batches it still holds');
+  const replay = s.surface.texts().slice(batches).join('\n');
+  assert.ok(!replay.includes('batch 1'), `the oldest copy was dropped: ${replay}`);
+  for (let i = 2; i <= batches; i += 1) {
+    assert.ok(replay.includes(`batch ${i}`), `batch ${i} must survive the cap, got:\n${replay}`);
+  }
+});
