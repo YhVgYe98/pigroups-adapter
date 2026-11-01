@@ -145,7 +145,7 @@ kill -TERM "$(cat "$PROBE_DIR/pi.pid")"
   不理会它的工具**——adapter 的 `abort()` 在 3 s 处放弃时，那一轮还在工具里。
   这正是 `src/surface.ts` 的放弃分支现在要打 warn 的原因。
 - **P3 成立，而且是判别性的**：`session_shutdown` 的异步体是 3000 ms；
-  `shutdown_done.waited_ms=3000`；`process_exit` 在 `shutdown_done` 之后 104 ms 才写，
+  `shutdown_done.waited_ms=3000`；`process_exit` 在 `shutdown_done` 之后 54 ms 才写，
   `after_shutdown_done_ms ≥ 0`，`exit 0`，SIGTERM→退出 3130 ms，只派发一次。
   250 ms 的旧探针做不到这个区分：一个没被 await 的 `setTimeout` 也能让进程活到 357 ms。
 - **abort 后的 settle 仍能起一轮**：`settled_3(aborted)` 里 `sendMessage` 被接受，
