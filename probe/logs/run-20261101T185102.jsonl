@@ -1,0 +1,31 @@
+{"ms":27,"pid":10573,"step":"start","reason":"startup","mode":"tui","hasUI":true,"isIdle":true,"hasPendingMessages":false,"pane":"wE:pK","node":"v26.12.1","argv":["-ne","-e","/home/yang/Documents/pigroups-adapter/probe/probe.ts","--no-session","--no-builtin-tools","--no-mcp","--no-skills","--no-prompt-templates","--no-context-files","--provider","deepseek","--model","deepseek-flash","Reply with exactly: ready"]}
+{"ms":39,"pid":10573,"step":"before_agent_start","messageType":"user","customType":null,"content":"Reply with exactly: ready"}
+{"ms":40,"pid":10573,"step":"turn_start","run":1,"delivery_stage":null,"since_delivery_ms":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":829,"pid":10573,"step":"assistant_end","stopReason":"stop","text":"ready"}
+{"ms":830,"pid":10573,"step":"turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":830,"pid":10573,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":831,"pid":10573,"step":"settled_1","settled":1,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":831,"pid":10573,"step":"delivered","stage":"p1","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":831,"pid":10573,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"This is an automated probe. Reply with the single word pong and nothing else."}
+{"ms":831,"pid":10573,"step":"turn_start","run":2,"delivery_stage":"p1","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":1383,"pid":10573,"step":"assistant_end","stopReason":"stop","text":"pong"}
+{"ms":1384,"pid":10573,"step":"turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":1384,"pid":10573,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":1384,"pid":10573,"step":"settled_2","settled":2,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":1384,"pid":10573,"step":"delivered","stage":"p2","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":1384,"pid":10573,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"Call the tool probe_sleep exactly once with seconds=60. Do not answer with text before the tool call."}
+{"ms":1384,"pid":10573,"step":"turn_start","run":3,"delivery_stage":"p2","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":2389,"pid":10573,"step":"assistant_end","stopReason":"toolUse","text":""}
+{"ms":2389,"pid":10573,"step":"tool_start","toolName":"probe_sleep","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","args":"{\"seconds\":60}"}
+{"ms":2390,"pid":10573,"step":"tool_enter","tool":"probe_sleep","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","seconds":60,"signalPresent":true,"isIdle":false}
+{"ms":4094,"pid":10573,"step":"abort_seen","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","waited_ms":1704,"isIdle":false}
+{"ms":4094,"pid":10573,"step":"tool_return","tool":"probe_sleep","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","why":"aborted","ran_ms":1704,"isIdle":false}
+{"ms":4095,"pid":10573,"step":"abort_called","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","abort_sync_ms":1,"abortError":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":4095,"pid":10573,"step":"tool_end","toolName":"probe_sleep","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","isError":false,"durationMs":1705}
+{"ms":4095,"pid":10573,"step":"turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"toolUse","errorMessage":null}
+{"ms":4096,"pid":10573,"step":"assistant_end","stopReason":"error","text":""}
+{"ms":4096,"pid":10573,"step":"turn_end","turnIndex":1,"outcome":"error","role":"assistant","stopReason":"error","errorMessage":"This operation was aborted"}
+{"ms":4097,"pid":10573,"step":"settled_3","settled":3,"aborted":true,"isIdle":true,"hasPendingMessages":false}
+{"ms":4120,"pid":10573,"step":"idle","wait_ms":26,"toolReturned":true}
+{"ms":4349,"pid":10573,"step":"shutdown_start","shutdown":1,"reason":"quit","targetSessionFile":null,"mode":"tui","isIdle":true}
+{"ms":4600,"pid":10573,"step":"shutdown_done","shutdown":1,"waited_ms":251}
