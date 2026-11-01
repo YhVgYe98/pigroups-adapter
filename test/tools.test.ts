@@ -114,3 +114,19 @@ test('pg_spawn creates a member, DMs the brief, and starts one pane with the chi
   assert.ok(brief.items[0].body.includes('implement Y'), brief.items[0].body);
   assert.equal(brief.items[0].sender_id, s.me.id, 'the brief comes from the spawning member');
 });
+
+// 概念稿 §5.1: deleting a member is how a stuck pane is stopped. The platform marks
+// it gone and tells its pi to exit; the shell the pane falls back to is still there,
+// so the adapter that spawned it has to close that pane.
+test('pg_terminate closes the pane of the child it spawned', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  const child = await s.loop.spawnMember({ name: 'runner', brief: 'implement Y' });
+  assert.deepEqual(s.herdr.closed, [], 'nothing may be closed while the child is alive');
+
+  const terminated = await s.loop.terminate(child.id);
+
+  assert.deepEqual(terminated, [child.id], 'the platform deleted exactly the child');
+  assert.deepEqual(s.herdr.closed, ['pane-1'], 'the pane of the terminated child must be closed');
+});

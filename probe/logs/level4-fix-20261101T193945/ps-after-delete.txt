@@ -1,0 +1,416 @@
+    PID    PPID     ELAPSED COMMAND
+      1       0    01:06:12 /usr/lib/systemd/systemd --switched-root --system --deserialize=53
+      2       0    01:06:12 [kthreadd]
+      3       2    01:06:12 [pool_workqueue_release]
+      4       2    01:06:12 [kworker/R-rcu_gp]
+      5       2    01:06:12 [kworker/R-sync_wq]
+      6       2    01:06:12 [kworker/R-kvfree_rcu_reclaim]
+      7       2    01:06:12 [kworker/R-slub_flushwq]
+      8       2    01:06:12 [kworker/R-netns]
+     11       2    01:06:12 [kworker/0:0H-kblockd]
+     14       2    01:06:12 [kworker/R-mm_percpu_wq]
+     15       2    01:06:12 [ksoftirqd/0]
+     16       2    01:06:12 [rcu_preempt]
+     17       2    01:06:12 [rcub/0]
+     18       2    01:06:12 [rcu_exp_par_gp_kthread_worker/0]
+     19       2    01:06:12 [rcu_exp_gp_kthread_worker]
+     20       2    01:06:12 [migration/0]
+     21       2    01:06:12 [kprobe-optimizer]
+     22       2    01:06:12 [idle_inject/0]
+     23       2    01:06:12 [cpuhp/0]
+     24       2    01:06:12 [cpuhp/1]
+     25       2    01:06:12 [idle_inject/1]
+     26       2    01:06:12 [migration/1]
+     27       2    01:06:12 [ksoftirqd/1]
+     29       2    01:06:12 [kworker/1:0H-kblockd]
+     30       2    01:06:12 [cpuhp/2]
+     31       2    01:06:12 [idle_inject/2]
+     32       2    01:06:12 [migration/2]
+     33       2    01:06:12 [ksoftirqd/2]
+     35       2    01:06:12 [kworker/2:0H-kblockd]
+     36       2    01:06:12 [cpuhp/3]
+     37       2    01:06:12 [idle_inject/3]
+     38       2    01:06:12 [migration/3]
+     39       2    01:06:12 [ksoftirqd/3]
+     41       2    01:06:12 [kworker/3:0H-kblockd]
+     42       2    01:06:12 [cpuhp/4]
+     43       2    01:06:12 [idle_inject/4]
+     44       2    01:06:12 [migration/4]
+     45       2    01:06:12 [ksoftirqd/4]
+     47       2    01:06:12 [kworker/4:0H-kblockd]
+     48       2    01:06:12 [cpuhp/5]
+     49       2    01:06:12 [idle_inject/5]
+     50       2    01:06:12 [migration/5]
+     51       2    01:06:12 [ksoftirqd/5]
+     53       2    01:06:12 [kworker/5:0H-kblockd]
+     54       2    01:06:12 [cpuhp/6]
+     55       2    01:06:12 [idle_inject/6]
+     56       2    01:06:12 [migration/6]
+     57       2    01:06:12 [ksoftirqd/6]
+     58       2    01:06:12 [kworker/6:0-cgroup_free]
+     59       2    01:06:12 [kworker/6:0H-kblockd]
+     60       2    01:06:12 [cpuhp/7]
+     61       2    01:06:12 [idle_inject/7]
+     62       2    01:06:12 [migration/7]
+     63       2    01:06:12 [ksoftirqd/7]
+     65       2    01:06:12 [kworker/7:0H-kblockd]
+     66       2    01:06:12 [cpuhp/8]
+     67       2    01:06:12 [idle_inject/8]
+     68       2    01:06:12 [migration/8]
+     69       2    01:06:12 [ksoftirqd/8]
+     71       2    01:06:12 [kworker/8:0H-kblockd]
+     72       2    01:06:12 [cpuhp/9]
+     73       2    01:06:12 [idle_inject/9]
+     74       2    01:06:12 [migration/9]
+     75       2    01:06:12 [ksoftirqd/9]
+     77       2    01:06:12 [kworker/9:0H-kblockd]
+     78       2    01:06:12 [cpuhp/10]
+     79       2    01:06:12 [idle_inject/10]
+     80       2    01:06:12 [migration/10]
+     81       2    01:06:12 [ksoftirqd/10]
+     83       2    01:06:12 [kworker/10:0H-kblockd]
+     84       2    01:06:12 [cpuhp/11]
+     85       2    01:06:12 [idle_inject/11]
+     86       2    01:06:12 [migration/11]
+     87       2    01:06:12 [ksoftirqd/11]
+     89       2    01:06:12 [kworker/11:0H-kblockd]
+     90       2    01:06:12 [cpuhp/12]
+     91       2    01:06:12 [idle_inject/12]
+     92       2    01:06:12 [migration/12]
+     93       2    01:06:12 [ksoftirqd/12]
+     95       2    01:06:12 [kworker/12:0H-kblockd]
+     96       2    01:06:12 [cpuhp/13]
+     97       2    01:06:12 [idle_inject/13]
+     98       2    01:06:12 [migration/13]
+     99       2    01:06:12 [ksoftirqd/13]
+    101       2    01:06:12 [kworker/13:0H-kblockd]
+    102       2    01:06:12 [cpuhp/14]
+    103       2    01:06:12 [idle_inject/14]
+    104       2    01:06:12 [migration/14]
+    105       2    01:06:12 [ksoftirqd/14]
+    107       2    01:06:12 [kworker/14:0H-kblockd]
+    108       2    01:06:12 [cpuhp/15]
+    109       2    01:06:12 [idle_inject/15]
+    110       2    01:06:12 [migration/15]
+    111       2    01:06:12 [ksoftirqd/15]
+    113       2    01:06:12 [kworker/15:0H-kblockd]
+    114       2    01:06:12 [kdevtmpfs]
+    115       2    01:06:12 [kworker/R-inet_frag_wq]
+    116       2    01:06:12 [rcu_tasks_kthread]
+    117       2    01:06:12 [rcu_tasks_rude_kthread]
+    118       2    01:06:12 [kauditd]
+    119       2    01:06:12 [khungtaskd]
+    120       2    01:06:12 [oom_reaper]
+    122       2    01:06:12 [kworker/R-writeback]
+    123       2    01:06:12 [kcompactd0]
+    124       2    01:06:12 [ksmd]
+    125       2    01:06:12 [khugepaged]
+    126       2    01:06:12 [kworker/R-kblockd]
+    127       2    01:06:12 [kworker/R-blkcg_punt_bio]
+    128       2    01:06:12 [kworker/R-kintegrityd]
+    129       2    01:06:12 [irq/9-acpi]
+    130       2    01:06:12 [kworker/8:1-mm_percpu_wq]
+    132       2    01:06:11 [kworker/R-tpm_dev_wq]
+    133       2    01:06:11 [kworker/R-ata_sff]
+    134       2    01:06:11 [kworker/R-edac-poller]
+    135       2    01:06:11 [kworker/R-devfreq_wq]
+    136       2    01:06:11 [watchdogd]
+    138       2    01:06:11 [kworker/R-quota_events_unbound]
+    141       2    01:06:11 [kworker/11:1-events]
+    142       2    01:06:11 [irq/30-AMD-Vi]
+    143       2    01:06:11 [kswapd0]
+    144       2    01:06:11 [kworker/R-kthrotld]
+    146       2    01:06:11 [kworker/R-acpi_thermal_pm]
+    148       2    01:06:11 [scsi_eh_0]
+    149       2    01:06:11 [kworker/R-scsi_tmf_0]
+    150       2    01:06:11 [scsi_eh_1]
+    151       2    01:06:11 [kworker/R-scsi_tmf_1]
+    152       2    01:06:11 [scsi_eh_2]
+    153       2    01:06:11 [kworker/R-scsi_tmf_2]
+    154       2    01:06:11 [scsi_eh_3]
+    155       2    01:06:11 [kworker/R-scsi_tmf_3]
+    156       2    01:06:11 [scsi_eh_4]
+    157       2    01:06:11 [kworker/R-scsi_tmf_4]
+    158       2    01:06:11 [scsi_eh_5]
+    159       2    01:06:11 [kworker/R-scsi_tmf_5]
+    161       2    01:06:11 [kworker/u64:4-events_unbound]
+    163       2    01:06:11 [kworker/u64:6-events_unbound]
+    171       2    01:06:11 [kworker/R-mld]
+    172       2    01:06:11 [kworker/R-ipv6_addrconf]
+    173       2    01:06:11 [kworker/R-kstrp]
+    175       2    01:06:11 [kworker/12:1-mm_percpu_wq]
+    177       2    01:06:11 [kworker/13:1-cgroup_free]
+    181       2    01:06:11 [kworker/R-zswap-shrink]
+    185       2    01:06:11 [irq/31-ACPI:Event]
+    186       2    01:06:11 [irq/32-ACPI:Event]
+    189       2    01:06:11 [kworker/2:2-cgroup_free]
+    191       2    01:06:11 [kworker/7:1-cgroup_free]
+    192       2    01:06:11 [kworker/10:1-mm_percpu_wq]
+    194       2    01:06:11 [kworker/14:1-mm_percpu_wq]
+    214       2    01:06:10 [kworker/R-vfio-irqfd-cleanup]
+    270       2    01:06:10 [kworker/8:2-events]
+    272       2    01:06:10 [kworker/R-nvme-wq]
+    273       2    01:06:10 [kworker/R-nvme-reset-wq]
+    274       2    01:06:10 [kworker/R-nvme-delete-wq]
+    275       2    01:06:10 [kworker/R-nvme-auth-wq]
+    281       2    01:06:10 [kworker/0:1H-kblockd]
+    282       2    01:06:10 [kworker/8:1H-kblockd]
+    284       2    01:06:10 [kworker/10:1H-kblockd]
+    286       2    01:06:10 [kworker/14:1H-kblockd]
+    290       2    01:06:10 [kworker/11:1H-kblockd]
+    292       2    01:06:09 [kworker/12:3-cgroup_free]
+    294       2    01:06:09 [kworker/2:1H-kblockd]
+    295       2    01:06:09 [jbd2/nvme0n1p2-8]
+    296       2    01:06:09 [kworker/R-ext4-rsv-conversion]
+    304       2    01:06:08 [kworker/R-amdgpu-reset-dev]
+    305       2    01:06:08 [kworker/R-ttm]
+    306       2    01:06:08 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    307       2    01:06:08 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    308       2    01:06:08 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    309       2    01:06:08 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    310       2    01:06:08 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    311       2    01:06:08 [kworker/R-dm_vblank_control_workqueue]
+    312       2    01:06:08 [kworker/R-hdmi_frl_status_polling_workque]
+    313       2    01:06:08 [card1-crtc0]
+    314       2    01:06:08 [card1-crtc1]
+    315       2    01:06:08 [card1-crtc2]
+    316       2    01:06:08 [card1-crtc3]
+    317       2    01:06:08 [kworker/R-gfx_0.0.0]
+    318       2    01:06:08 [kworker/R-gfx_0.1.0]
+    319       2    01:06:08 [kworker/R-comp_1.0.0]
+    320       2    01:06:08 [kworker/R-comp_1.1.0]
+    321       2    01:06:08 [kworker/R-comp_1.2.0]
+    322       2    01:06:08 [kworker/R-comp_1.3.0]
+    323       2    01:06:08 [kworker/R-comp_1.0.1]
+    324       2    01:06:08 [kworker/R-comp_1.1.1]
+    325       2    01:06:08 [kworker/R-comp_1.2.1]
+    326       2    01:06:08 [kworker/R-comp_1.3.1]
+    327       2    01:06:08 [kworker/R-sdma0]
+    328       2    01:06:08 [kworker/R-vcn_dec_0]
+    329       2    01:06:08 [kworker/R-vcn_enc_0.0]
+    330       2    01:06:08 [kworker/R-vcn_enc_0.1]
+    331       2    01:06:08 [kworker/R-jpeg_dec]
+    341       2    01:06:08 [kworker/1:1H-kblockd]
+    362       2    01:06:08 [kworker/9:1H-kblockd]
+    369       2    01:06:08 [kworker/5:1H-kblockd]
+    370       2    01:06:08 [kworker/13:1H-kblockd]
+    372       2    01:06:08 [kworker/7:1H-kblockd]
+    373       2    01:06:08 [kworker/15:1H-kblockd]
+    380       2    01:06:08 [psimon]
+    390       1    01:06:08 /usr/lib/systemd/systemd-journald
+    394       2    01:06:08 [kworker/3:1H-kblockd]
+    395       2    01:06:08 [kworker/6:1H-kblockd]
+    403       2    01:06:08 [kworker/12:1H-kblockd]
+    404       2    01:06:08 [kworker/4:1H-kblockd]
+    413       2    01:06:08 [kworker/5:2-cgroup_free]
+    422       1    01:06:08 /usr/lib/systemd/systemd-resolved
+    426       1    01:06:08 /usr/lib/systemd/systemd-udevd
+    427       1    01:06:08 /usr/lib/systemd/systemd-timesyncd
+    432       2    01:06:08 [psimon]
+    495       2    01:06:08 [kworker/14:2-mm_percpu_wq]
+    517       2    01:06:08 [kworker/11:2-cgroup_free]
+    594       2    01:06:08 [kworker/13:2-cgroup_free]
+    595       2    01:06:08 [nv_queue]
+    596       2    01:06:08 [nv_mem_pool_scrubber_queue]
+    597       2    01:06:08 [nv_mem_pool_scrubber_queue]
+    598       2    01:06:08 [nv_mem_pool_scrubber_queue]
+    599       2    01:06:08 [nv_queue]
+    601       2    01:06:08 [nv_open_q]
+    602       2    01:06:08 [irq/122-nvidia]
+    603       2    01:06:08 [irq/123-nvidia]
+    604       2    01:06:08 [irq/124-nvidia]
+    605       2    01:06:08 [irq/125-nvidia]
+    606       2    01:06:08 [irq/126-nvidia]
+    607       2    01:06:08 [irq/127-nvidia]
+    608       2    01:06:08 [irq/128-nvidia]
+    609       2    01:06:08 [irq/129-nvidia]
+    610       2    01:06:08 [nvidia]
+    611       2    01:06:08 [nv_queue]
+    719       2    01:06:07 [nvidia-modeset/kthread_q]
+    720       2    01:06:07 [nvidia-modeset/deferred_close_kthread_q]
+    753       2    01:06:07 [kworker/R-cfg80211]
+    754       2    01:06:07 [kworker/7:2-events]
+    761       1    01:06:06 /usr/bin/dbus-broker-launch --scope system --audit
+    762     761    01:06:06 dbus-broker --log 10 --controller 9 --machine-id 7cef3d619d5646059cabe2c2a8350af8 --max-bytes 536870912 --max-fds 4096 --max-matches 131072 --audit
+    764       1    01:06:06 /usr/bin/python /usr/bin/firewalld --nofork --nopid
+    765       1    01:06:06 /usr/bin/NetworkManager --no-daemon
+    766       1    01:06:06 /usr/lib/systemd/systemd-logind
+    767       1    01:06:06 /usr/lib/systemd/systemd-machined
+    768       1    01:06:06 /usr/bin/wpa_supplicant -u -s -O /run/wpa_supplicant
+    844       2    01:06:06 [kworker/15:2-cgroup_free]
+    851       1    01:06:06 /usr/bin/cupsd -l
+    852       1    01:06:06 /usr/bin/libvirtd --timeout 120
+    854       1    01:06:06 /home/natfrp/natfrp-service --daemon
+    855       1    01:06:06 sshd: /usr/bin/sshd -D [listener] 0 of 10-100 startups
+    867       1    01:06:06 /usr/lib/systemd/systemd --user
+    868       1    01:06:06 /usr/lib/systemd/systemd --user
+    869       1    01:06:06 /usr/lib/systemd/systemd --user
+    870       1    01:06:06 /usr/lib/systemd/systemd --user
+    871       1    01:06:06 /usr/bin/containerd
+    876     851    01:06:06 /usr/lib/cups/notifier/dbus dbus://
+    883     867    01:06:06 (sd-pam)
+    884     869    01:06:06 (sd-pam)
+    885     870    01:06:06 (sd-pam)
+    887       2    01:06:06 [irq/131-rtw89_pci]
+    888     868    01:06:06 (sd-pam)
+    939       2    01:06:06 [UVM global queue]
+    940       2    01:06:06 [UVM deferred release queue]
+    941       2    01:06:06 [UVM Tools Event Queue]
+    983       1    01:06:06 /usr/lib/polkit-1/polkitd --no-debug --log-level=notice
+   1019     867    01:06:06 /usr/bin/aria2c --conf-path=/home/yang/.config/aria2/aria2.conf --all-proxy=http://127.0.0.1:7890
+   1020     867    01:06:06 /home/yang/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 -I -c import os, re, sys os.environ.pop('PYTHONHOME', None) os.environ.pop('PYTHONPATH', None) sys.path.insert(0, '/home/yang/.hermes/hermes-agent') if sys.argv[1:2] == ['--print-runtime-command']: sys.dont_write_bytecode = True from hermes_constants import get_default_hermes_root os.environ['HERMES_HOME'] = os.environ.get('HERMES_HOME') or str(get_default_hermes_root()) if sys.argv[1:2] == ['--print-runtime-command']:     from pathlib import Path     from hermes_cli._launchers import print_runtime_command     print_runtime_command(Path('/home/yang/.hermes/hermes-agent'), sys.argv[2:])     sys.exit(0) import hermes_bootstrap if sys.argv[1:2] == ['--run-module']:     import runpy     if len(sys.argv) < 3: sys.exit('hermes: --run-module needs a module')     module = sys.argv.pop(2)     del sys.argv[1]     runpy.run_module(module, run_name='__main__', alter_sys=True)     sys.exit(0) from hermes_cli.main import main sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0]) sys.exit(main())  gateway run
+   1023     867    01:06:06 /usr/bin/syncthing serve --no-browser --no-restart
+   1024     868    01:06:06 mihomo -d /home/proxy-server/.config/mihomo/
+   1066    1023    01:06:06 /usr/bin/syncthing serve --no-browser --no-restart
+   1162       1    01:06:05 /usr/bin/plasmalogin
+   1164       1    01:06:05 /usr/lib/bluetooth/bluetoothd
+   1403       1    01:06:05 /usr/bin/dnsmasq --conf-file=/var/lib/libvirt/dnsmasq/default.conf --leasefile-ro --dhcp-script=/usr/lib/libvirt/libvirt_leaseshelper
+   1404    1403    01:06:05 /usr/bin/dnsmasq --conf-file=/var/lib/libvirt/dnsmasq/default.conf --leasefile-ro --dhcp-script=/usr/lib/libvirt/libvirt_leaseshelper
+   1483       1    01:06:04 /usr/lib/upowerd
+   1518       2    01:06:04 [krfcommd]
+   1541    1162    01:06:00 /usr/lib/plasmalogin-helper --socket /tmp/plasmalogin-auth-6850cd21-06b3-4fb0-a78b-86b4b4505c68 --id 1 --start /usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland --user yang
+   1545       1    01:06:00 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+   1546       1    01:06:00 /usr/bin/jellyfin --webdir=/usr/share/jellyfin/web --ffmpeg=/usr/lib/jellyfin-ffmpeg/ffmpeg
+   1561       1    01:06:00 /usr/bin/ksecretd --pam-login 8 9
+   1562    1541    01:06:00 /usr/bin/startplasma-wayland
+   1655     867    01:06:00 /usr/bin/dbus-broker-launch --scope user
+   1657    1655    01:06:00 dbus-broker --log 11 --controller 10 --machine-id 7cef3d619d5646059cabe2c2a8350af8 --max-bytes 100000000000000 --max-fds 25000000000000 --max-matches 5000000000
+   1701     867    01:06:00 /usr/bin/kwin_wayland_wrapper --xwayland
+   1715    1701    01:06:00 /usr/bin/kwin_wayland --wayland-fd 7 --socket wayland-1 --xwayland-fd 8 --xwayland-fd 9 --xwayland-display :0 --xwayland-initfd 11 --xwayland-init-display :1 --xwayland-xauthority /run/user/1000/xauth_CKeXAZ --xwayland
+   1719     867    01:06:00 /usr/bin/ksmserver
+   1723     867    01:06:00 /usr/bin/kded6
+   1750     867    01:06:00 /usr/bin/plasmashell --no-respawn
+   1782     869    01:06:00 catatonit -P
+   1872       2    01:06:00 [nvidia-drm/timeline-100]
+   1896     869    01:06:00 /usr/bin/conmon --api-version 1 -c 1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c -u 1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c -r /usr/bin/crun -b /home/ollama/.local/share/containers/storage/overlay-containers/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c/userdata -p /run/user/1003/containers/overlay-containers/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c/userdata/pidfile -n sillytavern --exit-dir /run/user/1003/libpod/tmp/exits --persist-dir /run/user/1003/libpod/tmp/persist/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c --full-attach -l journald --log-level warning --syslog --runtime-arg --log-format=json --runtime-arg --log --runtime-arg=/run/user/1003/containers/overlay-containers/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c/userdata/oci-log --conmon-pidfile /run/user/1003/containers/overlay-containers/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c/userdata/conmon.pid --exit-command /usr/bin/podman --exit-command-arg --root --exit-command-arg /home/ollama/.local/share/containers/storage --exit-command-arg --runroot --exit-command-arg /run/user/1003/containers --exit-command-arg --log-level --exit-command-arg warning --exit-command-arg --cgroup-manager --exit-command-arg systemd --exit-command-arg --tmpdir --exit-command-arg /run/user/1003/libpod/tmp --exit-command-arg --network-config-dir --exit-command-arg  --exit-command-arg --volumepath --exit-command-arg /home/ollama/.local/share/containers/storage/volumes --exit-command-arg --transient-store=false --exit-command-arg --hooks-dir --exit-command-arg /usr/share/containers/oci/hooks.d --exit-command-arg --runtime --exit-command-arg crun --exit-command-arg --storage-driver --exit-command-arg overlay --exit-command-arg --storage-opt --exit-command-arg overlay.mountopt=nodev --exit-command-arg --events-backend --exit-command-arg journald --exit-command-arg container --exit-command-arg cleanup --exit-command-arg --stopped-only --exit-command-arg --rm --exit-command-arg 1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c
+   1907    1896    01:06:00 tini -- ./docker-entrypoint.sh
+   1967    1907    01:06:00 node server.js --listen
+   1979       2    01:06:00 [nvidia-drm/timeline-10d]
+   1980     869    01:06:00 /usr/bin/dbus-broker-launch --scope user
+   1986    1980    01:06:00 dbus-broker --log 11 --controller 10 --machine-id 7cef3d619d5646059cabe2c2a8350af8 --max-bytes 100000000000000 --max-fds 25000000000000 --max-matches 5000000000
+   1997       2    01:06:00 [nvidia-drm/timeline-10e]
+   2000       2    01:06:00 [nvidia-drm/timeline-10f]
+   2039       2    01:06:00 [nvidia-drm/timeline-110]
+   2047       2    01:06:00 [nvidia-drm/timeline-111]
+   2057       2    01:06:00 [nvidia-drm/timeline-112]
+   2058       2    01:06:00 [nvidia-drm/timeline-113]
+   2059       2    01:06:00 [nvidia-drm/timeline-114]
+   2073       1    01:06:00 /usr/lib/power-profiles-daemon
+   2127       2    01:05:59 [nvidia-drm/timeline-139]
+   2128       2    01:05:59 [nvidia-drm/timeline-13a]
+   2138     867    01:05:59 /usr/bin/pipewire
+   2139     867    01:05:59 /usr/bin/wireplumber
+   2141    1715    01:05:59 /usr/lib/fcitx5-wayland-launcher --reopen
+   2147       2    01:05:59 [nvidia-drm/timeline-13b]
+   2148     867    01:05:59 /usr/bin/fcitx5
+   2160    1715    01:05:59 /usr/bin/Xwayland :0 -auth /run/user/1000/xauth_CKeXAZ -listenfd 8 -listenfd 9 -displayfd 150 -wm 152 -initfd 11 -rootless
+   2168     867    01:05:59 /usr/lib/kactivitymanagerd
+   2173       2    01:05:59 [nvidia-drm/timeline-13c]
+   2181     867    01:05:59 /usr/bin/gmenudbusmenuproxy
+   2182     867    01:05:59 /usr/bin/kaccess
+   2183     867    01:05:59 /usr/lib/polkit-kde-authentication-agent-1
+   2184     867    01:05:59 /usr/lib/org_kde_powerdevil
+   2185     867    01:05:59 /usr/bin/xembedsniproxy
+   2240       1    01:05:59 /usr/lib/udisks2/udisksd
+   2251     867    01:05:59 /usr/lib/at-spi-bus-launcher
+   2265    2251    01:05:59 /usr/bin/dbus-broker-launch --config-file=/usr/share/defaults/at-spi2/accessibility.conf --scope user
+   2267    2265    01:05:59 dbus-broker --log 10 --controller 9 --machine-id 7cef3d619d5646059cabe2c2a8350af8 --max-bytes 100000000000000 --max-fds 6400000 --max-matches 5000000000
+   2295     867    01:05:59 /usr/lib/dconf-service
+   2326     867    01:05:59 /usr/bin/pipewire-pulse
+   2336     867    01:05:59 /usr/lib/at-spi2-registryd --use-gnome-session
+   2366     867    01:05:59 /usr/bin/xsettingsd
+   2368       2    01:05:59 [nvidia-drm/timeline-149]
+   2376       2    01:05:59 [nvidia-drm/timeline-14c]
+   2400     867    01:05:58 /usr/bin/kdeconnectd
+   2508     867    01:05:58 /usr/lib/xdg-desktop-portal
+   2514     867    01:05:58 /usr/lib/geoclue-2.0/demos/agent
+   2517     867    01:05:58 /usr/lib/DiscoverNotifier --check-delay 20
+   2523     867    01:05:58 /usr/lib/kf6/baloo_file
+   2536     867    01:05:58 /usr/lib/xdg-permission-store
+   2546     867    01:05:58 /usr/lib/xdg-document-portal
+   2556    2546    01:05:58 fusermount3 -o rw,nosuid,nodev,fsname=portal,auto_unmount,subtype=portal -- /run/user/1000/doc
+   2559     867    01:05:58 /usr/lib/xdg-desktop-portal-gtk
+   2596     867    01:05:58 /usr/lib/xdg-desktop-portal-kde
+   2739       2    01:05:45 [kworker/10:3]
+   2751     867    01:05:39 /usr/bin/konsole
+   2763    2751    01:05:39 /usr/bin/zsh
+   2834     867    01:05:39 /usr/bin/zsh
+   2835     867    01:05:39 /usr/bin/zsh
+   2838     867    01:05:39 /usr/bin/zsh
+   2843    2838    01:05:39 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+   2879       2    01:05:39 [nvidia-drm/timeline-153]
+   2898       1    01:05:38 /usr/lib/accounts-daemon
+   2916     854    01:05:33 /home/natfrp/frpc -n --stdin_config 303 --watch 854 --report --traffic_int 1000
+   2917     854    01:05:33 /home/natfrp/frpc -n --stdin_config 311 --watch 854 --report --traffic_int 1000
+   2918     854    01:05:33 /home/natfrp/frpc -n --stdin_config 332 --watch 854 --report --traffic_int 1000
+   2957    2763    01:05:30 herdr
+   2959    2957    01:05:30 /usr/bin/herdr server
+   2977    2959    01:05:30 /usr/bin/zsh
+   3164     867    01:05:30 /usr/bin/zsh
+   3165     867    01:05:30 /usr/bin/zsh
+   3168     867    01:05:30 /usr/bin/zsh
+   3173    3168    01:05:30 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+   3326    2959    01:05:30 /usr/bin/zsh
+   3332     867    01:05:30 /usr/bin/zsh
+   3390     867    01:05:30 /usr/bin/zsh
+   3391     867    01:05:30 /usr/bin/zsh
+   3393    3332    01:05:30 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+   3429    3326    01:05:30 pi
+   3437    2959    01:05:30 /usr/bin/zsh
+   3443     867    01:05:30 /usr/bin/zsh
+   3501     867    01:05:30 /usr/bin/zsh
+   3502     867    01:05:30 /usr/bin/zsh
+   3504    3443    01:05:30 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+   3540    3437    01:05:30 pi
+   3720     867    01:05:26 /usr/bin/node /home/yang/.pi/agent/npm/node_modules/pi-straw-boss/dist/server/cli.mjs run --detached --by session "01a192d1-dc6f-7492-aae7-f54ef755f615" (01a192d1)
+   3779    3720    01:05:26 /home/yang/.pi/agent/npm/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2 --ping
+   3810    3429    01:05:26 /usr/bin/node --import file:///home/yang/.pi/agent/npm/node_modules/tsx/dist/loader.mjs /home/yang/.pi/agent/npm/node_modules/pi-intercom/broker/broker.ts
+   3821    3810    01:05:26 /home/yang/.pi/agent/npm/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2 --ping
+   7152     867       56:08 wl-copy
+   7526       2       54:38 [kworker/6:1-cgroup_free]
+   7753       2       54:07 [kworker/4:1-cgroup_free]
+   8162       2       52:03 [kworker/1:0-cgroup_free]
+   8393       2       51:57 [kworker/u64:7-events_unbound]
+   9075       2       51:01 [kworker/0:0-cgroup_free]
+  10255       2       49:47 [nvidia-drm/timeline-157]
+  10275       2       49:46 [kworker/15:0]
+  10279       2       49:45 [nvidia-drm/timeline-15d]
+  10282       2       49:45 [nvidia-drm/timeline-15f]
+  10366       2       49:28 [kworker/9:0-cgroup_free]
+  12404       2       46:22 [kworker/5:0-mm_percpu_wq]
+  13076       2       44:46 [kworker/u64:8-iou_exit]
+  19945       2       35:00 [kworker/2:1-mm_percpu_wq]
+  20219       2       33:27 [kworker/4:0-mm_percpu_wq]
+  20743       2       31:16 [kworker/u64:0-iou_exit]
+  21876       2       29:44 [kworker/u64:2-iou_exit]
+  25780       2       24:40 [kworker/0:1-events]
+  28092       2       21:17 [kworker/u65:1-rtw89_tx_wq]
+  31309       2       16:33 [kworker/u64:3-iou_exit]
+  31606       2       16:24 [kworker/3:1-events]
+  33503       2       14:30 [kworker/u64:10-events_unbound]
+  33504       2       14:30 [kworker/u64:11-events_unbound]
+  33813       2       14:20 [kworker/1:1-events]
+  35232       2       10:21 [kworker/u65:0-rtw89_tx_wq]
+  36436       2       08:39 [kworker/3:0]
+  38774       2       06:35 [kworker/9:2-mm_percpu_wq]
+  39632       2       05:02 [kworker/6:2-events]
+  40024       2       05:01 [kworker/u64:1-iou_exit]
+  40189       2       04:54 [kworker/u65:2-rtw89_tx_wq]
+  42073       2       04:05 [kworker/u64:5-iou_exit]
+  42434       2       04:00 [kworker/15:1-mm_percpu_wq]
+  42502       2       04:00 [kworker/u64:9-iou_exit]
+  43634     867       03:00 node src/main.ts
+  43748     867       02:52 node src/main.ts
+  44301       2       02:18 [kworker/u64:12]
+  44693       2       01:56 [kworker/7:0-mm_percpu_wq]
+  45320       2       01:25 [kworker/11:0-mm_percpu_wq]
+  46166       2       00:54 [kworker/13:0-mm_percpu_wq]
+  46281    3540       00:35 bash /tmp/pigroups-level4-fix-run.sh
+  46299   46281       00:35 node src/main.ts
+  46342    2959       00:35 /usr/bin/zsh
+  46368     867       00:35 /usr/bin/zsh
+  46422     867       00:35 /usr/bin/zsh
+  46423     867       00:35 /usr/bin/zsh
+  46425   46368       00:35 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+  46459   46342       00:35 pi
+  47234   46281       00:00 ps -eo pid,ppid,etime,args

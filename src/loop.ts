@@ -134,6 +134,12 @@ export class AdapterLoop {
   private readonly pending: PendingDelivery[] = [];
   private readonly queuedByJournal = new Map<string, number>();
   private readonly inspectWaiters = new Map<string, (result: InspectResult) => void>();
+  /**
+   * The pane each spawned child lives in. `terminate()` closes it after the platform
+   * has marked the subtree gone: a pi process can exit on `sys.terminated` and still
+   * leave its pane behind at a shell prompt (§5.3, 概念稿 §5.1).
+   */
+  private readonly panes = new Map<string, string>();
   /** Child-side edge-triggered attention state (§5.1): one at a time. */
   private attention: { state: AttentionState } | undefined;
   /** Sticky until a turn ends without a provider error. */
@@ -395,6 +401,7 @@ export class AdapterLoop {
       PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
     };
     const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd });
+    this.panes.set(id, pane);
     await this.herdr.waitReady(pane, SPAWN_READY_MS);
     return { id, name };
   }
@@ -434,7 +441,7 @@ export class AdapterLoop {
     return { owed: this.obligations.entries().map((entry) => entry.conv), nudges };
   }
 
-  /** `pg_terminate`: delete the subtree and surface it in telemetry on the immediate channel (§5.2). */
+  /** `pg_terminate`: delete the subtree, close the panes it had spawned, and surface it in telemetry (§5.2). */
   async terminate(member: string): Promise<string[]> {
     const known = this.telemetry.snapshot().find((entry) => entry.child === member);
     const { terminated } = await this.pg.deleteMember(member);
@@ -449,6 +456,14 @@ export class AdapterLoop {
         { child: id, name: id === member && known ? known.name : id, state: 'gone', since: now },
         now,
       );
+    }
+    // The delete is what stops the member; closing the pane is what removes the
+    // shell it leaves behind. Keep the mapping on failure so a retry can close it.
+    for (const id of terminated) {
+      const pane = this.panes.get(id);
+      if (pane === undefined) continue;
+      await this.herdr.close(pane);
+      this.panes.delete(id);
     }
     return terminated;
   }
