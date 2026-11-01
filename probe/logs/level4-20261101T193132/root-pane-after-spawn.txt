@@ -1,0 +1,6 @@
+(empty on purpose — the command wrote nothing)
+
+command: herdr agent read wE:pW --lines 120
+exit: 1
+stderr:
+{"error":{"code":"agent_not_idle","message":"cannot read 120 lines while wE:pW is working: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible"},"id":"cli:agent:read"}

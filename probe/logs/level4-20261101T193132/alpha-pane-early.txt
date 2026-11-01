@@ -1,0 +1,6 @@
+(empty on purpose — the command wrote nothing)
+
+command: herdr agent read wE:pX --lines 80
+exit: 1
+stderr (herdr prints API errors on stderr, so the redirect above captured nothing):
+{"error":{"code":"agent_not_idle","message":"cannot read 80 lines while wE:pX is working: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible"},"id":"cli:agent:read"}
