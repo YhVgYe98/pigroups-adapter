@@ -5,7 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,6 +31,61 @@ test('close() treats pane_not_found as a closed pane', async () => {
     );
     const herdr = new HerdrCli({ spawnCmd: 'pi', command });
     await assert.doesNotReject(herdr.close('wE:pX'), 'a pane that is already gone is a success');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('close() waits for the pane agent to exit before it runs pane close', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    // Two lists still show a working agent; the third is the shell herdr leaves after
+    // the agent exits (`agent` absent, `agent_status: unknown`). Every invocation is
+    // appended to `invocations`, so the test can see the order close() used.
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+printf '%s\n' "$*" >> "$DIR/invocations"
+case "$1 $2" in
+  "pane list")
+    n=$(cat "$DIR/lists" 2>/dev/null || echo 0)
+    if [ "$n" -lt 2 ]; then
+      echo $((n+1)) > "$DIR/lists"
+      printf '%s\n' '{"id":"cli:pane:list","result":{"panes":[{"pane_id":"wE:pX","agent":"pi","agent_status":"working"}]}}'
+    else
+      printf '%s\n' '{"id":"cli:pane:list","result":{"panes":[{"pane_id":"wE:pX","agent_status":"unknown"}]}}'
+    fi
+    ;;
+  "pane close")
+    printf '%s\n' '{"id":"cli:pane:close","result":{"ok":true}}'
+    ;;
+  *)
+    printf '%s\n' '{"error":{"code":"unexpected_command","message":"unexpected"},"id":"cli"}' >&2
+    exit 1
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    await herdr.close('wE:pX');
+
+    const calls = (await readFile(join(dir, 'invocations'), 'utf8')).trim().split('\n');
+    const closeAt = calls.indexOf('pane close wE:pX');
+    assert.ok(closeAt > 0, `pane close must happen after the wait, got ${JSON.stringify(calls)}`);
+    assert.equal(
+      calls.slice(0, closeAt).filter((call) => call === 'pane list').length,
+      3,
+      `the running agent must be polled until it exits, got ${JSON.stringify(calls)}`,
+    );
+    assert.equal(
+      calls.filter((call) => call === 'pane close wE:pX').length,
+      1,
+      'the pane is closed exactly once, after the agent is gone',
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

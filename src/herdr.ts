@@ -28,6 +28,14 @@ export interface HerdrCliOptions {
 /** `agent start` waits for the agent to become interactive. */
 const AGENT_START_TIMEOUT_MS = 120_000;
 const COMMAND_TIMEOUT_MS = 180_000;
+/**
+ * How long `close()` waits for the pane's agent to leave before it closes the pane.
+ * The child must consume `sys.terminated`, run its own shutdown handler and write its
+ * session file; closing the pane first cuts that off. The bound is the hard stop: a
+ * child that never exits loses its pane at the end of the wait.
+ */
+const PANE_AGENT_EXIT_TIMEOUT_MS = 5000;
+const PANE_AGENT_EXIT_POLL_MS = 200;
 
 export class HerdrCli implements Herdr {
   private readonly spawnCmd: string;
@@ -71,6 +79,10 @@ export class HerdrCli implements Herdr {
   }
 
   async close(pane: string): Promise<void> {
+    // The platform has already marked the member gone and sent `sys.terminated`. Give
+    // that pi time to consume it and finish its own shutdown before the hard close;
+    // otherwise the pane disappears under a session that is still writing its file.
+    await this.waitForAgentExit(pane);
     try {
       await this.run(['pane', 'close', pane]);
     } catch (err) {
@@ -80,6 +92,26 @@ export class HerdrCli implements Herdr {
       // error the caller retries forever (loop.ts §5.3).
       if (err instanceof HerdrCommandError && err.code === 'pane_not_found') return;
       throw err;
+    }
+  }
+
+  /**
+   * Poll `pane list` until the pane is gone or its agent has exited (herdr drops the
+   * `agent` key and reports `agent_status: unknown` once the process is gone). A list
+   * that fails is not a reason to wait: `close` is the hard stop the concept allows.
+   */
+  private async waitForAgentExit(pane: string): Promise<void> {
+    const deadline = Date.now() + PANE_AGENT_EXIT_TIMEOUT_MS;
+    for (;;) {
+      try {
+        if (!agentStillRunning(await this.run(['pane', 'list']), pane)) return;
+      } catch {
+        return;
+      }
+      if (Date.now() >= deadline) return;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, PANE_AGENT_EXIT_POLL_MS);
+      });
     }
   }
 
@@ -168,6 +200,20 @@ function parseEnvelope(stdout: string): Record<string, unknown> | null {
     }
   }
   return null;
+}
+
+/**
+ * Whether a `pane list` answer still shows this pane's agent running. A pane that is
+ * absent from the list is already gone, and an entry without `agent` (or with
+ * `agent_status: "unknown"`) is the shell herdr leaves after the agent exits.
+ */
+function agentStillRunning(envelope: Record<string, unknown> | null, pane: string): boolean {
+  const panes = envelope?.panes;
+  if (!Array.isArray(panes)) return false;
+  const entry = panes.find((item) => asRecord(item)?.pane_id === pane);
+  const record = asRecord(entry);
+  if (record === undefined) return false;
+  return record.agent !== undefined && record.agent_status !== 'unknown';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
