@@ -1,0 +1,8 @@
+[control] 2026-11-01T14:41:23.896Z tab wE:t14 pane wE:p26
+[control] 2026-11-01T14:41:27.829Z start argv: ["pi","-ne","-e","/home/yang/Documents/pigroups-adapter/src/extension.ts","--model","deepseek/deepseek-flash","--session-dir","/tmp/pgargs-ctrlsess.A7xFXs"]
+[control] 2026-11-01T14:41:27.831Z banner [Extensions]: [Extensions]   extension.ts   
+[control] 2026-11-01T14:41:29.335Z turn: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":334,"cwd":"/tmp/pgargs-ctrl.oswX70","focused":false,"foreground_
+[control] 2026-11-01T14:41:30.338Z control session: /tmp/pgargs-ctrlsess.A7xFXs/2026-11-01T14-41-24-091Z_01a1978e-da7b-75fa-a3fa-061b5237d8a8.jsonl
+[control] 2026-11-01T14:41:30.355Z control builtin tools: builtinTools=read,bash,edit,write
+[control] 2026-11-01T14:41:30.356Z control tool calls: toolCalls=(none)
+[control] 2026-11-01T14:41:30.399Z final panes: wD:p1E wE:p1 wE:p12 wE:p1J

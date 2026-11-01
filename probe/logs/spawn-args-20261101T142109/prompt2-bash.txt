@@ -1,0 +1,2 @@
+Use the bash tool to run exactly this command: touch /tmp/pgargs-scratch.AaKbIg/bash-ran
+then report the verbatim result. If you cannot run it, say exactly which tools you do have available and why the command cannot be run.

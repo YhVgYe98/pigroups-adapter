@@ -1,0 +1,14 @@
+== herdr pane process-info ==
+{"id":"cli:pane:process_info","result":{"process_info":{"foreground_process_group_id":191920,"foreground_processes":[{"argv":["pi"],"cmdline":"pi","cwd":"/tmp/pgargs-scratch.AaKbIg","name":"pi","pid":191920}],"pane_id":"wE:p1Y","shell_pid":191814},"type":"pane_process_info"}}
+== /proc/191920/cmdline (od -c) ==
+0000000   p   i  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+0000020  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0000220  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+0000236
+== /proc/191920/environ (PIGROUPS/HERDR) ==
+HERDR_PANE_ID=wE:p1Y
+PIGROUPS_ADAPTER_DIR=/tmp/pgargs-adir.kfAQXk
+PIGROUPS_SPAWN_CMD=pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts
+PIGROUPS_TOKEN=pgt_REDACTED
+PIGROUPS_URL=http://127.0.0.1:41777

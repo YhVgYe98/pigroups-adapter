@@ -1,0 +1,59 @@
+[spawn-args] 2026-11-01T14:23:04.468Z == 0. baseline ==
+[spawn-args] 2026-11-01T14:23:04.730Z commit 1d3e689 / pi 1.4.0 / herdr herdr 0.9.5
+[spawn-args] 2026-11-01T14:23:04.789Z expected default spawn: {  "entry": "/home/yang/Documents/pigroups-adapter/src/extension.ts",  "command": "pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts",  "argv": [    "pi",    "-e",    "/home/yang/Documents/pigroups-adapter/src/extension.ts"  ]}
+[spawn-args] 2026-11-01T14:23:04.805Z baseline panes: wD:p1E wE:p1 wE:p12 wE:p1J
+[spawn-args] 2026-11-01T14:23:04.821Z baseline tabs:  wD:tD wE:t1 wE:tT wE:tW
+[spawn-args] 2026-11-01T14:23:04.822Z == 1. throwaway platform (0.2.0, port 41777, data /tmp/pgargs-data.FzYFvt) ==
+[spawn-args] 2026-11-01T14:23:04.937Z platform pid 183413 healthy: {"status":"ok","version":"0.2.0","uptime_ms":50,"server_version":"0.2.0"}
+[spawn-args] 2026-11-01T14:23:04.975Z root member m_4dcf8c
+[spawn-args] 2026-11-01T14:23:04.996Z == 2. probe tab and root pi (root isolated with -ne -e, allowed) ==
+[spawn-args] 2026-11-01T14:23:05.016Z probe tab wE:tY, root pane wE:p1W (not focused)
+[spawn-args] 2026-11-01T14:23:08.951Z herdr's own reply for the root (it reports the launch argv): 
+[spawn-args] 2026-11-01T14:23:08.953Z root idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgargs-scratch.AaKbIg","focused":false,"foreground_cwd":"/tmp/pgargs-sc
+[spawn-args] 2026-11-01T14:23:08.983Z root pid 183603; environ:
+[spawn-args] 2026-11-01T14:23:08.984Z root has no PIGROUPS_SPAWN_CMD → resolveSpawnCmd() fell through to the default
+[spawn-args] 2026-11-01T14:23:08.999Z banner watcher pid 183825, known panes: wD:p1E wE:p1 wE:p12 wE:p1J wE:p1W 
+[spawn-args] 2026-11-01T14:23:08.999Z == 3. CASE 1: pg_spawn with only name and brief ==
+[spawn-args] 2026-11-01T14:23:09.002Z prompt(root, spawn 1): Call the pg_spawn tool exactly once with exactly two parameters: name="probe-one" and brief="You are probe-one. Do exactly two things, then stop. (1) Call the read tool once on /home/yang/Documents/pigroups-adapter/package.json. (2) Call the pg_say tool once with to=g:m_4dcf8c and text=probe-one: read the manifest. Use no other tool, and do not use intercom." Do not pass cwd, args, or any other parameter. Then stop.
+[spawn-args] 2026-11-01T14:25:25.390Z spawn-1 turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":278,"cwd":"/tmp/pgargs-scratch.AaKbIg","focused":false,"foreground_cwd":"/tmp/pgargs-scratch.AaKbIg","in
+[spawn-args] 2026-11-01T14:25:25.391Z waiting for the platform tree to show probe-one
+[spawn-args] 2026-11-01T14:25:25.412Z probe-one member m_6fa90a
+[spawn-args] 2026-11-01T14:25:25.429Z probe-one pane wE:p1X
+[spawn-args] 2026-11-01T14:25:25.448Z probe-one session (herdr's agent_session for the pane): /home/yang/.pi/agent/sessions/--tmp-pgargs-scratch.AaKbIg--/2026-11-01T14-23-10-718Z_01a1977e-2b7e-73af-b39c-66618c4f58af.jsonl
+[spawn-args] 2026-11-01T14:25:25.465Z probe-one pi pid 184050
+[spawn-args] 2026-11-01T14:25:25.472Z waiting for probe-one to call pg_say
+[spawn-args] 2026-11-01T14:25:25.489Z probe-one facts:
+[spawn-args] 2026-11-01T14:25:25.496Z human view of g:m_4dcf8c:
+[spawn-args] 2026-11-01T14:25:25.515Z probe-one pane tail: ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── /tmp/pgargs-scratch.AaKbIg ↑40k ↓568 R25k CH99.2% $0.013 1.8%/1.0M (auto)        
+[spawn-args] 2026-11-01T14:25:25.515Z == 4. CASE 2: pg_spawn with args ["--tools","read"] ==
+[spawn-args] 2026-11-01T14:25:25.517Z prompt(root, spawn 2): Call the pg_spawn tool exactly once with exactly three parameters: name="probe-two", args=["--tools", "read"], and brief="You are probe-two. Wait for a follow-up instruction, then answer it briefly and exactly." Do not pass cwd or any other parameter. Then stop.
+[spawn-args] 2026-11-01T14:27:49.309Z spawn-2 turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":294,"cwd":"/tmp/pgargs-scratch.AaKbIg","focused":true,"foreground_cwd":"/tmp/pgargs-scratch.AaKbIg","int
+[spawn-args] 2026-11-01T14:27:49.329Z probe-two member m_00acf7
+[spawn-args] 2026-11-01T14:27:49.347Z probe-two pane wE:p1Y
+[spawn-args] 2026-11-01T14:27:49.365Z probe-two session: /home/yang/.pi/agent/sessions/--tmp-pgargs-scratch.AaKbIg--/2026-11-01T14-25-27-124Z_01a19780-4053-75cb-b262-f69a22167008.jsonl
+[spawn-args] 2026-11-01T14:27:49.382Z probe-two pi pid 191920
+[spawn-args] 2026-11-01T14:27:49.386Z probe-two idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"path","source":"herdr:pi","value":"/home/yang/.pi/agent/sessions/--
+[spawn-args] 2026-11-01T14:27:49.387Z prompt(probe-two): Use the bash tool to run exactly this command: touch /tmp/pgargs-scratch.AaKbIg/bash-ran
+then report the verbatim result. If you cannot run it, say exactly which tools you do have available and why the command cannot be run.
+[spawn-args] 2026-11-01T14:27:51.592Z probe-two bash turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_session":{"agent":"pi","kind":"path","source":"herdr:pi","value":"/home/yang/.pi/agent/sessions/--tmp-pgargs-scratch.AaKbIg--/2026-11-01
+[spawn-args] 2026-11-01T14:27:52.610Z probe-two facts:
+[spawn-args] 2026-11-01T14:27:52.611Z bash-ran absent: the command did not run
+[spawn-args] 2026-11-01T14:27:52.612Z == 5. control: the same banner with -ne (A/B for the extension list) ==
+[spawn-args] 2026-11-01T14:27:56.547Z control argv per herdr: 
+[spawn-args] 2026-11-01T14:27:57.551Z control banner:
+[spawn-args] 2026-11-01T14:27:57.552Z == 6. herdr's reply for probe-one's own agent start is not available ==
+[spawn-args] 2026-11-01T14:27:57.552Z the adapter discards the agent.start reply; the child's launch line is evidenced by /proc environ + banner + control
+[spawn-args] 2026-11-01T14:27:57.553Z == 7. done; cleanup follows ==
+[spawn-args] 2026-11-01T14:27:57.553Z == cleanup ==
+[spawn-args] 2026-11-01T14:27:57.754Z banner watcher stopped
+[spawn-args] 2026-11-01T14:27:57.778Z closed pane wE:p1X (exit 0)
+[spawn-args] 2026-11-01T14:27:57.803Z closed pane wE:p1Y (exit 0)
+[spawn-args] 2026-11-01T14:27:57.829Z closed pane wE:p1Z (exit 0)
+[spawn-args] 2026-11-01T14:27:57.854Z closed pane wE:p1W (exit 0)
+[spawn-args] 2026-11-01T14:27:57.855Z closed tab wE:tZ (exit 1)
+[spawn-args] 2026-11-01T14:27:57.856Z closed tab wE:tY (exit 1)
+[spawn-args] 2026-11-01T14:27:57.863Z platform 183413 stopped
+[spawn-args] 2026-11-01T14:27:57.884Z new panes vs baseline after cleanup: ' '
+[spawn-args] 2026-11-01T14:27:57.919Z platform port 41777 closed
+[spawn-args] 2026-11-01T14:27:57.921Z removed /home/yang/.pi/agent/sessions/--tmp-pgargs-scratch.AaKbIg-- (copied to /home/yang/Documents/pigroups-adapter/probe/logs/spawn-args-20261101T142109/children-session-dir)
+[spawn-args] 2026-11-01T14:27:57.922Z driver exit 0

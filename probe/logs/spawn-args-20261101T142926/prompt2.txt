@@ -1,0 +1,1 @@
+Call the pg_spawn tool exactly once with exactly three parameters: name="probe-two", args=["--tools", "read"], and brief="You are probe-two. Wait for a follow-up instruction, then answer it briefly and exactly." Do not pass cwd or any other parameter. Then stop.

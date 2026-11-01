@@ -180,6 +180,42 @@ node probe/paneclose-analyze.mjs probe/logs/paneclose-20261101T210306-midtool
 > pi 会把自己的 argv 重写成 `pi`，所以 `ps`/`pgrep -f` 认不出它，探针用
 > `herdr pane process-info` 的 pid 加 `/proc/<pid>/environ` 的 `HERDR_PANE_ID` 认。
 
+## `pg_spawn` 的 `args` 透传：真机验证（0.4.0）
+
+`1d3e689` 之后 `pg_spawn` 不再镜像 pi 的旗标，只把调用方的 `args` 原样接在
+`pi -e <本扩展绝对路径>` 后面。这件事只能在真机上验：启动行、旗标生效、继承。
+
+每次运行一个目录（`probe/logs/spawn-args-<时间戳>/`），`report.md` 是结论与原始证据：
+
+| 目录 | 内容 |
+|---|---|
+| `20261101T142109`（run A） | 两 case + `-ne` 对照 banner；带 `--tools read` 子成员活着时的 pane 回显；子成员启动 banner 的 `[Extensions]` 全表 |
+| `20261101T142926`（run B，主记录） | 两个 case 的启动行都从 pane 回滚里取到；root transcript 里的 `pg_spawn` 实参；`-ne` 对照的内置工具表；`waitReady` 误报的复现 |
+
+```bash
+bash probe/logs/spawn-args-20261101T142926/driver.sh        # 完整两 case（约 5 分钟）
+bash probe/logs/spawn-args-20261101T142926/ready-probe.sh   # 只复现 readiness 误报
+bash probe/logs/spawn-args-20261101T142926/control-probe.sh # 只做 -ne 的 A/B
+```
+
+看什么：
+
+- **启动行**：herdr 把命令打进 pane 的 shell，shell 会回显。子 pi 退出、终端恢复普通屏之后
+  `herdr pane read <pane> --source recent-unwrapped --lines 400` 里第一行就是
+  `pi -e …/src/extension.ts`（case 2 后面多一段 `--tools read`）。**不要**指望
+  `/proc/<pid>/cmdline` 或 `herdr pane process-info`：pi 把 `process.title` 改成 `pi`，
+  那里只剩 `["pi"]`。`herdr agent start` 的返回里有 `argv`，但适配器把它丢掉了。
+- **`-ne` 有没有生效**：看子成员启动 banner 的 `[Extensions]`，以及会话 system prompt 里的
+  内置工具表。`-ne` 只关"发现"，显式 `-e` 仍加载：对照的 banner 只有 `extension.ts`、工具表
+  只有 `read,bash,edit,write`；不隔离的子成员是 11 项扩展、15 项工具。`[Skills]` 两种都列全，
+  不能拿来当 `-ne` 的证据。
+- **`args` 有没有生效**：`--tools read` 的子成员工具表只剩 `read`，问它跑 `touch`，它自己的
+  拒绝原文 + `toolCalls=(none)` + 落盘标记不存在，三样都在。
+- **已知坑**：`pg_spawn` 会返回 `timed out waiting for agent status` —— 这是
+  `waitReady()` 只等 `--until idle` 而 pi 跑完一轮后是 `done` 的既有 bug（run B §5.1），
+  不是 spawn 失败；子成员照常工作。`--tools` 也会把适配器自己的 `pg_*` 工具一起挡掉，
+  于是子成员无法 `pg_say`，欠账提醒会一直催。
+
 ## 日志格式
 
 `$PROBE_LOG` 是 JSONL，每行一个对象，两个公共字段在前：

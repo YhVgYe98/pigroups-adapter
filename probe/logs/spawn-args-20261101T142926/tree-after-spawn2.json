@@ -1,0 +1,1 @@
+{"nodes":[{"id":"m_a95aa7","name":"root","parent_id":null,"child_count":2,"last_seen_at":1793543686983},{"id":"m_303c16","name":"probe-one","parent_id":"m_a95aa7","child_count":0,"last_seen_at":1793543556191},{"id":"m_5572fc","name":"probe-two","parent_id":"m_a95aa7","child_count":0,"last_seen_at":1793543683999}],"server_version":"0.2.0"}

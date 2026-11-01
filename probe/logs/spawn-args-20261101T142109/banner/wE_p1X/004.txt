@@ -1,0 +1,21 @@
+/council, /gather-context-and-clarify, /parallel-cleanup, /parallel-research, /parallel-review, /review-loop
+
+[Extensions]
+  @juicesharp/rpiv-ask-user-question, @juicesharp/rpiv-todo, @quintinshaw/pi-dynamic-workflows:workflow.ts, extension.ts,
+herdr-agent-state.ts, pi-intercom, pi-straw-boss:src, pi-straw-boss:src/balance.ts, pi-straw-boss:src/blocked.ts, pi-subagents:bundle,
+pi-web-access:dist
+
+
+
+ [pigroups]
+
+ [dm:m_4dcf8c_m_6fa90a#1] root: You are probe-one. Do exactly two things, then stop. (1) Call the read tool once on
+ /home/yang/Documents/pigroups-adapter/package.json. (2) Call the pg_say tool once with to=g:m_4dcf8c and text=probe-one: read the
+ manifest. Use no other tool, and do not use intercom.
+
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pgargs-scratch.AaKbIg
+1.2%/1.0M (auto)                                                                                          (deepseek) deepseek-flash • max

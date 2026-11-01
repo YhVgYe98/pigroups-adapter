@@ -1,0 +1,12 @@
+adapter commit: 1d3e689523d585a7788cc40dfb391d0e4f439b51
+1dc103f58a7cc90b6ee9a7382695f5cdbb889023c5741bdf120cc58b3de723d3  /home/yang/Documents/pigroups-adapter/src/extension.ts
+36285d3b0daac805f56d7f815f58717be80a5cad7e21c1d3807f6fdc1c4a8eaf  /home/yang/Documents/pigroups-adapter/src/command.ts
+7a82f592992e214c9abe4758a1e913276031271cb251c7d2b2c087b860f930fb  /home/yang/Documents/pigroups-adapter/src/herdr.ts
+adapter status:
+?? probe/logs/release-0.4.0-20261101T220311/
+?? probe/logs/spawn-args-20261101T142109/
+?? probe/logs/spawn-args-20261101T142926/
+platform package version: 0.2.0
+pi: 1.4.0
+herdr: herdr 0.9.5
+node: v26.12.1

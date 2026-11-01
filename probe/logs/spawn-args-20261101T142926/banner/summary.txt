@@ -1,0 +1,3 @@
+pane=wE:p22 captures=5 bannerCapture=5 dir=/home/yang/Documents/pigroups-adapter/probe/logs/spawn-args-20261101T142926/banner/wE_p22
+pane=wE:p23 captures=92 bannerCapture=MISSED dir=/home/yang/Documents/pigroups-adapter/probe/logs/spawn-args-20261101T142926/banner/wE_p23
+pane=wE:p24 captures=3 bannerCapture=3 dir=/home/yang/Documents/pigroups-adapter/probe/logs/spawn-args-20261101T142926/banner/wE_p24

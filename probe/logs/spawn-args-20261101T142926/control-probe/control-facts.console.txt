@@ -1,0 +1,12 @@
+file=/home/yang/Documents/pigroups-adapter/probe/logs/spawn-args-20261101T142926/control-probe/control-session.jsonl
+lines=6 bad=0 endsWithNewline=true
+session cwd=/tmp/pgargs-ctrl.oswX70 id=01a1978e-da7b-75fa-a3fa-061b5237d8a8
+model=deepseek/deepseek-flash thinking=max
+sectionKeys=preamble,tools,rules,docs,skills,cwd
+builtinTools=read,bash,edit,write
+skills=council-mode,pi-subagents,pi-intercom,workflow-authoring,workflow-patterns
+toolCalls=(none)
+toolResults=(none)
+assistantTexts=1
+  said 2026-11-01T14:41:28.957Z: ok
+last=message role=assistant stopReason=stop

@@ -1,0 +1,9 @@
+[ready] 2026-11-01T14:40:49.110Z tab wE:t13 pane wE:p25
+[ready] 2026-11-01T14:40:53.043Z start argv: ["pi","-ne","-e","/home/yang/Documents/pigroups-adapter/src/extension.ts","--model","deepseek/deepseek-flash","--session-dir","/tmp/pgargs-readysess.ZjqPJS"]
+[ready] 2026-11-01T14:40:53.044Z before any turn, --until idle: exit=0 {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgargs-ready.ZRQiEr","focused":false,"foreground_cwd":"/tmp/pgargs-ready.ZRQiEr","interactive_ready":true,"name
+[ready] 2026-11-01T14:40:54.850Z prompt done: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":331,"cwd":"/tmp/pgargs-ready.ZRQiEr","focused":false,"foreground_cwd":"/tmp/pgargs-ready.ZRQiEr","intera
+[ready] 2026-11-01T14:40:55.868Z status after one turn: done (interactive_ready=undefined)
+[ready] 2026-11-01T14:41:03.877Z settled as done, --until idle, 8 s: exit=1 {"error":{"code":"timeout","message":"timed out waiting for agent status"},"id":"cli:agent:wait"}
+[ready] 2026-11-01T14:41:03.879Z settled as done, --until done, 8 s: exit=0 {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":331,"cwd":"/tmp/pgargs-ready.ZRQiEr","focused":false,"foreground_cwd":"/tmp/pgargs-ready.ZRQiEr","interact
+[ready] 2026-11-01T14:41:03.880Z settled as done, --until idle --until done, 8 s: exit=0 {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":331,"cwd":"/tmp/pgargs-ready.ZRQiEr","focused":false,"foreground_cwd":"/tmp/pgargs-ready.ZRQiEr","interact
+[ready] 2026-11-01T14:41:03.922Z final panes: wD:p1E wE:p1 wE:p12 wE:p1J

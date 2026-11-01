@@ -1,0 +1,3 @@
+pi -ne -e /home/yang/Documents/pigroups-adapter/src/extension.ts --model deepseek/deepseek-flash --session-dir /tmp/pgargsB-ctrlsess.VNamQx
+> pi -ne -e /home/yang/Documents/pigroups-adapter/src/extension.ts --model deepseek/deepseek-flash --session-dir /tmp/pgargsB-ctrlsess.VNam
+Qx

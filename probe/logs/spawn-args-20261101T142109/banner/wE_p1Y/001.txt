@@ -1,0 +1,2 @@
+pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts --tools read
+> pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts --tools read

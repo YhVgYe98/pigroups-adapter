@@ -1,0 +1,21 @@
+== herdr pane process-info (argv as herdr reads it from /proc) ==
+{"id":"cli:pane:process_info","result":{"process_info":{"foreground_process_group_id":184050,"foreground_processes":[{"argv":["pi"],"cmdline":"pi","cwd":"/tmp/pgargs-scratch.AaKbIg","name":"pi","pid":184050}],"pane_id":"wE:p1X","shell_pid":183934},"type":"pane_process_info"}}
+== /proc/184050/cmdline (od -c) ==
+0000000   p   i  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+0000020  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0000220  \0
+0000221
+== /proc/184050/cmdline as text ==
+pi                                                                                                                                               
+== /proc/184050/environ (PIGROUPS/HERDR) ==
+HERDR_PANE_ID=wE:p1X
+PIGROUPS_ADAPTER_DIR=/tmp/pgargs-adir.kfAQXk
+PIGROUPS_SPAWN_CMD=pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts
+PIGROUPS_TOKEN=pgt_REDACTED
+PIGROUPS_URL=http://127.0.0.1:41777
+== process chain ==
+    PID    PPID COMMAND
+ 184050  183934 pi
+    PID    PPID COMMAND
+ 183934    2959 /usr/bin/zsh

@@ -1,0 +1,9 @@
+{
+  "entry": "/home/yang/Documents/pigroups-adapter/src/extension.ts",
+  "command": "pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts",
+  "argv": [
+    "pi",
+    "-e",
+    "/home/yang/Documents/pigroups-adapter/src/extension.ts"
+  ]
+}

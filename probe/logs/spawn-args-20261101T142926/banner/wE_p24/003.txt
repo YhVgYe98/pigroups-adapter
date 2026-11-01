@@ -1,0 +1,45 @@
+▀▀█  v1.4.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Skills]
+  council-mode, pi-intercom, pi-subagents, workflow-authoring, workflow-patterns
+
+[Prompts]
+  /council, /gather-context-and-clarify, /parallel-cleanup, /parallel-research, /parallel-review, /review-loop
+
+[Extensions]
+  extension.ts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pgargsB-scratch.uOTfI0
+0.0%/1.0M (auto)                                                                                            (deepseek) deepseek-flash • max

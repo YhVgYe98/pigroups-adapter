@@ -1,0 +1,1 @@
+{"id":"cli:pane:process_info","result":{"process_info":{"foreground_process_group_id":191920,"foreground_processes":[{"argv":["pi"],"cmdline":"pi","cwd":"/tmp/pgargs-scratch.AaKbIg","name":"pi","pid":191920}],"pane_id":"wE:p1Y","shell_pid":191814},"type":"pane_process_info"}}

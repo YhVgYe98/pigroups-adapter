@@ -1,6 +1,6 @@
 # 交接文档
 
-> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12。**第六轮同日：修 A–D（§13），并把 A 放到真机上复跑四轮——子成员能在 5 s 内退出时成立，卡在长工具里时 `pane close` 仍会切掉活着的 agent（§3.7）。适配器单独发 `v0.2.1`，平台仍是 `0.2.0`（§8）。**第七轮同日：修 E–F（§14），把“先切断正在跑的那一轮，再收尾”写进 `sys.terminated`，并让强制关 pane 不再伪装成干净关闭；上一轮唯一失败的 `bash sleep 40` 真机复跑现在 3/3 PASS，5 s 硬上限不再是常态路径，但仍是兜底（§3.8）。适配器单独发 `v0.3.0`，平台仍是 `0.2.0`（§8）。**第八轮同日：spawn 默认改成自加载本扩展（`pi -ne -e <自身绝对路径>`），启动时对平台 major.minor 只 warn 不拒绝，适配器成为带 `pi` manifest 的包；版本 `0.4.0+platform.0.2.0`（metadata 只记录测试对象，不参与判定）。适配器单独发 `v0.4.0`，平台仍是 `0.2.0`（§8）。**第九轮同日：把 spawn 默认纠回正常 pi（`pi -e <自身绝对路径>`，去掉 `-ne`）。`pg_spawn` 先试过镜像 model/thinking/tools/exclude_tools/extensions/skills/prompt_templates，随后按老板的意见整组删掉，只留原始 `args` 透穿——不知道旗标就读 `pi --help`；适配器 103/103，版本仍是 `0.4.0+platform.0.2.0`。**）
+> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12。**第六轮同日：修 A–D（§13），并把 A 放到真机上复跑四轮——子成员能在 5 s 内退出时成立，卡在长工具里时 `pane close` 仍会切掉活着的 agent（§3.7）。适配器单独发 `v0.2.1`，平台仍是 `0.2.0`（§8）。**第七轮同日：修 E–F（§14），把“先切断正在跑的那一轮，再收尾”写进 `sys.terminated`，并让强制关 pane 不再伪装成干净关闭；上一轮唯一失败的 `bash sleep 40` 真机复跑现在 3/3 PASS，5 s 硬上限不再是常态路径，但仍是兜底（§3.8）。适配器单独发 `v0.3.0`，平台仍是 `0.2.0`（§8）。**第八轮同日：spawn 默认改成自加载本扩展（`pi -ne -e <自身绝对路径>`），启动时对平台 major.minor 只 warn 不拒绝，适配器成为带 `pi` manifest 的包；版本 `0.4.0+platform.0.2.0`（metadata 只记录测试对象，不参与判定）。适配器单独发 `v0.4.0`，平台仍是 `0.2.0`（§8）。**第九轮同日：把 spawn 默认纠回正常 pi（`pi -e <自身绝对路径>`，去掉 `-ne`）。`pg_spawn` 先试过镜像 model/thinking/tools/exclude_tools/extensions/skills/prompt_templates，随后按老板的意见整组删掉，只留原始 `args` 透穿——不知道旗标就读 `pi --help`；适配器 103/103，版本仍是 `0.4.0+platform.0.2.0`。**第十轮同日：`args` 透传在真机上验过——只给 name+brief 的子成员是正常 pi（`pi -e <本扩展>`，无 `-ne`），`args:["--tools","read"]` 真的到 pi（内置工具只剩 `read`，它自己说跑不了 bash），两个 case 都 PASS；附带复现了 `waitReady()` 只等 `idle`、对 `done` 永远超时的既有 bug（§15）。**）
 >
 > 两个人（或一个人隔几天回来）之间交接用。
 > 面向：接手「把 PiGroups 在 herdr + pi 上真机跑起来」这件事的人。
@@ -573,6 +573,7 @@ close 等到了正常退出，所以按 F 的语义 `pane_close_forced` 为空�
 | pane 关闭与子成员自己的 `sys.terminated` 退出竞争 | **已修，但不是“已关”。** 根因不在 close 的等待（`7ae1adc`）而在 `discardAndShutdown()`：它只丢 journal / 停循环 / `shutdown()`，从不 abort 正在跑的那一轮，而 pi 的 shutdown 会等工具，于是父进程的 5 s 上限先到。`25b8c1b` 让 `sys.terminated` 先按 `pg.abort` 同一条 `ABORT_IDLE_TIMEOUT_MS = 3000` 切断（同一 `cutTurn()`，没有第二个数字），再丢 journal、停循环、shutdown；abort 期间不投递。`Herdr.close()` 现在返回 `{forced}`，到点 agent 仍在就报 `forced: true`，`pg_terminate` 列进 `pane_close_forced`，不再伪装成 `pane_close_failed: []`。真机（§3.8）：idle 406 ms / midturn 404 ms / `bash sleep 40` **204 ms**，均 PASS，且 close 前 pi 已退出、`pane list` 已看不到 agent；上一轮 FAIL 的 5031 ms 不再重现。**仍不覆盖**：① 一个忽略 abort signal 的工具——`abort()` 是协作式的，3 s 后放弃，pane 仍只能在 5 s 硬上限被切，只是现在**会报** `pane_close_forced`；② `herdr pane list` 读失败——`close()` 观察不到活 agent，报 `forced: false`，这是“未知”不是干净退出；③ pane 映射仍在内存里（父适配器重启就丢，孙子 pane 本进程没有映射，见本表 `pg_terminate` 关 pane 那一行）；④ 祖先删除路径（settle/poll 复核）遇到强制关只打 warn，没有面向调用者的答案 |
 | 名册读的三条旧洞（第五轮留档：失败无退避、`ROSTER_TIMEOUT_MS` 只是 race 不是取消、启动/`tick()` 不剪） | **已修（`712db53` + `6ce2789`）**：失败或答案不可信时保留上一份好快照、5 s 后重试；超时用 `withAbort()` 真的 `abort` 请求；启动在 `ready` 前剪一次。**仍漏**：退避固定 5 s，不随失败次数增长；半截响应只能靠“名册必须含自己”整次作废 |
 | `pg_spawn` 的 `args` 不消毒 | **有意的取舍**。调用方可以传 `-p`、`--` 等改变子进程启动方式的旗标，适配器不拦也不改写——透穿就是契约（§2.3）。代价是上层模型传错旗标时子成员可能起不来或进入非交互模式；错误由子进程自己的输出暴露，适配器不做预检，也不维护会过期的旗标表（`pi --help` 才是手册） |
+| `pg_spawn` 的 readiness 等待等不到 `done` | **真机已复现，未修**。`HerdrCli.waitReady()` 只发 `herdr agent wait --until idle`，而 pi 跑完第一轮后 herdr 记的是 `agent_status:"done"`——子成员一切正常，`pg_spawn` 也会走满 `SPAWN_READY_MS` 并把 `timed out waiting for agent status` 当错误返回给调用方（§15，`probe/logs/spawn-args-20261101T142926/ready-probe/`）。herdr 支持重复 `--until`：`--until idle --until done` 立即返回。修它是行为改动 + 一条测试，留给下一轮 |
 | 手动起的根继承用户的全局 pi 扩展 | **不再是产品问题**：0.4.0 起子成员和手动起的根一样，都是正常 pi，不剥离扩展（§2.3）。第一次第 4 级 run 里 `pi-intercom` 把消息转进主会话、`pi-straw-boss` 重排 tab，是探针环境噪声，操作者已禁用那个扩展；不要为它重新加 `-ne`。探针若仍要隔离，按探针纪律显式加 `-ne`，产品默认不这么做 |
 | 消息与 inbox 都没有清理策略 | 已知，无上限增长。规模上来再定 |
 | 催办三级的阈值（5 分钟窗口 / 3 次上限 / 30 分钟持续） | 全是拍的数字。第 4 级看到了“3 次后 blocked”真的发生，但没有负载样本校准 |
@@ -789,3 +790,51 @@ expected: true`，`pg_terminate reports...` 红在 `actual: [], expected: [{ mem
 **没有做的**：`abort()` 仍是协作式的——忽略 signal 的工具拖过 3 s 时 pane 仍会在 5 s 被强制关，
 现在至少会报出来；`pane list` 读失败仍是“未知”，报 `forced: false`；pane 映射仍只在内存里；
 祖先删除路径上的强制关闭只有 warn，没有工具答案。
+
+## 15. 第十轮：`pg_spawn` 的 `args` 透传真机验证（2026-11-01）
+
+这一轮没有动 `src/` / `test/`：`1d3e689` 已经把镜像旗标整组删掉，`pg_spawn` 只剩
+`name`/`brief`/`cwd`/`args`，本轮只把它放到真机上验，并记录撞到的东西。适配器仍是
+`0.4.0+platform.0.2.0`，平台仍是 `0.2.0`；证据在
+`probe/logs/spawn-args-20261101T142926/`（主记录，run B）与
+`probe/logs/spawn-args-20261101T142109/`（run A）。
+
+**两个 case 都 PASS。** 真机条件：pi 1.4.0 / herdr 0.9.5 / node v26.12.1 /
+`deepseek/deepseek-flash`，一次性平台 `0.2.0`（端口 41777 / 41778），**全程未设
+`PIGROUPS_SPAWN_CMD`**（root 的 `/proc/<pid>/environ` 里没有它，所以走的是默认），
+root 用 `-ne -e` 隔离（它是探针会话，允许）。
+
+| case | 观测 | 结果 |
+|---|---|---|
+| 1 只给 `name`+`brief` | root 的 toolCall 实参只有这两个键；子成员 `m_303c16` 的启动行是 `pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts`（pane 回滚第 1 行）；收到 brief、调 `read`、`pg_say` 到 `g:`，human API 读到 `probe-one: read the manifest`；启动 banner 的 `[Extensions]` 有 11 项（只有 `extension.ts` 是适配器放的），内置工具 15 项 | PASS |
+| 2 `args:["--tools","read"]` | root 的实参原文含该数组；启动行是 `pi -e …/src/extension.ts --tools read`；子成员 `m_5572fc` 的 `builtinTools=read`（唯一）、`toolCalls=(none)`、`touch …/bash-ran` 不存在，拒绝原文见报告 §3.4 | PASS |
+
+**启动行怎么读到（三条事实，别再走弯路）**：herdr 把启动命令**打进 pane 的 shell**，
+shell 会回显，所以子 pi 退出后 `herdr pane read <pane> --source recent-unwrapped --lines 400`
+第一行就是完整启动行；pi 启动时 `process.title = "pi"`，`/proc/<pid>/cmdline` 与
+`herdr pane process-info` 只剩 `["pi"]`；`herdr agent start` 的返回里本来有 `argv`，但
+`HerdrCli.spawn()` 把它丢掉了——要把它变成证据需要适配器落盘，属产品决定。
+
+**继承有可见证据，不是推测**：同一个 pi，只多一个 `-ne` 作对照——对照 banner 的
+`[Extensions]` 只有 `extension.ts`、内置工具只有 `read,bash,edit,write`；不隔离的子成员是
+11 项扩展、15 项工具（`pi-web-access` 的 `web_search`/`fetch_content`、`pi-subagents`、
+`rpiv-todo`、`rpiv-ask-user-question`、`pi-intercom`、`herdr-agent-state`、`pi-straw-boss`）。
+`[Skills]` 两种都列全，**不能**当 `-ne` 的证据。本轮子成员没有调用 `intercom`，也没有消息
+漏进用户主会话；这只证明"这一轮没漏"。
+
+**新抓到的既有 bug（未修，见 §7 与报告 §5.1）**：两次 `pg_spawn` 都返回
+`isError=true`、正文 `timed out waiting for agent status`，各白等 120 s，而子成员当场就在
+正常工作。根因是 `HerdrCli.waitReady()` 只发 `--until idle`；pi 跑完一轮后 herdr 记的是
+`agent_status:"done"`，`--until idle` 匹配不到。`ready-probe/` 三次复现：未跑过任何一轮时
+`--until idle` 立即返回；`done` 状态下 `--until idle` 8 s 超时、`--until done` 与
+`--until idle --until done` 立即返回。修法短，但是行为改动 + 一条测试，留给下一轮。
+
+**另一个值得记的边界**：`--tools` 是允许清单，会把适配器自己的 `pg_*` 工具一起挡掉。case 2
+的子成员因此无法 `pg_say` 回复 `pg_spawn` 发的那条 brief 私聊，欠账提醒每 ~2 s 注入一次
+（`你在这些会话还有未回复的消息：dm:… #1`），子成员永远不 `idle`。这是调用者选择旗标的
+后果，不是 bug；但"收窄 `--tools` 的成员只能听、不能说"要写进下一版文档。
+
+**清理**：两次 run 造出来的 pane/tab 全部关掉，最终 pane 集合
+`wD:p1E wE:p1 wE:p12 wE:p1J`、tab 集合 `wD:tD wE:t1 wE:tT wE:tW` 与基线一致（只剩 boss 的）；
+平台进程已停、端口不再应答；子成员的会话（默认启动行不带 `--session-dir`）复制进日志目录后
+从 `~/.pi/agent/sessions/` 删除；平台仓库只被读过/跑过，未改。
