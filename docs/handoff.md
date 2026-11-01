@@ -1,6 +1,6 @@
 # 交接文档
 
-> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果，改写 §4 / §7 / §10；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第四轮审阅的留痕见 §11）。
+> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，但判据里的 `pg.report` 工具仍缺，所以仍是部分通过；第四轮审阅的留痕见 §11）。
 > 两个人（或一个人隔几天回来）之间交接用。
 > 面向：接手「把 PiGroups 在 herdr + pi 上真机跑起来」这件事的人。
 
@@ -8,13 +8,15 @@
 
 ## 1. 一句话现状
 
-**两个仓库都已建成、全绿、经过四轮独立评审和变异测试（第四轮见 §11）；三条 pi 接口假设已于 2026-11-01 在真机（pi 1.4.0 / herdr 0.9.5）上验过：第 1 级通过；第 2 级只对“配合的工具”通过（pi 不会杀一个忽略 abort signal 的工具）；第 3 级只过了 SIGTERM/tui 这一条路径，且这次用 3 s 异步体 + `process.on('exit')` 证明了处理器确实被 await。** 抓到的真偏离（`pg.abort` 之后没有 turn_end）已由 `abecc76` / `fff2418` 修掉。
+**两个仓库都已建成、全绿、经过四轮独立评审和变异测试（第四轮见 §11）；三条 pi 接口假设已于 2026-11-01 在真机（pi 1.4.0 / herdr 0.9.5）上验过：第 1 级通过；第 2 级只对“配合的工具”通过（pi 不会杀一个忽略 abort signal 的工具）；第 3 级只过了 SIGTERM/tui 这一条路径，且这次用 3 s 异步体 + `process.on('exit')` 证明了处理器确实被 await；第 4 级端到端主链路通过。** 抓到的真偏离（`pg.abort` 之后没有 turn_end）已由 `abecc76` / `fff2418` 修掉。
 
-下一步：**补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘**；第 4 级端到端还没碰。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
+**第 4 级不是“全过”。** 第一次真机 run 抓出两处：模型侧没有 `pg_report` 工具（只有 9 个工具，规范也只列了 9 个），以及删除后子 pane 没人关。后者已由 `9453f6d` 修掉并在真机复跑确认；前者是产品/规范决定，不是循环能修的，所以“根收到 `pg.report`”这条判据仍不成立——只有适配器自发的 `pg.report` 控制项能到根。详见 §3.6 与 §4。
+
+下一步：**先把 `pg_report` 定为“加第 10 个工具”还是“改第 4 级判据”**；补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘；再把第 4 级从 1 个子成员扩到 2 个并验重启/级联。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
 
 ```
 平台仓库  ~/Documents/PiGroups          52 tests   typecheck 干净  已定稿
-适配器    ~/Documents/pigroups-adapter  59 tests   typecheck 干净  第 1 级通过 / 第 2 级部分 / 第 3 级部分
+适配器    ~/Documents/pigroups-adapter  62 tests   typecheck 干净  第 1 级通过 / 第 2、3 级部分 / 第 4 级主链路通过、判据未全过
 ```
 
 ---
@@ -31,7 +33,7 @@
 | 代码 | `src/` 2072 行，15 个 HTTP 端点，TypeScript + `node:sqlite`，**无运行时依赖** |
 | 测试 | `test/` 2553 行，52 个黑盒 HTTP 测试 |
 | 运行 | `npm run serve`（`PORT` 默认 7717，`PIGROUPS_DATA`，`PIGROUPS_ADMIN_TOKEN`） |
-| 提交 | 21 个，`master` |
+| 提交 | `master`（数量见 `git log`） |
 
 **它不知道 agent 是什么**：不启动、不唤醒、不判断死活、不带 UI、不提供共享文件空间。这些全部划给适配器。
 
@@ -43,8 +45,8 @@
 |---|---|
 | 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（含 `PiSurface`、`Herdr`、循环、journal、`pg.*` 契约） |
 | 代码 | `src/` 2677 行，8 个模块（见下），**无运行时依赖**（只用 `node:*` 和 `fetch`） |
-| 测试 | `test/` 2567 行，59 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
-| 提交 | 39 个，`master` |
+| 测试 | `test/` 2567 行，62 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
+| 提交 | `master`（数量见 `git log`） |
 
 ```
 src/extension.ts   Pi 扩展入口：注册 9 个 pg_* 工具，挂 session_start / session_shutdown
@@ -60,6 +62,39 @@ src/state.ts       义务表、遥测表、合并窗口
 **`loop.ts` 不许 import `@earendil-works/pi-coding-agent`。** 这是整个仓库可测的唯一来源。改坏了这一条，测试就退化成"跑一遍真模型看看"。
 
 9 个工具：`pg_say` `pg_read` `pg_spawn` `pg_terminate` `pg_whoami` `pg_abort` `pg_steer` `pg_inspect` `pg_children`。
+
+### 2.3 接线前提：`PIGROUPS_SPAWN_CMD` 必须带 `-e <extension>`
+
+子成员不是平台创建的，是适配器的 `HerdrCli` 在 pane 里起一个 pi。它执行的就是
+`PIGROUPS_SPAWN_CMD`；如果这个值只是 `pi`，`pg_spawn` 仍会建成员、开 pane，但子 pi
+没有加载适配器，于是不轮询、不收简报、也没有任何 `pg_*` 工具——表面“spawn 成功”，
+实际不是成员。**这是第一次接线最容易错的地方。**
+
+环境变量只能放在 `herdr pane split --env` 上（`agent start` 没有 `--env`）。子成员通过
+pane 继承同一组变量，所以它的孙子也走同一个 `PIGROUPS_SPAWN_CMD`。可运行的最小形状：
+
+```bash
+ADAPTER=/home/yang/Documents/pigroups-adapter
+MODEL=deepseek/deepseek-flash
+SPAWN_CMD="pi -ne -e $ADAPTER/src/extension.ts --model $MODEL"
+
+PANE=$(herdr pane split --direction down --no-focus --cwd "$SCRATCH" \
+  --env PIGROUPS_URL="$PIGROUPS_URL" \
+  --env PIGROUPS_TOKEN="$ROOT_TOKEN" \
+  --env PIGROUPS_ADAPTER_DIR="$ADIR" \
+  --env "PIGROUPS_SPAWN_CMD=$SPAWN_CMD" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.pane.pane_id))')
+
+herdr agent start root --kind pi --pane "$PANE" --timeout 60000 \
+  -- -ne -e "$ADAPTER/src/extension.ts" --model "$MODEL"
+```
+
+`$PIGROUPS_URL` / `$ROOT_TOKEN` / `$ADIR` / `$SCRATCH` 由 §8 那套启动与 bootstrap 得到；
+完整的一键块见 `probe/README.md` 第 4 级。
+
+`-ne` 是给真机探针用的：不继承用户的全局扩展，只加载 `-e` 指定的适配器（第一次第 4 级
+跑没加，root 通过 `pi-intercom` 把一条消息转进了用户的主会话，见 §3.6）。生产里可以去掉
+`-ne`，但 `PIGROUPS_SPAWN_CMD` 里的 `-e .../src/extension.ts` 不能少。
 
 ---
 
@@ -88,8 +123,8 @@ src/state.ts       义务表、遥测表、合并窗口
 
 ### 3.3 适配器侧的具体数字
 
-- 59 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
-- 新补的 15 条（44 → 59）：`test/surface.test.ts` 新增 3 条（幂等门；该文件共 9 条）、
+- 62 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
+- 新补的 15 条（44 → 59，之后又补 3 条到 62）：`test/surface.test.ts` 新增 3 条（幂等门；该文件共 9 条）、
   `test/surface.abort.test.ts` 10 条（abort/isBusy/shutdown/退订/preview，含 3 s 放弃分支）、
   `test/obligation.test.ts` 新增 2 条（`nudgeOwed` 的 abort 竞态）；三组都做过撤掉源码再跑红的验证
 - 变异测试 17 个，抓 12 个；存活 5 个里 3 个已被后补测试覆盖，剩 2 个（水位按成员、`flush()` 返回值）已补并有变异证明
@@ -199,6 +234,42 @@ session 落盘、以及 shutdown 正在跑的一轮。
 `fff2418` 又加了 `turnOpen` 门，避免 `before_settle` 已经关过的一轮被补第二次。
 现在探针的 `P2.8` 对缺失的 `before_settle` 只打 WARN：它描述 pi 的边界，不再是 adapter 的洞。
 
+### 3.6 第 4 级端到端（2026-11-01，两次真机运行）
+
+**结论：主链路通过，判据没有全过，所以第 4 级仍是“部分通过”。** 第一次 run 暴露问题
+（提交 `191c52d`，证据 `probe/logs/level4-20261101T193132/`）；第二次只复跑失败点
+（提交 `9453f6d`，证据 `probe/logs/level4-fix-20261101T193945/`）。环境：pi 1.4.0 /
+herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次用 1 个根 + 1 个子成员，
+不是清单写的 2 个。
+
+| 观察 | 证据 |
+|---|---|
+| 根按人的方式启动：`herdr pane split` → `herdr agent start root` 返回 `interactive_ready:true`；3 s 内 `GET /v1/members/<root>` 的 `last_seen_at` 前进，说明适配器循环在轮询 | `level4-.../agent-start-root.json`、`journal.md` §1.5 |
+| `pg_spawn` 同时建成员和 pane：root transcript 里 `pg_spawn {"name":"alpha",…}` → `{"id":"m_635f7e","name":"alpha"}`，herdr 新增 `wE:pX agent=pi status=working`，平台树里 alpha 挂在根下 | `level4-.../transcripts/root.md`、`herdr-snapshot.json` |
+| 接线前提成立：`PIGROUPS_SPAWN_CMD` 带着 `-e .../src/extension.ts`，子成员才会成为成员 | `level4-.../env.sh`、`transcripts/alpha.md` |
+| 简报真的进了子成员的模型并引发动作：`INJECTED … [dm:m_635f7e_m_d1becc#1] root: You are alpha…` → 子调 `pg_say` → `{"conv":"g:m_d1becc","seq":1}` | `transcripts/alpha.md` |
+| 子成员的群消息人能读到：`GET /v1/messages?to=g:m_d1becc`（人 token）返回 `sender_name:"alpha"`、`seq:1` | `level4-.../after-delete.txt` |
+| journal/watermark 按成员分：同一个 `PIGROUPS_ADAPTER_DIR` 下两个 journal，`injected/m_d1becc.json` = 6，`injected/m_635f7e.json` = 5 | `level4-.../adapter-dir/` |
+| 删除：根自己调 `pg_terminate` → `{"terminated":["m_635f7e"]}`；成员变 `gone`；`sys.terminated` receipt `delivered`；子 pi 正常退出（pane 末行是 pi 的 resume 提示）；`herdr agent list` 与 `ps` 都没有它 | `after-delete.txt`、`db-inspect.txt` |
+| pane 关闭：第一次 run 失败（`wE:pX agent=- status=unknown` 留在 shell）。`9453f6d` 让 `terminate()` 关闭 `spawn()` 记下的 pane；复跑 `wE:p11` 在删除后从 `herdr pane list` 消失 | `level4-fix-.../report.md` |
+| `pg.report`：模型侧**没有** `pg_report` 工具（子成员用 `searchTools("pg")` 只找到 9 个），所以子不能“汇报”；控制通道本身可用——复跑里根收到适配器自发的 `pg.report {"status":"blocked","text":"no output after 3 nudges …"}` | `transcripts/alpha.md`、`level4-fix-.../root-pane-after-delete.txt` |
+| 删除后的兜底报告也发不出：`session_shutdown` 的 `reportExiting` 先 `GET /v1/whoami`，`gone` 成员得到 410 `member_gone`，异常被吞掉 | `src/http.ts:20-23`、`level4-.../report.md` |
+
+**这次证明了什么**：人按 `herdr pane split` + `herdr agent start` 起根 → 适配器轮询 → `pg_spawn`
+经 `HerdrCli` 建成员和 pane → DM 简报注入子模型 → 子模型真的调工具说话 → 人 API 能读到 →
+`pg_terminate` 删除成员、子进程退出、pane 关闭；共享 adapter dir 下父子各自的水位没有互相踩。
+这是第一次把“平台 + 适配器 + herdr + 真模型”串成一条真机链路，而且失败点都有日志。
+
+**这次没有证明什么**：只跑了 1 个子成员（不是 2 个），完整场景只跑了 1 次（第二次只复跑失败点）；没有重启/重放/崩溃；
+没有模型主动发出的 `pg.report`（工具不存在），只有适配器自发的控制项；没有验孙子成员、
+父适配器重启后关 pane、以及 `GET /v1/control?all=true` 的删除后视图（平台 500，见 §7）。
+一次 run 是样本，不是对所有路径的证明。
+
+**探针隔离的教训**：第一次 run 的 `pi -e extension.ts` 继承了用户全局扩展
+（`pi-straw-boss`、`pi-intercom`）；root 把一条消息经 intercom 转进用户主会话，还触发
+`balance.mjs after-close wE:pX` 重排了用户的 tab。复跑用 `-ne` 只加载适配器。真机探针必须
+隔离，见 §2.3 与 `probe/README.md` 第 4 级。
+
 ---
 
 ## 4. 真机四级清单（2026-11-01 实测后）
@@ -210,7 +281,7 @@ session 落盘、以及 shutdown 正在跑的一轮。
 | **1** | 在 `agent_settled` 回调里调 `pi.sendMessage(text, {triggerTurn: true})` **能真起一轮** | 整个消息通道静默失效（最致命，所以排第一） | 探针扩展在 idle 时投一句，日志里出现一次新的 `agent_start` | **通过**。`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮（`delivered p3 → turn_start run 4`） |
 | **2** | 一个卡住的工具在外部 `abort()` 后回到 idle | 卡住的成员永远收不到 `pg.abort`，回到"没人能叫停它" | `abort()` 在有界时间内 resolve，日志里那轮以 `aborted` 结束 | **部分通过**。配合的工具（从 signal 监听器返回）2 ms 结束；**忽略 signal 的工具不会被 pi 杀掉**，settle 要到 58 296 ms 后才来。证据：`run-20261101T1920-control/` 与 `run-20261101T1920-ignore-signal/` |
 | **3** | `shutdown()` 后进程真退、session 落盘 | 被删成员留一个僵尸 pane | 进程 exit 0，session JSONL 有结尾 | **部分通过**。SIGTERM/tui 这条路径已用 3 s 异步体 + `process.on('exit')` 证明 await：`waited_ms=3000`，`process_exit` 在 `shutdown_done` 之后 54 ms，`exit 0`。**没调 `ctx.shutdown()` 自调用，没验 print/json 模式、session 落盘、shutdown 正在跑的一轮** |
-| **4** | 端到端：根 + 2 个子成员、真模型、派活 → 汇报 → 删除 | — | 子成员收到简报、说了一句、根收到 `pg.report`，删除后两个子进程都退出 | **未验证**。一次都没跑；它验的是策略，不是接口 |
+| **4** | 端到端：根 + 2 个子成员、真模型、派活 → 汇报 → 删除 | — | 子成员收到简报、说了一句、根收到 `pg.report`，删除后子进程与 pane 都消失 | **部分通过（主链路通过；判据未全过）**。`probe/logs/level4-20261101T193132/`：根由 herdr 起、`pg_spawn` 建成员与 pane、简报进子模型、子消息人可读、删除后成员/进程退出都成立；两处失败：模型没有 `pg_report` 工具、删除后 pane 仍在。pane 已由 `9453f6d` 修好并在 `probe/logs/level4-fix-20261101T193945/` 复跑确认；`pg.report` 仍只有适配器自发的控制项，模型不能主动发，所以按原判据仍**不算通过**。只跑了 1 个子成员，不是 2 个 |
 
 三条假设逐条对账（日期 2026-11-01，证据在 `probe/logs/run-20261101T1920-*`）：
 
@@ -337,11 +408,18 @@ session 落盘、以及 shutdown 正在跑的一轮。
 | 投递排队分支没有真实样本 | 留存日志里 `hasPendingMessages` 恒为 `false`：两笔投递同时排队、以及 turn 中途再投都没观测过；`hasPendingMessages` 在 `src/` 里也一次没读。一次 settle 只投一次的规则不覆盖这个场景 |
 | `ctx.shutdown()` 自调用、print/json 模式下的退出 | 未验证。外部 `SIGTERM` 的 tui 路径已证明 await（3 s 异步体、`process_exit.after_shutdown_done_ms ≥ 0`、exit 0、只派发一次）；`ctx.shutdown()` 自调用、print/json、session 落盘、shutdown 正在跑的一轮都没验。print 模式据源码是 143（未实测） |
 | 一个忽略 abort signal 的工具不会被 pi 杀掉 | **未解决，接口边界**。硬变体：abort 后 3009 ms `idle_timeout`，工具自己 60 s 后返回，aborted settle 晚到 58 296 ms。adapter 的 `abort()` 3 s 后放弃并打 warn；`pg.abort` 对这类成员无法兑现“已切断”。`bash` 内置工具未验 |
-| `herdr agent start` 在真实 pane 里的行为 | 命令行形状已核，**行为未验**；探针是在 pane 里直接跑 `bash pane.sh` 起 pi，没走 `agent start` |
+| `herdr agent start` 在真实 pane 里的行为 | **已验证**（第 4 级）：root 与 child 都由 `agent start` 起，返回 `interactive_ready:true`，pane 显示 `agent=pi`。**未验**的是失败后的 `pane send-text` 兜底路径 |
+| `pg_terminate` 关 pane 只覆盖“本适配器内存里记得的 pane” | 已修一半（`9453f6d`）：`spawn()` 按成员 id 记住 pane，DELETE 成功后 `close()`；真机复跑确认。**仍漏**：父适配器重启后内存映射丢失；子成员（孙子）由子适配器拉起，父/根直接删它时关不掉。要补需持久化/共享 pane map，或平台协作 |
+| 模型侧没有 `pg_report` 工具 | **产品缺口，未决**。规范只列 9 个工具；第 4 级却要求“根收到 `pg.report`”。适配器可自发 `blocked`/`exiting` 控制项，模型不能主动发 `done`/`progress`。要么加第 10 个工具并改 `docs/设计说明.md` §5.3，要么改第 4 级判据 |
+| 删除后 `GET /v1/control?all=true` 500 | **平台 bug，未修**。`sys.terminated` 的 `to_json` 存裸 id，`src/routes/control.ts:68` 直接 `JSON.parse` → `SyntaxError`；删除后正是最需要看指令的时候。本轮只动 adapter 文档，平台未改 |
+| 删除后父的义务表残留 | **已修**（`d19a179`）：`terminate()` 丢弃指向已删除成员的义务，不再无限催；`test/obligation.test.ts` 守着。第 4 级第一次 run 时观察到 `owed:["dm:…"]` 与 3 次 nudge |
+| 子成员消失后群会话从人类索引消失 | 平台按概念稿 §3.3 是正确的（群只在有子成员时存在）；但删完后 `GET /v1/conversations` 看不到那个群，只能按已知 `g:<parent>` 读历史。已知限制，未改 |
+| 子成员 `gone` 的遥测文案显示 `id（id）` | 小瑕疵，未修：`terminate()` 时 telemetry 没有该成员的名字，回退到 id。不影响状态判断 |
+| 真机探针会继承用户的全局 pi 扩展 | 第一次第 4 级 run 踩过：root 通过 `pi-intercom` 把消息转进用户主会话，`pi-straw-boss` 还重排了用户 tab。`probe/README.md` 第 4 级与 §2.3 已要求 `-ne` + 只加载 `-e` 适配器；这是探针纪律，不是产品代码 |
 | 消息与 inbox 都没有清理策略 | 已知，无上限增长。规模上来再定 |
-| 催办三级的阈值（5 分钟窗口 / 3 次上限 / 30 分钟持续） | 全是拍的数字，需要真实负载校准 |
+| 催办三级的阈值（5 分钟窗口 / 3 次上限 / 30 分钟持续） | 全是拍的数字。第 4 级看到了“3 次后 blocked”真的发生，但没有负载样本校准 |
 | `at-most-once`（取走即消费）的丢失代价 | 用 journal 缓解，但没有实测过崩溃频率下的影响 |
-| 相关性分级（`mentions_me` / `from_parent`）在真实群里够不够 | 未验证。若不够，才考虑启用门控 |
+| 相关性分级（`mentions_me` / `from_parent`）在真实群里够不够 | 仍未验证。第 4 级只有 1 个子成员、1 个群，样本不够；若不够，才考虑启用门控 |
 | 同一个 cwd 的两个成员会互相覆盖文件 | 平台没有文件空间；靠 spawn 时指定 cwd 约束 |
 
 ---
@@ -361,6 +439,8 @@ curl -s localhost:7717/v1/conversations -H "Authorization: Bearer <human token>"
 curl -s 'localhost:7717/v1/messages?to=g:m_xxx&limit=50' -H "Authorization: Bearer <human token>"
 ```
 
+> 注意：`/v1/control?all=true` 在删除之后目前会 500（`sys.terminated` 的裸 id），见 §7；这不是读法错了。
+
 ```bash
 # 平台
 cd ~/Documents/PiGroups
@@ -368,7 +448,7 @@ npm run typecheck && npm test          # 52 tests，约 2 秒
 
 # 适配器（会自己拉起一个平台子进程）
 cd ~/Documents/pigroups-adapter
-npm run typecheck && npm test          # 59 tests，约 7.5 秒
+npm run typecheck && npm test          # 62 tests，约 7.5 秒
 PIGROUPS_PLATFORM_DIR=~/Documents/PiGroups   # 默认是 ../PiGroups
 
 # 手动起一个平台
@@ -382,11 +462,11 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 9. 接手的第一件事
 
-1. 跑一遍上面两个 `npm test`，确认 52 / 59 全绿
+1. 跑一遍上面两个 `npm test`，确认 52 / 62 全绿
 2. 读 `pigroups-adapter/docs/设计说明.md` §2.1（`PiSurface`）和 §2.2（`Herdr`）——那是真机验证的靶子
 3. 重跑 `probe/run.sh`（对照组应 PASS）与 `PROBE_IGNORE_SIGNAL=1 probe/run.sh`（硬变体应 FAIL 在 P2.5/P2.7，这是 pi 的已知边界）
 4. 补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘；`pg.abort` 的 turn_end 已修，不要再动
-5. 只有 1–3 级全过，才碰第 4 级的端到端
+5. 第 4 级主链路已在真机跑过（§3.6）；先定 `pg_report` 的判据，再补 2 个子成员、adapter 重启后的 pane 关闭。不要因为主链路通了就勾第 4 级
 
 **不要**在真机之前改循环。接口假设错了，循环改多少遍都是白改。
 
@@ -394,15 +474,15 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 10. 交接清单
 
-- [x] 两个仓库 `git status` 干净（2026-11-01：adapter 本轮 7 个提交，HEAD 见 `git log`；PiGroups `8e886ca`）
-- [ ] `PiGroups`: 52/52，typecheck 干净（本轮没跑，留待确认）
-- [x] `pigroups-adapter`: 59/59，typecheck 干净（2026-11-01 实测，约 7.5 s）
+- [x] 两个仓库 `git status` 干净（2026-11-01：adapter HEAD 见 `git log`；PiGroups `8e886ca`）
+- [x] `PiGroups`: 52/52，typecheck 干净（2026-11-01 本次文档轮实测，约 1.6 s）
+- [x] `pigroups-adapter`: 62/62，typecheck 干净（2026-11-01 实测，约 7.5 s）
 - [x] `grep -c 'pi-coding-agent' pigroups-adapter/src/loop.ts` = 0（实测 0）
 - [x] herdr 版本记下（本机 0.9.5，`herdr --version` 2026-11-01 复核），三个旗标形状与 §3.4 一致
 - [x] 第 1 级探针通过（2026-11-01，`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮）
 - [ ] 第 2 级探针**部分通过**（对照组 2 ms 切断；`PROBE_IGNORE_SIGNAL=1` 的硬变体 P2.5/P2.7 失败：pi 不杀忽略 signal 的工具；`bash sleep 60` 未验）
 - [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；`ctx.shutdown()` 自调用、print/json 模式、session 落盘、shutdown 正在跑的一轮都未验）
-- [ ] 第 4 级端到端跑通，录一份日志
+- [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**仍不通过**：模型没有 `pg_report` 工具，“根收到 `pg.report`”只走适配器自发的控制项；只跑了 1 个子成员，重启/级联未验）
 
 ---
 

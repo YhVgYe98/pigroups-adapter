@@ -68,6 +68,76 @@ kill -TERM "$(cat "$PROBE_DIR/pi.pid")"
 
 调试时设 `PROBE_ECHO=1`，每行日志会同时镜像到 stderr。
 
+## 第 4 级：端到端（根 + 子成员）
+
+前三级只验 pi 接口；这一级起一个真平台、一个根、一个子成员，验“简报进模型、子能说话、人能读到、删除能收尸”。
+整块可以照抄（不需要 `jq`，JSON 字段用 node 取）：
+
+```bash
+ADAPTER=/home/yang/Documents/pigroups-adapter
+PG=/home/yang/Documents/PiGroups
+PORT=7911
+MODEL=deepseek/deepseek-flash
+DATA=$(mktemp -d)
+ADIR=$(mktemp -d)
+SCRATCH=$(mktemp -d)
+SPAWN_CMD="pi -ne -e $ADAPTER/src/extension.ts --model $MODEL"
+
+# 1. 一次性平台
+(cd "$PG" && PIGROUPS_ADMIN_TOKEN=adm PORT=$PORT PIGROUPS_DATA=$DATA node src/main.ts) &
+PLATFORM_PID=$!
+until curl -sf "http://127.0.0.1:$PORT/v1/health" >/dev/null; do sleep 0.2; done
+
+# 2. 根成员（bootstrap 只在这里用一次）
+ROOT=$(curl -sX POST "http://127.0.0.1:$PORT/v1/bootstrap" \
+  -H 'content-type: application/json' -d '{"name":"root"}')
+ROOT_ID=$(printf '%s' "$ROOT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).member.id))')
+ROOT_TOKEN=$(printf '%s' "$ROOT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).token))')
+
+# 3. 根 pane：环境在 pane split 上，spawn 命令必须带 -e
+PANE=$(herdr pane split --direction down --no-focus --cwd "$SCRATCH" \
+  --env PIGROUPS_URL="http://127.0.0.1:$PORT" \
+  --env PIGROUPS_TOKEN="$ROOT_TOKEN" \
+  --env PIGROUPS_ADAPTER_DIR="$ADIR" \
+  --env "PIGROUPS_SPAWN_CMD=$SPAWN_CMD" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.pane.pane_id))')
+herdr agent start root --kind pi --pane "$PANE" --timeout 60000 \
+  -- -ne -e "$ADAPTER/src/extension.ts" --model "$MODEL"
+herdr agent wait "$PANE" --until idle --timeout 120000
+
+# 4. 让根拉一个子成员，并在群里说一句
+herdr agent prompt "$PANE" "Call pg_spawn exactly once: name 'alpha', brief 'You are alpha. Call pg_say once to g:$ROOT_ID with one short line, then stop.' Then stop." \
+  --wait --timeout 300000
+
+# 5. 让根删掉 pg_spawn 返回的那个成员
+herdr agent prompt "$PANE" "Call pg_terminate with the member id returned by pg_spawn. Then stop." \
+  --wait --timeout 120000
+```
+
+看什么：
+
+- `herdr pane list` 多出一个 pane，`agent=pi status=working`；`GET /v1/tree`（root token）里
+  `alpha` 的 `parent_id` 是 `$ROOT_ID`。
+- 根的 transcript / pane 里有 `pg_spawn` 的返回 `{"id":"m_…","name":"alpha"}`。
+- 子成员的会话里出现 `INJECTED … [dm:…]`，随后有 `pg_say` 的 `{"conv":"g:…","seq":1}`。
+- 人的读法：`adm` 只用于 `POST /v1/humans` 换 human token，消息按会话读：
+  ```bash
+  HTOKEN=$(curl -sX POST "http://127.0.0.1:$PORT/v1/humans" -H 'Authorization: Bearer adm' \
+    -H 'content-type: application/json' -d '{"name":"probe-human"}' \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).token))')
+  curl -s "http://127.0.0.1:$PORT/v1/messages?to=g:$ROOT_ID" -H "Authorization: Bearer $HTOKEN"
+  ```
+- 删除后：成员 `status:"gone"`；`herdr pane list` 里子 pane 消失；`herdr agent list` 没有它；
+  `ps` 没有子 `pi`。
+- **当前已知失败**：模型侧没有 `pg_report` 工具（`searchTools("pg")` 只有 9 个），所以根不会收到
+  子模型主动发的 `pg.report`；只有适配器自发的 `pg.report{"status":"blocked",…}` 可能出现。
+  不要把这个当成通过。
+- 清理：`herdr pane close "$PANE"`（子 pane 若因 bug 残留也一并关）、`kill "$PLATFORM_PID"`、
+  `rm -rf "$DATA" "$ADIR" "$SCRATCH"`。
+
+> 必须用 `-ne`，否则 root 会继承你全局安装的扩展。2026-11-01 第一次第 4 级跑就因此把消息
+> 经 `pi-intercom` 转进了用户主会话，还让 `pi-straw-boss` 重排了用户的 tab。
+
 ## 日志格式
 
 `$PROBE_LOG` 是 JSONL，每行一个对象，两个公共字段在前：
