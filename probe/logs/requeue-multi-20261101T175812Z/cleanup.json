@@ -1,0 +1,22 @@
+{
+  "baselinePaneIds": [
+    "wD:p1E",
+    "wE:p1",
+    "wE:p12",
+    "wE:p2Q",
+    "wE:p36"
+  ],
+  "finalPaneIds": [
+    "wD:p1E",
+    "wE:p1",
+    "wE:p12",
+    "wE:p2Q",
+    "wE:p36"
+  ],
+  "extraPanes": [],
+  "requiredPanesPresent": true,
+  "platformAlive": false,
+  "leftoverProbePanes": [
+    "wE:p36"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "case": "requeue-multi",
+  "markers": [
+    "MARK-ONE-20261101T180247Z",
+    "MARK-TWO-20261101T180247Z"
+  ],
+  "windowMs": 5000,
+  "verdict": "PASS",
+  "member": {
+    "id": "m_c5ebf9",
+    "name": "rq-20261101T180247Z",
+    "parent_id": "m_cbfaef",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_cbfaef",
+        "owner": "m_cbfaef"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793556168027
+  },
+  "conv": "dm:m_c5ebf9_m_cbfaef",
+  "label": "rq-180247",
+  "toolStartAt": "2026-11-01T18:02:53.283Z",
+  "toolArgs": {
+    "command": "sleep 60; echo SLEEPDONE",
+    "timeout": null
+  },
+  "adaptersDeliveriesBeforeAbort": [
+    "2026-11-01T18:02:58.363Z",
+    "2026-11-01T18:03:08.350Z"
+  ],
+  "elapsedAtAbortMs": 15145,
+  "toolStillRunningAtAbort": true,
+  "abortAt": "2026-11-01T18:03:08.428Z",
+  "replayedAt": [
+    "2026-11-01T18:03:08.482Z"
+  ],
+  "replayText": "[dm:m_c5ebf9_m_cbfaef#1] root: MARK-ONE-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-ONE-20261101T180247Z\" and then stop. Do not call any tool.\n[dm:m_c5ebf9_m_cbfaef#2] root: MARK-TWO-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-TWO-20261101T180247Z\" and then stop. Do not call any tool.",
+  "replayHasBothInOrder": true,
+  "assistantMentionsAfterAbort": {
+    "MARK-ONE-20261101T180247Z": 0,
+    "MARK-TWO-20261101T180247Z": 1
+  },
+  "assistantTextAfterAbort": [
+    "Now there are newest instructions. Two markers: MARK-ONE says when you next see this marker, reply with exactly \"MARK-ONE-...\" and then stop. MARK-TWO is the newest instruction. So reply exactly \"MARK-TWO-20261101T180247Z\".\n\nThe bash was aborted, but now we follow newest instruction. Reply exactly MARK-TWO.\nMARK-TWO-20261101T180247Z"
+  ]
+}

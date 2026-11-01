@@ -1,0 +1,21 @@
+{
+  "member": {
+    "id": "m_c5ebf9",
+    "name": "rq-20261101T180247Z",
+    "parent_id": "m_cbfaef",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_cbfaef",
+        "owner": "m_cbfaef"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793556168027
+  },
+  "rootId": "m_cbfaef",
+  "model": "deepseek/deepseek-flash",
+  "windowMs": 5000
+}

@@ -1,0 +1,111 @@
+{
+  "sessionPath": "/home/yang/Documents/pigroups-adapter/probe/logs/requeue-multi-20261101T175812Z/session.jsonl",
+  "entryCount": 10,
+  "sleepCalls": [
+    {
+      "index": 5,
+      "id": "call_00_QOlcrY5yA9I8JvYbo3iK8031",
+      "name": "bash",
+      "args": {
+        "command": "sleep 60; echo SLEEPDONE",
+        "timeout": null
+      },
+      "timestamp": "2026-11-01T18:02:53.283Z",
+      "result": {
+        "index": 6,
+        "toolCallId": "call_00_QOlcrY5yA9I8JvYbo3iK8031",
+        "toolName": "bash",
+        "isError": true,
+        "durationMs": 15148,
+        "timestamp": "2026-11-01T18:03:08.433Z",
+        "text": "Command aborted"
+      }
+    }
+  ],
+  "customMessages": [
+    {
+      "index": 8,
+      "timestamp": "2026-11-01T18:03:08.482Z",
+      "customType": "pigroups",
+      "content": "[dm:m_c5ebf9_m_cbfaef#1] root: MARK-ONE-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-ONE-20261101T180247Z\" and then stop. Do not call any tool.\n[dm:m_c5ebf9_m_cbfaef#2] root: MARK-TWO-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-TWO-20261101T180247Z\" and then stop. Do not call any tool."
+    }
+  ],
+  "markers": {
+    "MARK-ONE-20261101T180247Z": {
+      "customMessages": [
+        {
+          "index": 8,
+          "timestamp": "2026-11-01T18:03:08.482Z",
+          "customType": "pigroups",
+          "content": "[dm:m_c5ebf9_m_cbfaef#1] root: MARK-ONE-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-ONE-20261101T180247Z\" and then stop. Do not call any tool.\n[dm:m_c5ebf9_m_cbfaef#2] root: MARK-TWO-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-TWO-20261101T180247Z\" and then stop. Do not call any tool."
+        }
+      ],
+      "assistantMentions": []
+    },
+    "MARK-TWO-20261101T180247Z": {
+      "customMessages": [
+        {
+          "index": 8,
+          "timestamp": "2026-11-01T18:03:08.482Z",
+          "customType": "pigroups",
+          "content": "[dm:m_c5ebf9_m_cbfaef#1] root: MARK-ONE-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-ONE-20261101T180247Z\" and then stop. Do not call any tool.\n[dm:m_c5ebf9_m_cbfaef#2] root: MARK-TWO-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-TWO-20261101T180247Z\" and then stop. Do not call any tool."
+        }
+      ],
+      "assistantMentions": [
+        {
+          "index": 9,
+          "timestamp": "2026-11-01T18:03:09.797Z",
+          "stopReason": "stop",
+          "text": "Now there are newest instructions. Two markers: MARK-ONE says when you next see this marker, reply with exactly \"MARK-ONE-...\" and then stop. MARK-TWO is the newest instruction. So reply exactly \"MARK-TWO-20261101T180247Z\".\n\nThe bash was aborted, but now we follow newest instruction. Reply exactly MARK-TWO.\nMARK-TWO-20261101T180247Z"
+        }
+      ]
+    }
+  },
+  "relevant": [
+    {
+      "index": 5,
+      "type": "message",
+      "timestamp": "2026-11-01T18:02:53.283Z",
+      "role": "assistant",
+      "durationMs": 1027,
+      "stopReason": "toolUse",
+      "toolCalls": [
+        {
+          "id": "call_00_QOlcrY5yA9I8JvYbo3iK8031",
+          "name": "bash",
+          "args": {
+            "command": "sleep 60; echo SLEEPDONE",
+            "timeout": null
+          }
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "type": "message",
+      "timestamp": "2026-11-01T18:03:08.433Z",
+      "role": "toolResult",
+      "toolName": "bash",
+      "isError": true,
+      "durationMs": 15148,
+      "text": "Command aborted"
+    },
+    {
+      "index": 7,
+      "type": "message",
+      "timestamp": "2026-11-01T18:03:08.434Z",
+      "role": "assistant",
+      "durationMs": 0,
+      "stopReason": "error",
+      "errorMessage": "This operation was aborted",
+      "text": ""
+    },
+    {
+      "index": 8,
+      "type": "custom_message",
+      "timestamp": "2026-11-01T18:03:08.482Z",
+      "customType": "pigroups",
+      "content": "[dm:m_c5ebf9_m_cbfaef#1] root: MARK-ONE-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-ONE-20261101T180247Z\" and then stop. Do not call any tool.\n[dm:m_c5ebf9_m_cbfaef#2] root: MARK-TWO-20261101T180247Z: when you next see this marker, reply with exactly \"MARK-TWO-20261101T180247Z\" and then stop. Do not call any tool."
+    }
+  ]
+}

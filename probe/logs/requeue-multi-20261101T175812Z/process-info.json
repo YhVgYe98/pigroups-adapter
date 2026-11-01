@@ -1,0 +1,22 @@
+{
+  "id": "cli:pane:process_info",
+  "result": {
+    "process_info": {
+      "foreground_process_group_id": 396903,
+      "foreground_processes": [
+        {
+          "argv": [
+            "pi"
+          ],
+          "cmdline": "pi",
+          "cwd": "/tmp/pigroups-rq-scratch.cZdmWz",
+          "name": "pi",
+          "pid": 396903
+        }
+      ],
+      "pane_id": "wE:p3A",
+      "shell_pid": 396785
+    },
+    "type": "pane_process_info"
+  }
+}

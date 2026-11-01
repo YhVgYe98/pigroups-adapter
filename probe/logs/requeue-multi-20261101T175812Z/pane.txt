@@ -1,0 +1,58 @@
+                                                                                                                                          ┃
+ ▀▀█  v1.4.0                                                                                                                              │
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                                     ┃
+ Press ctrl+o to show full startup help and loaded resources.                                                                             ┃
+                                                                                                                                          ┃
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                                    ┃
+                                                                                                                                          ┃
+[Extensions]                                                                                                                              ┃
+  extension.ts                                                                                                                            ┃
+                                                                                                                                          ┃
+                                                                                                                                          ┃
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┃
+ Package Updates Available
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-web-access
+ - pi-subagents
+ - @juicesharp/rpiv-ask-user-question
+ - @juicesharp/rpiv-todo
+ - @quintinshaw/pi-dynamic-workflows
+ - pi-straw-boss
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+ Call the bash tool exactly once with this exact command and no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the
+ bash result comes back, follow the newest instruction in your context. If there is none, reply exactly READY and stop.
+
+
+ Thinking...
+
+
+ $ sleep 60; echo SLEEPDONE
+
+ Command aborted
+
+ Took 15.1s
+
+
+ Error: This operation was aborted
+
+
+ [pigroups]
+
+ [dm:m_c5ebf9_m_cbfaef#1] root: MARK-ONE-20261101T180247Z: when you next see this marker, reply with exactly "MARK-ONE-20261101T180247Z"
+ and then stop. Do not call any tool.
+ [dm:m_c5ebf9_m_cbfaef#2] root: MARK-TWO-20261101T180247Z: when you next see this marker, reply with exactly "MARK-TWO-20261101T180247Z"
+ and then stop. Do not call any tool.
+
+
+ Thinking...
+
+ MARK-TWO-20261101T180247Z
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pigroups-rq-scratch.cZdmWz
+↑2.8k ↓200 R3.6k CH92.8% $0.001 0.3%/1.0M (auto)                                                            (deepseek) deepseek-flash • max

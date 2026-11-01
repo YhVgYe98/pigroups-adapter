@@ -1,0 +1,129 @@
+{
+  "id": "cli:pane:list",
+  "result": {
+    "panes": [
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/yang",
+        "focused": false,
+        "foreground_cwd": "/home/yang",
+        "pane_id": "wD:p1E",
+        "revision": 3,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 46
+        },
+        "tab_id": "wD:tD",
+        "terminal_id": "term_65f34943a61331",
+        "terminal_title": "yang@yangPC:~",
+        "terminal_title_stripped": "yang@yangPC:~",
+        "workspace_id": "wD"
+      },
+      {
+        "agent": "pi",
+        "agent_session": {
+          "agent": "pi",
+          "kind": "path",
+          "source": "herdr:pi",
+          "value": "/home/yang/.pi/agent/sessions/--home-yang--/2026-11-01T17-56-18-985Z_01a19841-4da8-71d1-85f3-e4c1ebbbd694.jsonl"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/yang",
+        "focused": false,
+        "foreground_cwd": "/home/yang",
+        "pane_id": "wE:p36",
+        "revision": 7,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 46
+        },
+        "tab_id": "wE:t1Y",
+        "terminal_id": "term_65f3abf1275d460",
+        "terminal_title": "π - tower · pigroups - yang",
+        "terminal_title_stripped": "π - tower · pigroups - yang",
+        "tokens": {
+          "sb_order": "001.0",
+          "sb_role": "tower"
+        },
+        "workspace_id": "wE"
+      },
+      {
+        "agent": "pi",
+        "agent_session": {
+          "agent": "pi",
+          "kind": "path",
+          "source": "herdr:pi",
+          "value": "/home/yang/.pi/agent/sessions/--home-yang--/2026-10-29T17-37-50-566Z_01a188bd-4fe5-715e-bbb7-af7d5ee34135.jsonl"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/yang",
+        "focused": true,
+        "foreground_cwd": "/home/yang",
+        "pane_id": "wE:p1",
+        "revision": 168,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 46
+        },
+        "state_labels": {
+          "done": "⏳ 1 subagent (worker)",
+          "idle": "⏳ 1 subagent (worker)",
+          "working": "⏳ 1 subagent (worker)"
+        },
+        "tab_id": "wE:t1",
+        "terminal_id": "term_65f34943a64e95",
+        "terminal_title": "π - PiGroups 实现 - yang",
+        "terminal_title_stripped": "π - PiGroups 实现 - yang",
+        "tokens": {
+          "sb_main_tab": "PiGroups 实现",
+          "sb_mark": "",
+          "sb_order": "001.1.001.0.000",
+          "sb_role": "main",
+          "summary": "⏳ 1 subagent (worker)",
+          "title-suffix": "⏳worker"
+        },
+        "workspace_id": "wE"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/yang/Documents/pigroups-adapter",
+        "focused": false,
+        "foreground_cwd": "/home/yang/Documents/pigroups-adapter",
+        "pane_id": "wE:p12",
+        "revision": 22,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 46
+        },
+        "tab_id": "wE:tT",
+        "terminal_id": "term_65f35ab531e181c",
+        "terminal_title": "nvim docs/概念稿.md",
+        "terminal_title_stripped": "nvim docs/概念稿.md",
+        "workspace_id": "wE"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/yang/Documents/PiGroups",
+        "focused": false,
+        "foreground_cwd": "/home/yang/Documents/PiGroups",
+        "pane_id": "wE:p2Q",
+        "revision": 4,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 46
+        },
+        "tab_id": "wE:t1F",
+        "terminal_id": "term_65f3966ca415851",
+        "terminal_title": "nvim .",
+        "terminal_title_stripped": "nvim .",
+        "workspace_id": "wE"
+      }
+    ],
+    "type": "pane_list"
+  }
+}

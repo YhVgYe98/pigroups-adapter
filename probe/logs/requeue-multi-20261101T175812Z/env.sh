@@ -1,0 +1,9 @@
+export EVID=/home/yang/Documents/pigroups-adapter/probe/logs/requeue-multi-20261101T175812Z
+export PORT=40433
+export PIGROUPS_URL=http://127.0.0.1:40433
+export PIGROUPS_DATA=/tmp/pigroups-rq-data.LD8Zbj
+export ADIR=/tmp/pigroups-rq-adir.WWN9md
+export SCRATCH=/tmp/pigroups-rq-scratch.cZdmWz
+export MODEL=deepseek/deepseek-flash
+export PI_VERSION=1.4.0
+export HEAD=8e9fe91af3bd36347fa631f68fc5454a65a1ee4d
