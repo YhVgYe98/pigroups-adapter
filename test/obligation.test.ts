@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 import { AdapterLoop } from '../src/loop.ts';
 import { PgGone, type PgClient } from '../src/pgclient.ts';
-import { FakeClock, FakeSurface, createMember, dmId, removeMember, send, waitFor } from './support.ts';
+import { FakeClock, FakeSurface, createMember, dmId, poll, removeMember, send, waitFor } from './support.ts';
 import { payloads, scenario } from './scenario.ts';
 
 test('an owed reply is nudged when the turn settles; after replying it is not', async (t) => {
@@ -434,6 +434,31 @@ test('a debt to a member that was deleted is dropped, not nudged forever', async
   assert.deepEqual(s.loop.state().owed, [], 'the marker is gone, not merely skipped');
 });
 
+test('a member that starts up owing a dead peer has no debt before the first settle', async (t) => {
+  const s = await scenario({ siblings: 1 });
+  t.after(() => s.close());
+  const sibling = s.siblings[0];
+  const peerDm = dmId(s.me.id, sibling.id);
+
+  // The member saw the message before it went down: drain the queue, so only the
+  // startup reconciliation can put the debt back. History keeps it.
+  await send(s.platform, sibling.token, s.me.id, 'ping before you restart');
+  const drained = await poll(s.platform, s.me.token, { wait: 0, types: 'message' });
+  assert.equal(drained.items.length, 1, 'precondition: the message was consumed before the restart');
+
+  await removeMember(s.platform, s.parent!.token, sibling.id);
+
+  // First drive is the startup sequence itself; no settle is fired.
+  await s.loop.pollOnce();
+  assert.deepEqual(
+    s.loop.state().owed,
+    [],
+    'a startup reconciliation must not leave a debt to a peer that is already gone',
+  );
+  assert.equal(s.surface.textsOfKind('nudge').length, 0, 'nothing may be nudged before the first settle');
+  assert.ok(!s.surface.texts().some((text) => text.includes(peerDm)), 'the dead conversation is not delivered');
+});
+
 test('a deleted peer is not nudged by the settle that follows', async (t) => {
   const s = await scenario({ siblings: 1 });
   t.after(() => s.close());
@@ -633,7 +658,15 @@ test('a failed roster read keeps every debt', async () => {
 });
 
 test('a healthy roster missing the peer prunes the debt', async () => {
-  const { owed, surface } = await settleWithRoster(async () => ({ nodes: [{ id: SELF_ID }] }));
+  // The startup pass reads a roster that still has the peer, so it keeps the debt.
+  // The settle then reads one without it: that second read is the prune under test.
+  let reads = 0;
+  const { owed, surface } = await settleWithRoster(async () => {
+    reads += 1;
+    return reads === 1
+      ? { nodes: [{ id: SELF_ID }, { id: PEER_ID }] }
+      : { nodes: [{ id: SELF_ID }] };
+  });
   assert.deepEqual(owed, [], 'this is the case the prune exists for');
   assert.equal(surface.textsOfKind('nudge').length, 0, 'a pruned debt is not nudged');
 });

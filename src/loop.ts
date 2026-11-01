@@ -607,6 +607,12 @@ export class AdapterLoop {
     await this.injectBrief();
     await this.reconcileObligations();
     await this.replayJournal();
+    // §4.1: a peer that died while this member was down is still in the history that
+    // `reconcileObligations()` just read. Prune it once here, at the end of startup, so
+    // `idle_owed`/`pg_inspect` do not name an unanswerable conversation until the first
+    // settle. The roster is read after the history, so its absence is conclusive even
+    // for a debt the reconciliation has only just marked.
+    await this.pruneUnanswerableDms(true);
     this.ready = true;
   }
 
@@ -1049,16 +1055,21 @@ export class AdapterLoop {
    * the read is absent from a list that was true when it was taken. A debt that became
    * owed at or after the snapshot's `at` therefore proves nothing about that peer's
    * existence; only an older debt can be judged by that snapshot.
+   *
+   * `startup` is the one time the guard does not apply: the history was read first, so
+   * the fresh roster that follows it is newer than every debt it judges. A peer absent
+   * from that roster is gone even though `reconcileObligations()` has just marked its
+   * debt at the current instant.
    */
-  private async pruneUnanswerableDms(): Promise<void> {
+  private async pruneUnanswerableDms(startup = false): Promise<void> {
     const dms = this.obligations.entries().filter((entry) => isDmConv(entry.conv));
     if (dms.length === 0) return;
-    const roster = await this.aliveIds();
+    const roster = await this.aliveIds(startup);
     if (!roster) return;
 
     let changed = false;
     for (const entry of dms) {
-      if (entry.since >= roster.at) continue;
+      if (!startup && entry.since >= roster.at) continue;
       const peer = dmPeer(entry.conv, this.selfId);
       if (peer === undefined || roster.ids.has(peer)) continue;
       this.obligations.clear(entry.conv);
@@ -1079,10 +1090,10 @@ export class AdapterLoop {
    * it as "everyone is gone" clears every DM debt. An answer that does not contain the
    * caller cannot come from a healthy roster, so it prunes nothing.
    */
-  private async aliveIds(): Promise<RosterSnapshot | null> {
+  private async aliveIds(fresh = false): Promise<RosterSnapshot | null> {
     const now = this.now();
     // `now >= at` rules out a backwards clock step pinning a stale snapshot forever.
-    if (this.roster && now >= this.roster.at && now - this.roster.at < ROSTER_TTL_MS) return this.roster;
+    if (!fresh && this.roster && now >= this.roster.at && now - this.roster.at < ROSTER_TTL_MS) return this.roster;
     try {
       const tree: unknown = await withTimeout(this.pg.tree(), ROSTER_TIMEOUT_MS);
       const nodes = (tree as { nodes?: unknown } | null | undefined)?.nodes;
