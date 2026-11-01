@@ -116,7 +116,7 @@ kill -TERM "$(cat "$PROBE_DIR/pi.pid")"
 
 ## 本机实测（pi 1.4.0 / herdr 0.9.5 / node v26.12.1 / deepseek-flash / mode=tui）
 
-用 `probe/run.sh` 连跑两次，结果一致：
+用 `probe/run.sh` 连跑多次（含一次故意用错模型验证失败路径），结果一致：
 
 - **P1 成立**：`agent_settled` 处理器里 `ctx.isIdle()` 已经是 `true`；`sendMessage` 同步返回
   `0 ms`；`before_agent_start` 以 `messageType=custom, customType=probe` 出现，`agent_start`
@@ -133,6 +133,55 @@ kill -TERM "$(cat "$PROBE_DIR/pi.pid")"
   adapter 把 `agent_before_settle` 当作 turn_end 的唯一来源，因此 **`pg.abort` 之后
   收不到任何 turn_end**：`turnStartedAt` 不会清零、`errorNote` 也不会被设置。
   这条由 `run.sh` 的 `P2.8` 以 WARN 形式打印，不改探针的 PASS/FAIL。
+
+## 已完成的一次运行（2026-11-01 18:51）
+
+不是“应该能过”，是一次真实运行的记录。环境：pi 1.4.0、herdr 0.9.5、node v26.12.1、
+`deepseek / deepseek-flash`、`mode=tui`。
+
+```bash
+PROBE_OUT_DIR=/tmp/probe-run/run-20261101T185102 \
+  /home/yang/Documents/pigroups-adapter/probe/run.sh
+```
+
+- pane `wE:pK`（不抢焦点的 tab `wE:tH`，workspace `wE`），探针 pi pid `10573`
+- `run.sh` 退出码 **0**，`RESULT: PASS`；墙钟 18:51:02 → 18:51:10
+- 日志：`probe/logs/run-20261101T185102.jsonl`（31 行，提交 `ee9d819`）。
+  `run.sh` 自己把日志写在 `$PROBE_OUT_DIR/probe.log`，仓库里这一份是拷进来的样本。
+
+**P1**：`sendMessage` 在 settle 处理器里同步返回，新 run 是 `custom` run，同一毫秒：
+
+```
+{"ms":831,"pid":10573,"step":"settled_1","settled":1,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":831,"pid":10573,"step":"delivered","stage":"p1","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":831,"pid":10573,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"This is an automated probe. Reply with the single word pong and nothing else."}
+{"ms":831,"pid":10573,"step":"turn_start","run":2,"delivery_stage":"p1","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+```
+
+**P2**：工具在 `execute` 里跑了 1704 ms 后被切断，`isIdle()` 26 ms 后为 `true`：
+
+```
+{"ms":2390,"pid":10573,"step":"tool_enter","tool":"probe_sleep","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","seconds":60,"signalPresent":true,"isIdle":false}
+{"ms":4094,"pid":10573,"step":"abort_seen","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","waited_ms":1704,"isIdle":false}
+{"ms":4095,"pid":10573,"step":"abort_called","toolCallId":"call_00_ET_PcLSoFCf8aWxDsKulWtR3909","abort_sync_ms":1,"abortError":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":4097,"pid":10573,"step":"settled_3","settled":3,"aborted":true,"isIdle":true,"hasPendingMessages":false}
+{"ms":4120,"pid":10573,"step":"idle","wait_ms":26,"toolReturned":true}
+```
+
+注意顺序是 `abort_seen → tool_return → abort_called`：`ctx.abort()` 同步触发了工具自己的
+signal 监听器，promise 在 `abort()` 返回前就 resolve 了。这条 run 也**没有** `before_settle`
+（见上面“实测发现”）。
+
+**P3**：`kill -TERM 10573` → `session_shutdown(reason=quit)` → 处理器 251 ms → `exit 0`，
+全程 357 ms，只派发一次：
+
+```
+{"ms":4349,"pid":10573,"step":"shutdown_start","shutdown":1,"reason":"quit","targetSessionFile":null,"mode":"tui","isIdle":true}
+{"ms":4600,"pid":10573,"step":"shutdown_done","shutdown":1,"waited_ms":251}
+```
+
+收尾：探针 tab/pane 已关闭，pane 列表与运行前基线一致（`wE:pB`、`wE:p1`），
+`pane current --current` 仍是 `wE:p1 focused=true`，pid 10573 已不在。
 
 ## 环境变量
 
