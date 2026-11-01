@@ -195,17 +195,20 @@ pi -ne -e <abs>/probe/probe.ts --no-session --no-builtin-tools --no-mcp \
    关键是这两个假通过陷阱都被排除：新 run 的 `before_agent_start` 是
    `messageType=custom, customType=probe`（不是被 `sendUserMessage` steer 进 user run），
    且 `settled_1` 里 `isIdle` 已经是 `true`（不是等空闲后才补的投递）。
-2. **`ctx.abort()` 能切断正在跑工具的 turn —— 已验证，但留了一条真偏离。**
+2. **`ctx.abort()` 能切断正在跑工具的 turn —— 已验证，附带的偏离已修复。**
    通过行是 `{"ms":4120,"step":"idle","wait_ms":26,"toolReturned":true}` 与
    `settled_3` 的 `aborted:true`（`wait_ms` 上限 20 000，
    adapter 自己的上限 `ABORT_IDLE_TIMEOUT_MS` = 3 000，两者都远未触及）。
    **pi 实际行为**：被 abort 的 run **不发 `agent_before_settle`**；它给的是
    `assistant_end stopReason:"error"` + `turn_end outcome=error`
    （`errorMessage: "This operation was aborted"`）+ `agent_settled.aborted=true`。
-   **接口现状：没改。** `surface.ts:129-134` 仍以 `agent_before_settle` 为 turn_end 的唯一来源，
-   所以 `pg.abort` 之后**一条 turn_end 也没有**：`turnStartedAt` 不会清零，`errorNote` 也不设。
-   补法不用改 `PiSurface`：`PiLike` 已经把 `agent_settled.aborted` 类型化了，
-   在那个分支补发 turn_end 即可。**这是待办，不是通过项。**
+   **接口已按实测改掉（`abecc76`）。** 原先 `surface.ts` 以 `agent_before_settle` 为 turn_end 的唯一来源，
+   于是 `pg.abort` 之后一条 turn_end 也没有：`turnStartedAt` 不清零、`errorNote` 不设、
+   上级永远不知道那一轮被切断。现在 `agent_settled.aborted === true` 也会补发一条
+   `turn_end{error}`。`PiSurface` 接口没动。
+   更值得记的是**为什么以前没测出来**：整个测试套件驱动的是 `FakeSurface`，
+   `surface.ts` 里这段真实的 pi 事件映射**一条测试都没有**。补了 `test/surface.test.ts`
+   （6 条），并且验证过：把修复撤掉，2 条变红。
 3. **`shutdown()` 干净 —— 只验证了一条路径。** 通过行是 `shutdown_start`
    （`reason:"quit", mode:"tui"`）→ `shutdown_done`（`waited_ms:251`），
    退出码 `0`、只派发一次。
@@ -293,7 +296,7 @@ pi -ne -e <abs>/probe/probe.ts --no-session --no-builtin-tools --no-mcp \
 
 | 风险 | 状态 |
 |---|---|
-| `pg.abort` 之后没有 turn_end：pi 在 abort 时不发 `agent_before_settle` | **2026-11-01 实测确认，未修**。`surface.ts:129-134` 仍以该事件为唯一来源；补法是在 `agent_settled.aborted === true` 时补发，不动 `PiSurface` |
+| ~~`pg.abort` 之后没有 turn_end~~ | **已修（`abecc76`）**：`agent_settled.aborted === true` 时补发 `turn_end{error}`，`test/surface.test.ts` 守着。但**`surface.ts` 的 pi 事件映射整体此前零测试**，是这次才发现的盲区——以后改这个文件，先看那个测试文件 |
 | `ctx.shutdown()` 自调用、print/json 模式下的退出 | 未验证。只验了外部 `SIGTERM` 的 tui 路径（exit 0、处理器被 await、只派发一次）；print 模式据源码是 143（未实测） |
 | `herdr agent start` 在真实 pane 里的行为 | 命令行形状已核，**行为未验**；探针是在 pane 里直接跑 `bash pane.sh` 起 pi，没走 `agent start` |
 | 消息与 inbox 都没有清理策略 | 已知，无上限增长。规模上来再定 |
