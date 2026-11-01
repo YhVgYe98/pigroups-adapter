@@ -7,13 +7,23 @@ import { existsSync, readFileSync } from 'node:fs';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as Record<string, any>;
 
-test('package.json declares a Pi package whose extension entry exists', () => {
-  assert.deepEqual(pkg.pi, { extensions: ['./src/extension.ts'] }, 'the manifest points at the extension entry');
+test('package.json declares a Pi package whose extension entry and skills exist', () => {
+  assert.deepEqual(
+    pkg.pi,
+    { extensions: ['./src/extension.ts'], skills: ['./skills'] },
+    'the manifest points at the extension entry and the two skills',
+  );
   assert.ok(Array.isArray(pkg.keywords) && pkg.keywords.includes('pi-package'), 'the gallery discovery keyword is present');
   assert.ok(
     existsSync(new URL(pkg.pi.extensions[0], new URL('../package.json', import.meta.url))),
     'the declared extension path exists in this package',
   );
+  for (const name of ['pigroups-org', 'pigroups-message']) {
+    assert.ok(
+      existsSync(new URL(`../skills/${name}/SKILL.md`, import.meta.url)),
+      `the skill directory ${name} ships a SKILL.md`,
+    );
+  }
 });
 
 test('the package stays private and ships only what a user needs', () => {
@@ -25,7 +35,7 @@ test('the package stays private and ships only what a user needs', () => {
   assert.equal(typeof pkg.repository.url, 'string');
   assert.deepEqual(
     [...pkg.files].sort(),
-    ['CHANGELOG.md', 'README.md', 'docs', 'src'].sort(),
-    'probe/, test/ and lockfiles are not part of the installed package',
+    ['CHANGELOG.md', 'README.md', 'docs', 'skills', 'src'].sort(),
+    'the skills ship with the package; probe/, test/ and lockfiles do not',
   );
 });

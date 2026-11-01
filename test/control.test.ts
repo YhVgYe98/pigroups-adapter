@@ -6,9 +6,9 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { command, poll, removeMember, send, waitFor, within } from './support.ts';
-import { scenario } from './scenario.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, scenario } from './scenario.ts';
 
-test('pg.abort from the parent calls abort() and delivers nothing; a pg.steer behind it waits for the abort', async (t) => {
+test('pg.abort cuts, then closes the window and delivers the steer queued behind it at once', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
 
@@ -30,6 +30,73 @@ test('pg.abort from the parent calls abort() and delivers nothing; a pg.steer be
   assert.equal(steer.length, 1, 'the queued steer must be delivered once the abort resolved');
   assert.equal(steer[0].kind, 'control');
   assert.ok(steer[0].at >= releasedAt, 'the steer is injected after the abort returned, not alongside it');
+  assert.equal(
+    s.surface.aborts.length,
+    1,
+    'the steer itself no longer aborts: pg_abort is the only way to change a member inside a tool',
+  );
+  assert.equal(s.surface.deliveries.length, 1, 'pg.abort closed the window, and one closed window is one deliver');
+});
+
+// 概念稿 §8.3 ①: the window exists to avoid interrupting work; an abort already stopped
+// the work, so the pending batch must not wait out the rest of the window.
+test('pg.abort delivers what is pending without waiting for the window', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  s.surface.beginTurn();
+  await send(s.platform, s.parent!.token, s.me.id, 'already queued when the abort lands');
+  await s.cycle();
+  assert.equal(s.surface.deliveries.length, 0, 'precondition: the message is inside its window');
+
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.abort', { v: 1 });
+  await s.loop.pollOnce();
+  await s.loop.flush();
+
+  assert.equal(s.surface.aborts.length, 1, 'precondition: the turn was cut');
+  const delivered = s.surface.texts().join('\n');
+  assert.ok(delivered.includes('already queued when the abort lands'), `the abort must close the window: ${delivered}`);
+});
+
+// 概念稿 §8.3 ①, second sentence: "abort, then say" must take effect at once — a message
+// sent after the abort must not wait out a fresh window just because it arrived later.
+test('a message that arrives after the abort is delivered without waiting for a fresh window', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  s.surface.beginTurn();
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.abort', { v: 1 });
+  await s.loop.pollOnce();
+  assert.equal(s.surface.aborts.length, 1, 'precondition: the abort was handled');
+  assert.equal(s.surface.deliveries.length, 0, 'precondition: nothing was pending when the abort landed');
+
+  await send(s.platform, s.parent!.token, s.me.id, 'the new direction after the cut');
+  await s.cycle();
+
+  const delivered = s.surface.texts().join('\n');
+  assert.ok(delivered.includes('the new direction after the cut'), `the post-abort message waited for a window: ${delivered}`);
+});
+
+// 概念稿 §8.2: a steer waits for the running turn — only pg_abort can change a member
+// that is inside a long tool. The old adapter cut the turn before injecting; that is gone.
+test('pg.steer no longer cuts a busy member; it is delivered into the turn like any message', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  s.surface.beginTurn();
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.steer', { text: 'the new direction' });
+  await s.loop.pollOnce();
+  assert.equal(s.surface.aborts.length, 0, 'a steer is a message; it must not cut the running turn');
+  assert.equal(s.surface.deliveries.length, 0, 'the steer enters the window');
+
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 1);
+  assert.ok(s.surface.deliveries[0].text.includes('the new direction'));
+  assert.equal(s.surface.deliveries[0].kind, 'control');
+  assert.equal(s.surface.isBusy(), true, 'the turn was still running: the steer joined it');
 });
 
 test('pg.steer from a sibling is ignored and does not call abort()', async (t) => {
@@ -39,6 +106,7 @@ test('pg.steer from a sibling is ignored and does not call abort()', async (t) =
 
   await command(s.platform, sibling.token, s.me.id, 'pg.steer', { text: 'do this instead' });
   await s.cycle();
+  await s.timer(WINDOW);
 
   assert.equal(s.surface.aborts.length, 0, 'a sibling must not be able to abort me');
   assert.equal(s.surface.deliveries.length, 0, 'a sibling must not be able to steer me');
@@ -50,6 +118,7 @@ test('sys.terminated stops the member: shutdown() is called and nothing further 
 
   await send(s.platform, s.parent!.token, s.me.id, 'something owed before the end');
   await s.cycle();
+  await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 1);
 
   await removeMember(s.platform, s.parent!.token, s.me.id);
@@ -60,11 +129,10 @@ test('sys.terminated stops the member: shutdown() is called and nothing further 
 
   const mark = s.surface.mark();
   await s.settle();
-  await s.loop.flush();
+  await s.timer(WINDOW);
   assert.equal(s.surface.since(mark).length, 0, 'nothing may be delivered after the shutdown');
   assert.equal(s.surface.textsOfKind('nudge').length, 0, 'a stopped member must not keep nudging');
 });
-
 
 test('sys.terminated cuts the running turn before discarding the journal and shutting down', async (t) => {
   const s = await scenario({ siblings: 1 });
@@ -112,7 +180,7 @@ test('sys.terminated cuts the running turn before discarding the journal and shu
 
   const afterShutdown = s.surface.mark();
   await s.settle();
-  await s.loop.flush();
+  await s.timer(WINDOW);
   assert.equal(s.surface.since(afterShutdown).length, 0, 'nothing may be delivered after the shutdown');
 });
 
@@ -144,6 +212,7 @@ test('a poll answered 410 member_gone stops the member', async (t) => {
 
   await send(s.platform, s.parent!.token, s.me.id, 'the work before the end');
   await s.cycle();
+  await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 1);
 
   await removeMember(s.platform, s.parent!.token, s.me.id);
@@ -162,7 +231,7 @@ test('a poll answered 410 member_gone stops the member', async (t) => {
 
   const mark = s.surface.mark();
   await s.settle();
-  await s.loop.flush();
+  await s.timer(WINDOW);
   assert.equal(s.surface.since(mark).length, 0, 'nothing may be delivered after a 410');
   assert.equal(s.surface.textsOfKind('nudge').length, 0, 'a gone member must not keep nudging');
 });
@@ -183,10 +252,8 @@ test('an unknown cmd and a pg.* payload with v:2 are injected, not dropped', asy
     text: 'an inspect from a newer protocol',
   });
   await s.cycle();
-  // Controls are handled one by one and the first one starts a turn, so the second may be queued
-  // behind it; a settle is what releases the queue (§2.3).
-  await s.settle();
-  await s.timer(0);
+  // Controls enter the same window as messages (概念稿 §8.4), so this takes one close.
+  await s.timer(WINDOW);
 
   const control = s.surface.textsOfKind('control').join('\n');
   assert.ok(control.length > 0, `control items must be injected, got: ${JSON.stringify(s.surface.texts())}`);

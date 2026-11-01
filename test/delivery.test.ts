@@ -1,30 +1,55 @@
-// §3.3 message grading and §3.4 injection coalescing, against the real platform.
+// 概念稿 §8.1/§8.2: one queue, a tumbling time window, and delivery as a steer.
+//
+// The window is checked by the same 5 s `tick()`, so every test here moves the injected
+// clock and calls `tick()` (via `s.timer`) instead of waiting for wall time.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
-import { AdapterLoop } from '../src/loop.ts';
-import { PgClient } from '../src/pgclient.ts';
-import type { PiSurface } from '../src/surface.ts';
-import { delay, send } from './support.ts';
-import { scenario } from './scenario.ts';
+import { send } from './support.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, scenario } from './scenario.ts';
 
-test('a DM from the parent is delivered with the conversation id and the message seq', async (t) => {
+test('a DM from the parent waits for its window, then arrives with the conversation id and the message seq', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
+  // Drain the startup sequence first: a DM that exists before the first poll is the brief,
+  // and the brief is the one item that does not wait for a window (概念稿 §8.4).
+  await s.cycle();
 
   await send(s.platform, s.parent!.token, s.me.id, 'implement X, accept Y');
   await s.cycle();
 
-  assert.equal(s.surface.deliveries.length, 1, 'one DM must produce exactly one deliver');
+  assert.equal(s.surface.deliveries.length, 0, 'the first item opens the window; nothing goes out yet');
+
+  await s.timer(WINDOW);
+
+  assert.equal(s.surface.deliveries.length, 1, 'a closed window is exactly one deliver');
   const [delivery] = s.surface.deliveries;
   assert.equal(delivery.kind, 'message');
   assert.ok(delivery.text.includes(s.dm), `injected text must carry the conversation id, got: ${delivery.text}`);
   assert.ok(delivery.text.includes('#1'), `injected text must carry the message seq, got: ${delivery.text}`);
   assert.ok(delivery.text.includes('implement X'), 'injected text must carry the preview');
+});
+
+test('items that arrive inside one window share a single delivery, in arrival order', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle(); // startup: no DM yet, so no windowless brief
+
+  await send(s.platform, s.parent!.token, s.me.id, 'first');
+  await s.cycle();
+  assert.equal(s.surface.deliveries.length, 0, 'precondition: the window is open');
+
+  s.clock.advance(WINDOW / 2);
+  await send(s.platform, s.parent!.token, s.me.id, 'second');
+  await s.cycle();
+  assert.equal(s.surface.deliveries.length, 0, 'a second item joins the open window instead of delivering');
+
+  await s.timer(WINDOW / 2); // the clock is now WINDOW past the first item
+  const delivered = s.surface.texts().join('\n');
+  assert.equal(s.surface.deliveries.length, 1, `one window is one deliver, got:\n${delivered}`);
+  assert.ok(delivered.includes('first') && delivered.includes('second'), delivered);
+  assert.ok(delivered.indexOf('first') < delivered.indexOf('second'), `arrival order, got:\n${delivered}`);
 });
 
 test('a group message that mentions me is delivered; one that does not is not delivered and starts no turn', async (t) => {
@@ -36,6 +61,9 @@ test('a group message that mentions me is delivered; one that does not is not de
   await send(s.platform, sibling.token, s.group, 'please review my branch', [s.me.id]);
   await send(s.platform, sibling.token, s.group, 'lunch anyone?');
   await s.cycle();
+
+  assert.equal(s.surface.deliveries.length, 0, 'the window is open; the unmentioned message is not queued');
+  await s.timer(WINDOW);
 
   assert.equal(s.surface.deliveries.length, 1, 'only the mentioning message may start a turn');
   const [delivery] = s.surface.deliveries;
@@ -53,10 +81,12 @@ test('chatter is counted and appears as a suffix on the next real delivery, neve
   await send(s.platform, sibling.token, s.group, 'chatter two');
   await send(s.platform, sibling.token, s.group, 'chatter three');
   await s.cycle();
-  assert.equal(s.surface.deliveries.length, 0, 'chatter must not start a turn by itself');
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 0, 'chatter must not start a turn, not even a window');
 
   await send(s.platform, s.parent!.token, s.me.id, 'the real task');
   await s.cycle();
+  await s.timer(WINDOW);
 
   assert.equal(s.surface.deliveries.length, 1, 'the real message must produce one deliver');
   const [delivery] = s.surface.deliveries;
@@ -64,7 +94,7 @@ test('chatter is counted and appears as a suffix on the next real delivery, neve
   assert.match(delivery.text, /另有\s*3\s*条无关消息/, `missing the chatter suffix: ${delivery.text}`);
 });
 
-test('while isBusy() nothing is delivered; after onSettled the held items arrive in order', async (t) => {
+test('a busy member still receives the window batch: delivery is a steer, not a wait for idle', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle(); // drain the startup sequence: no DM exists yet, so nothing is injected
@@ -74,13 +104,15 @@ test('while isBusy() nothing is delivered; after onSettled the held items arrive
   await send(s.platform, s.parent!.token, s.me.id, 'second');
   await s.cycle();
 
-  assert.equal(s.surface.deliveries.length, 0, 'nothing may be injected while a turn is running');
+  assert.equal(s.surface.isBusy(), true, 'precondition: a turn is running');
+  assert.equal(s.surface.deliveries.length, 0, 'the window, not the busy flag, decides when');
   assert.equal(s.surface.heldCount, 0);
 
-  await s.settle();
+  await s.timer(WINDOW);
 
   const delivered = s.surface.texts().join('\n');
-  assert.ok(delivered.length > 0, 'the held messages must be delivered after the turn ends');
+  assert.equal(s.surface.deliveries.length, 1, `one window is one steer, got:\n${delivered}`);
+  assert.equal(s.surface.isBusy(), true, 'the turn is still running: the batch was steered into it');
   assert.ok(delivered.includes('first'), delivered);
   assert.ok(delivered.includes('second'), delivered);
   assert.ok(
@@ -97,6 +129,7 @@ test('a gap that skipped messages naming me is delivered as a hint with its anch
 
   for (let i = 0; i < 5; i += 1) await send(s.platform, sibling.token, s.group, `chatter ${i}`);
   await s.cycle();
+  await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 0, 'a gap with nothing pointed at me must not start a turn');
 
   const pointed: number[] = [];
@@ -104,6 +137,7 @@ test('a gap that skipped messages naming me is delivered as a hint with its anch
     pointed.push((await send(s.platform, sibling.token, s.group, `pointed ${i}`, [s.me.id])).seq);
   }
   await s.cycle();
+  await s.timer(WINDOW);
 
   // `pollLimit` 2 keeps the newest two: the anchor is the seq of the earliest one kept (§6.4).
   const anchor = pointed[pointed.length - 2];
@@ -119,138 +153,96 @@ test('a gap that skipped messages naming me is delivered as a hint with its anch
   assert.ok(s.loop.state().owed.includes(s.group), 'a gap that skipped a mention leaves the conversation owed');
 });
 
-// §2.3: one delivery per settle. The settle reaction now awaits the platform before it
-// decides, and another path (`ingest() → flush()`) can deliver inside that window. Its
-// own flush then answers `empty` because the queue was drained — which is not the same
-// as "nothing was delivered", and must not license a nudge on top of that delivery.
-test('a settle nudges only when nothing was delivered while it was asking the platform', async () => {
-  const SELF = 'm_aaaaaa';
-  const PEER = 'm_bbbbb1';
-  const dm = `dm:${SELF}_${PEER}`;
-  const dir = await mkdtemp(join(tmpdir(), 'pigroups-delivery-test-'));
-  const deliveries: Array<{ text: string; kind: string }> = [];
-  let fireSettled: (() => void) | undefined;
-  let releaseTree: ((tree: unknown) => void) | undefined;
-  let treeReads = 0;
-  let now = 1_000_000;
-  let polls = 0;
+test('the batch cap is a size valve, not a trigger: a full window sends ten and the rest waits for the next', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
 
-  // pi 1.4.0's contract: `sendMessage` is void, so `deliver` resolves before `isIdle()`
-  // has to have flipped. A fake that flips busy inside `deliver` would hide this race.
-  const surface: PiSurface = {
-    deliver: async (text, kind) => {
-      deliveries.push({ text, kind });
-    },
-    abort: async () => undefined,
-    isBusy: () => false,
-    onSettled: (cb) => {
-      fireSettled = cb;
-      return () => undefined;
-    },
-    onEvent: () => () => undefined,
-    shutdown: () => undefined,
-  };
-  const pg = {
-    whoami: async () => ({ member: { id: SELF, name: 'me', parent_id: null } }),
-    conversations: async () => ({ items: [{ to: dm }] }),
-    messages: async () => ({
-      items: [
-        {
-          to: dm,
-          seq: 7,
-          sender_id: PEER,
-          sender_kind: 'member',
-          sender_name: 'peer',
-          body: 'ping',
-          meta: null,
-          mentions: [],
-          created_at: 0,
-        },
-      ],
-      next: null,
-    }),
-    // The startup prune reads a healthy roster first. Only the settle under test
-    // gets the held read, which is what `releaseTree` exposes.
-    tree: () => {
-      treeReads += 1;
-      if (treeReads === 1) return Promise.resolve({ nodes: [{ id: SELF }, { id: PEER }] });
-      return new Promise((resolve) => {
-        releaseTree = resolve;
-      });
-    },
-    poll: async () => {
-      polls += 1;
-      if (polls === 1) return { items: [], control_pending: 0 };
-      return {
-        items: [
-          {
-            kind: 'message',
-            to: dm,
-            seq: 8,
-            from_id: PEER,
-            from_name: 'peer',
-            preview: 'the message that wins the settle',
-            mentions_me: false,
-            from_parent: false,
-          },
-        ],
-        control_pending: 0,
-      };
-    },
-    getMember: async () => ({ status: 'alive' }),
-    sendMessage: async () => ({ to: '', seq: 0, recipients: [], created_at: 0 }),
-    sendControl: async () => ({ control_seq: 0, receipts: [] }),
-  };
-  const loop = new AdapterLoop({
-    pg: pg as unknown as PgClient,
-    surface,
-    herdr: {
-      spawn: async () => ({ pane: 'pane-x' }),
-      waitReady: async () => undefined,
-      read: async () => '',
-      close: async () => ({ forced: false }),
-    },
-    config: {
-      url: 'http://127.0.0.1:1',
-      token: 't',
-      adapterDir: dir,
-      pollLimit: 20,
-      pollWait: 0,
-      attentionToolMs: 300_000,
-      remindWindowMs: 300_000,
-      nudgeMax: 3,
-      spawnCmd: 'pi',
-    },
-    now: () => now,
-  });
-  try {
-    await loop.pollOnce(); // initialise: selfId + the DM debt, exactly as a real start would
-    assert.deepEqual(loop.state().owed, [dm], 'precondition: the reconciliation found the debt');
-    now += 31_000; // the startup roster snapshot is stale, so the settle must read again
+  for (let i = 0; i < 12; i += 1) await send(s.platform, s.parent!.token, s.me.id, `message ${i}`);
+  await s.cycle();
+  assert.equal(s.surface.deliveries.length, 0, 'precondition: one window, nothing out yet');
 
-    fireSettled?.(); // the settle under test starts and waits inside pruneUnanswerableDms()
-    await delay(20);
-    assert.equal(releaseTree !== undefined, true, 'precondition: the settle is waiting on the roster read');
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 1, 'the count closes no window and starts no second delivery');
+  const first = s.surface.texts()[0];
+  assert.ok(first.includes('message 9'), `the first ten go out: ${first}`);
+  assert.ok(!first.includes('message 10'), `the eleventh must wait for the next window: ${first}`);
 
-    // Meanwhile the poll path delivers its message and drains the queue.
-    await loop.pollOnce();
-    assert.deepEqual(
-      deliveries.map((d) => d.kind),
-      ['message'],
-      'precondition: the other path really delivered',
-    );
+  assert.equal(s.surface.deliveries.length, 1, 'the remainder does not ride the same close');
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 2, 'the remainder goes out when the next window closes');
+  const second = s.surface.texts()[1];
+  assert.ok(second.includes('message 10') && second.includes('message 11'), second);
+});
 
-    releaseTree?.({ nodes: [{ id: SELF }, { id: PEER }] }); // the peer is alive: no prune
-    await loop.settled();
+test('a settle is no longer a delivery trigger; the window is', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
 
-    assert.deepEqual(
-      deliveries.map((d) => d.kind),
-      ['message'],
-      "one settle may deliver once: the queued message that went out is the settle's delivery",
-    );
-    assert.deepEqual(loop.state().nudges, { [dm]: 0 }, 'the nudge budget must not be spent on a settle that delivered');
-  } finally {
-    await loop.stop();
-    await rm(dir, { recursive: true, force: true });
-  }
+  // A turn is running, so the polled DM is queued and opens its window.
+  s.surface.beginTurn();
+  await send(s.platform, s.parent!.token, s.me.id, 'queued behind the turn');
+  await s.cycle();
+
+  // The turn ends with the window still open: a settle may enqueue a nudge, nothing more.
+  await s.settle();
+  assert.equal(s.surface.deliveries.length, 0, 'a settle must not deliver; it only lets the tick look');
+
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 1, 'the closed window delivers the queued work');
+  assert.equal(s.surface.deliveries[0].kind, 'message', 'the queued message wins the window over the nudge');
+  assert.ok(s.surface.deliveries[0].text.includes('queued behind the turn'));
+  assert.deepEqual(s.loop.state().owed, [s.dm], 'the nudge was not delivered alongside the message');
+});
+
+test('a batch delivered into a provider-error turn is kept; the next aborted end re-sends it', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  await send(s.platform, s.parent!.token, s.me.id, 'the message a failed turn did not necessarily show');
+  await s.cycle();
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 1, 'precondition: the batch reached pi');
+
+  // A provider error proves neither that the model saw it nor that it did not: keep the copy.
+  s.surface.settle({ message: 'provider 429 ×7' });
+  await s.loop.settled();
+  await s.loop.flush();
+  assert.equal(s.surface.deliveries.length, 1, 'an errored end neither clears nor re-sends');
+
+  s.surface.settleAborted();
+  await s.loop.settled();
+  await s.loop.flush();
+  assert.equal(s.surface.deliveries.length, 2, 'the kept copy is re-sent when an abort takes the turn');
+  assert.ok(s.surface.deliveries[1].text.includes('the message a failed turn did not necessarily show'));
+});
+
+test('a batch delivered into an aborted turn is put back and delivered again; a clean end clears it', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  const sent = await send(s.platform, s.parent!.token, s.me.id, 'the message the abort could swallow');
+  await s.cycle();
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 1, 'precondition: the batch reached pi');
+  assert.ok(s.surface.deliveries[0].text.includes(`#${sent.seq}`), s.surface.deliveries[0].text);
+
+  // pi drops a steer still queued when an abort lands; the turn ends `aborted`.
+  s.surface.settleAborted();
+  await s.loop.settled();
+  await s.loop.flush();
+
+  assert.equal(s.surface.deliveries.length, 2, 'the aborted turn must hand the batch back');
+  const replay = s.surface.deliveries[1].text;
+  assert.ok(replay.includes('the message the abort could swallow'), replay);
+  assert.ok(replay.includes(`[${s.dm}#${sent.seq}]`), `the duplicate still carries its marker: ${replay}`);
+
+  // A clean turn end means pi kept it: nothing is re-sent.
+  s.surface.settle();
+  await s.loop.settled();
+  await s.loop.flush();
+  assert.equal(s.surface.deliveries.length, 2, 'a clean end clears the copy');
 });

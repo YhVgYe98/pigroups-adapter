@@ -9,18 +9,20 @@ import { join } from 'node:path';
 import { AdapterLoop } from '../src/loop.ts';
 import { PgClient, PgGone } from '../src/pgclient.ts';
 import { FakeClock, FakeSurface, createMember, dmId, poll, removeMember, send, waitFor } from './support.ts';
-import { payloads, scenario } from './scenario.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, payloads, scenario } from './scenario.ts';
 
-test('an owed reply is nudged when the turn settles; after replying it is not', async (t) => {
+test('an owed reply is nudged on the window after the turn settles; after replying it is not', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
 
   await send(s.platform, s.parent!.token, s.me.id, 'status please');
   await s.cycle();
+  await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 1);
 
   await s.settle();
-  await s.timer(0); // a settle may be noticed by the timer task too; no clock moves
+  assert.equal(s.surface.textsOfKind('nudge').length, 0, 'a settle enqueues the nudge; the window delivers it');
+  await s.timer(WINDOW);
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(nudges.length, 1, 'a DM from the parent with no reply must be nudged once');
   assert.ok(nudges[0].includes(s.dm), `the nudge must name the conversation: ${nudges[0]}`);
@@ -31,7 +33,7 @@ test('an owed reply is nudged when the turn settles; after replying it is not', 
 
   const nudgesBefore = s.surface.textsOfKind('nudge').length;
   await s.settle();
-  await s.timer(0);
+  await s.timer(WINDOW);
   assert.equal(
     s.surface.textsOfKind('nudge').length,
     nudgesBefore,
@@ -46,10 +48,11 @@ test('@all produces exactly one obligation for that conversation, not one per me
   await send(s.platform, s.parent!.token, s.group, 'standup now', ['all']);
   await send(s.platform, s.parent!.token, s.group, 'and bring numbers', ['all']);
   await s.cycle();
+  await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 1, 'two mentioned messages may share one deliver');
 
   await s.settle();
-  await s.timer(0);
+  await s.timer(WINDOW);
 
   const nudges = s.surface.textsOfKind('nudge').filter((text) => text.includes(s.group));
   assert.equal(nudges.length, 1, `@all means one obligation, got ${nudges.length} nudges:\n${nudges.join('\n')}`);
@@ -60,88 +63,82 @@ test('@all produces exactly one obligation for that conversation, not one per me
   );
 });
 
-// §2.3 invariant 2: one delivery per settle, `flush()` first and `nudge()` only when flush
-// delivered nothing. Nudge-first starves the queue — the nudge starts the turn, so the flush
-// behind it always no-ops and new messages never reach the member that is not answering.
-test('a settle delivers once: the queued message first, and the nudge only when nothing was queued', async (t) => {
+// §8.4's \"催办：窗口关闭，且只在没别的东西可投时\", expressed on one queue: queued work
+// wins the window over a nudge, and the nudge is delivered by a window with nothing else.
+test('queued work wins the window over a nudge, and the nudge waits for a quiet window', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
 
   await send(s.platform, s.parent!.token, s.me.id, 'status please');
   await s.cycle();
+  await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 1, 'the first DM must be delivered');
   assert.equal(s.surface.deliveries[0].kind, 'message');
   assert.deepEqual(s.loop.state().owed, [s.dm], 'an answered-nothing DM leaves the conversation owed');
 
-  // A turn is running, so the next DM is queued by pollOnce() and stays queued.
+  // A turn is running, so the next DM is queued when the poll sees it.
   s.surface.beginTurn();
   await send(s.platform, s.parent!.token, s.me.id, 'and the numbers');
-  await s.loop.pollOnce();
-  assert.equal(s.surface.deliveries.length, 1, 'nothing may be injected while a turn is running');
+  await s.cycle();
+  assert.equal(s.surface.deliveries.length, 1, 'the window is open: nothing has gone out');
 
-  // That turn ends: the settle reaction runs with something queued *and* a nudge due.
+  // That turn ends with work queued *and* a nudge due (§4.3). The settle itself delivers
+  // nothing; the closed window delivers the queued message, and only that.
   const afterFirst = s.surface.mark();
-  s.surface.settle();
-  await waitFor(() => s.surface.since(afterFirst).length > 0, 'the settle reaction to deliver');
-  // The signal for "that was the only delivery": the queue is empty. The first `flush()` would
-  // merge into the settle reaction's own in-flight flush (§2.3), so the second one is the fresh answer.
-  await s.loop.flush();
-  assert.equal(await s.loop.flush(), false, 'the settle reaction left an empty queue behind');
+  await s.settle();
+  assert.equal(s.surface.since(afterFirst).length, 0, 'a settle is not a delivery trigger');
+  await s.timer(WINDOW);
 
   const first = s.surface.since(afterFirst);
   assert.equal(
     first.length,
     1,
-    `one settle may deliver once, got ${first.length}: ${first.map((d) => d.kind).join(', ')}`,
+    `one window is one delivery, got ${first.length}: ${first.map((d) => d.kind).join(', ')}`,
   );
-  assert.equal(first[0].kind, 'message', 'queued work must win over the nudge in the same settle');
+  assert.equal(first[0].kind, 'message', 'queued work must win over the nudge in the same window');
   assert.ok(first[0].text.includes('and the numbers'), `the queued message must be delivered: ${first[0].text}`);
 
-  // Next settle, nothing queued and the member has still said nothing: now the nudge.
+  // Next window, nothing else queued and the member has still said nothing: the nudge.
   const afterSecond = s.surface.mark();
-  s.surface.settle();
-  await waitFor(() => s.surface.since(afterSecond).length > 0, 'the next settle reaction to deliver');
-  await s.loop.flush();
-  assert.equal(await s.loop.flush(), false, 'the next settle reaction also left an empty queue behind');
+  await s.settle();
+  assert.equal(s.surface.since(afterSecond).length, 0, 'the settle only marked the nudge due');
+  await s.timer(WINDOW);
 
   const second = s.surface.since(afterSecond);
   assert.equal(
     second.length,
     1,
-    `one settle may deliver once, got ${second.length}: ${second.map((d) => d.kind).join(', ')}`,
+    `one window is one delivery, got ${second.length}: ${second.map((d) => d.kind).join(', ')}`,
   );
-  assert.equal(second[0].kind, 'nudge', 'with an empty queue and an owed reply, the settle must nudge');
+  assert.equal(second[0].kind, 'nudge', 'with nothing queued and an owed reply, the window delivers a nudge');
   assert.ok(second[0].text.includes(s.dm), `the nudge must name the conversation: ${second[0].text}`);
   assert.deepEqual(s.loop.state().owed, [s.dm], 'the member never spoke, so the conversation is still owed');
 });
 
-// §2.3: `flush()` returns 这次是否真的投出去了 — false while the surface is busy (it spins), true
-// when something was handed to `deliver`. A `flush()` that answers true whenever it was called
-// makes the settle reaction skip the nudge forever, so the busy case has to be pinned.
-test('flush() reports what it did: false while the surface is busy, true when the queued message goes out', async (t) => {
+// `flush()` answers "did a delivery happen now?": false while the window is open, true
+// when it closes, false again once the queue is drained.
+test('flush() reports what it did: false while the window is open, true when it closes', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle(); // drain the startup sequence: no DM exists yet, so nothing is injected
-  assert.equal(s.surface.deliveries.length, 0, 'precondition: the member starts idle with an empty queue');
+  assert.equal(s.surface.deliveries.length, 0, 'precondition: the member starts with an empty queue');
 
-  // A turn is already running, so the next DM is queued and stays queued.
-  s.surface.beginTurn();
-  await send(s.platform, s.parent!.token, s.me.id, 'queued while the turn was running');
+  await send(s.platform, s.parent!.token, s.me.id, 'queued behind the window');
   await s.loop.pollOnce();
-  assert.equal(s.surface.deliveries.length, 0, 'precondition: nothing is injected while the surface is busy');
+  assert.equal(s.surface.deliveries.length, 0, 'precondition: the window is open');
 
   const mark = s.surface.mark();
-  assert.equal(await s.loop.flush(), false, 'a busy surface must report that it delivered nothing');
-  assert.equal(s.surface.since(mark).length, 0, 'and it must not have delivered anything while busy');
+  assert.equal(await s.loop.flush(), false, 'an open window must report that it delivered nothing');
+  assert.equal(s.surface.since(mark).length, 0, 'and it must not have delivered anything');
 
-  // The turn is cut instead of settled: `settle()` would fire the loop's own settle reaction,
-  // which flushes the queue itself and leaves this `flush()` with nothing to report.
-  await s.surface.abort();
-  const afterIdle = s.surface.mark();
-  assert.equal(await s.loop.flush(), true, 'an idle surface with a queued message must report that it delivered');
-  const delivered = s.surface.since(afterIdle);
-  assert.equal(delivered.length, 1, `one deliver for the queued message, got ${delivered.length}`);
-  assert.ok(delivered[0].text.includes('queued while the turn was running'), `the queued message must go out: ${delivered[0].text}`);
+  s.clock.advance(WINDOW);
+  const afterClose = s.surface.mark();
+  assert.equal(await s.loop.flush(), true, 'a closed window with a queued message must report that it delivered');
+  const delivered = s.surface.since(afterClose);
+  assert.equal(delivered.length, 1, `one deliver for the closed window, got ${delivered.length}`);
+  assert.ok(delivered[0].text.includes('queued behind the window'), `the message must go out: ${delivered[0].text}`);
+
+  assert.equal(await s.loop.flush(), false, 'a drained queue reports that it delivered nothing');
 });
 
 test('three nudges without an outbound message produce an adapter-authored blocked report to the parent', async (t) => {
@@ -150,10 +147,11 @@ test('three nudges without an outbound message produce an adapter-authored block
 
   await send(s.platform, s.parent!.token, s.me.id, 'report back');
   await s.cycle();
+  await s.timer(WINDOW);
 
   for (let i = 0; i < 5; i += 1) {
     await s.settle();
-    await s.timer(0);
+    await s.timer(WINDOW);
   }
 
   const nudges = s.surface.textsOfKind('nudge');
@@ -174,10 +172,11 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
 
   await send(s.platform, s.parent!.token, s.me.id, 'report back');
   await s.cycle();
+  await s.timer(WINDOW);
 
   for (let i = 0; i < s.config.nudgeMax + 2; i += 1) {
     await s.settle();
-    await s.timer(0);
+    await s.timer(WINDOW);
   }
 
   assert.equal(
@@ -191,10 +190,11 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
   // The parent asks again: that is inbound traffic, not the member speaking.
   await send(s.platform, s.parent!.token, s.me.id, 'any progress?');
   await s.cycle();
+  await s.timer(WINDOW); // the inbound message is delivered; its arrival is not a new episode
   const afterArrival = s.surface.mark();
   for (let i = 0; i < s.config.nudgeMax + 1; i += 1) {
     await s.settle();
-    await s.timer(0);
+    await s.timer(WINDOW);
   }
 
   assert.equal(
@@ -216,10 +216,11 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
 
   await send(s.platform, s.parent!.token, s.me.id, 'and the second half');
   await s.cycle();
+  await s.timer(WINDOW);
   const secondEpisode = s.surface.textsOfKind('nudge').length;
   for (let i = 0; i < s.config.nudgeMax + 2; i += 1) {
     await s.settle();
-    await s.timer(0);
+    await s.timer(WINDOW);
   }
 
   assert.equal(
@@ -234,8 +235,8 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
   );
 });
 
-// §4.3: "把**所有** owed 会话合成一条文本，只 deliver 一次". Two owed conversations are one turn,
-// not two: the second deliver would land in the streaming turn and be dropped silently.
+// §4.3: "把**所有** owed 会话合成一条文本，只 deliver 一次". Two owed conversations are one
+// window, one delivery: one wake-up shows all the debts, not one turn per conversation.
 test('two owed conversations are coalesced into one nudge that names both', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
@@ -244,6 +245,7 @@ test('two owed conversations are coalesced into one nudge that names both', asyn
   await send(s.platform, s.parent!.token, s.me.id, 'the dm');
   await send(s.platform, s.parent!.token, s.group, 'the group task', [s.me.id]);
   await s.cycle();
+  await s.timer(WINDOW);
   assert.deepEqual(
     s.loop.state().owed.slice().sort(),
     [s.dm, s.group].sort(),
@@ -252,7 +254,7 @@ test('two owed conversations are coalesced into one nudge that names both', asyn
 
   const mark = s.surface.mark();
   await s.settle();
-  await s.timer(0);
+  await s.timer(WINDOW);
 
   const delivered = s.surface.since(mark);
   assert.equal(
@@ -274,9 +276,10 @@ test('an exhausted conversation reports blocked once while the live one keeps be
 
   await send(s.platform, s.parent!.token, s.me.id, 'the dm that never gets answered');
   await s.cycle();
+  await s.timer(WINDOW);
   for (let i = 0; i < s.config.nudgeMax + 1; i += 1) {
     await s.settle();
-    await s.timer(0);
+    await s.timer(WINDOW);
   }
 
   assert.equal(s.surface.textsOfKind('nudge').length, s.config.nudgeMax, 'the DM spends its whole budget');
@@ -287,21 +290,22 @@ test('an exhausted conversation reports blocked once while the live one keeps be
   );
 
   // A second conversation becomes owed while the first is still owed but already reported.
-  // A turn is forced to be running so the arrival is queued: then the settle order is deterministic.
   s.surface.beginTurn();
   await send(s.platform, s.parent!.token, s.group, 'and this one too', [s.me.id]);
   await s.cycle();
+  assert.equal(s.surface.textsOfKind('nudge').length, s.config.nudgeMax, 'the queued message opens its window');
 
   const nudgesBefore = s.surface.textsOfKind('nudge').length;
-  await s.settle(); // the queued group message goes out first
-  await s.timer(0);
+  await s.settle(); // the queued group message still has its window open
+  await s.timer(WINDOW); // the message goes out first
   assert.equal(
     s.surface.textsOfKind('nudge').length,
     nudgesBefore,
-    'the queued message, not a nudge, is what this settle delivers',
+    'the queued message, not a nudge, is what this window delivers',
   );
+
   await s.settle(); // then the first nudge for the live conversation
-  await s.timer(0);
+  await s.timer(WINDOW);
 
   const live = s.surface.textsOfKind('nudge').slice(nudgesBefore);
   assert.equal(live.length, 1, `the live conversation gets nudged while the other is exhausted, got ${live.length}`);
@@ -315,7 +319,7 @@ test('an exhausted conversation reports blocked once while the live one keeps be
 
   for (let i = 0; i < s.config.nudgeMax + 1; i += 1) {
     await s.settle();
-    await s.timer(0);
+    await s.timer(WINDOW);
   }
 
   assert.equal(
@@ -334,12 +338,12 @@ test('an exhausted conversation reports blocked once while the live one keeps be
 // abort then waits for. `onSettled` already refuses while `aborting`, but the nudge
 // itself is reachable from a settle that began before the abort landed — and the
 // blocked report below awaits the platform, which leaves a second window right
-// before the delivery. Both guards are checked here through the loop's internals:
+// before the nudge is marked. Both guards are checked here through the loop's internals:
 // no public drive can hold the report open at a chosen instant.
 interface LoopInternals {
   aborting: boolean;
   obligations: { recordNudge(conv: string): number };
-  nudgeOwed(): Promise<void>;
+  markNudgeDue(): Promise<void>;
   pg: { sendControl(input: unknown): Promise<unknown> };
 }
 
@@ -347,18 +351,22 @@ function internals(loop: unknown): LoopInternals {
   return loop as LoopInternals;
 }
 
-test('nudgeOwed delivers nothing while an abort is already cutting the turn', async (t) => {
+test('a nudge is not marked or delivered while an abort is already cutting the turn', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
 
   await send(s.platform, s.parent!.token, s.me.id, 'status please');
   await s.cycle();
+  await s.timer(WINDOW);
   const inner = internals(s.loop);
   inner.aborting = true;
 
   const mark = s.surface.mark();
-  await inner.nudgeOwed();
+  await inner.markNudgeDue();
+  s.clock.advance(WINDOW);
+  s.loop.tick();
+  await s.loop.flush();
 
   assert.equal(s.surface.since(mark).length, 0, 'a nudge during pg.abort would be the turn the abort is cutting');
 });
@@ -371,6 +379,7 @@ test('an abort during the blocked report stops the nudge to the live conversatio
   await send(s.platform, s.parent!.token, s.me.id, 'the dm that never gets answered');
   await send(s.platform, s.parent!.token, s.group, 'the group task', [s.me.id]);
   await s.cycle();
+  await s.timer(WINDOW);
   const inner = internals(s.loop);
   assert.equal(
     inner.obligations.recordNudge(s.dm),
@@ -390,13 +399,16 @@ test('an abort during the blocked report stops the nudge to the live conversatio
   });
 
   const mark = s.surface.mark();
-  const driving = inner.nudgeOwed();
+  const driving = inner.markNudgeDue();
   await waitFor(() => releaseReport !== undefined, 'the blocked report to reach the platform');
 
   // The report is in flight; this is the moment a `pg.abort` can land.
   inner.aborting = true;
   releaseReport!();
   await driving;
+  s.clock.advance(WINDOW);
+  s.loop.tick();
+  await s.loop.flush();
 
   assert.equal(
     s.surface.since(mark).length,
@@ -413,8 +425,9 @@ test('a debt to a member that was deleted is dropped, not nudged forever', async
   // A sibling writes to me privately: a one-to-one debt I can only pay by answering.
   await send(s.platform, sibling.token, s.me.id, 'ping');
   await s.cycle();
+  await s.timer(WINDOW);
   await s.settle();
-  await s.timer(0);
+  await s.timer(WINDOW);
   assert.equal(s.surface.textsOfKind('nudge').length, 1, 'a living peer is owed an answer');
 
   // The parent deletes it. From now on every reply would answer 410 `member_gone`, so
@@ -425,7 +438,7 @@ test('a debt to a member that was deleted is dropped, not nudged forever', async
 
   const before = s.surface.textsOfKind('nudge').length;
   await s.settle();
-  await s.timer(0);
+  await s.timer(WINDOW);
   assert.equal(
     s.surface.textsOfKind('nudge').length,
     before,
@@ -455,6 +468,7 @@ test('a member that starts up owing a dead peer has no debt before the first set
     [],
     'a startup reconciliation must not leave a debt to a peer that is already gone',
   );
+  await s.timer(WINDOW);
   assert.equal(s.surface.textsOfKind('nudge').length, 0, 'nothing may be nudged before the first settle');
   assert.ok(!s.surface.texts().some((text) => text.includes(peerDm)), 'the dead conversation is not delivered');
 });
@@ -466,6 +480,7 @@ test('a deleted peer is not nudged by the settle that follows', async (t) => {
 
   await send(s.platform, sibling.token, s.me.id, 'ping');
   await s.cycle();
+  await s.timer(WINDOW);
   const peerDm = dmId(s.me.id, sibling.id);
   assert.ok(s.loop.state().owed.includes(peerDm), 'precondition: a living peer leaves a real debt');
 
@@ -473,6 +488,7 @@ test('a deleted peer is not nudged by the settle that follows', async (t) => {
   await s.timer(31_000); // let the roster snapshot go stale
 
   await s.settle();
+  await s.timer(WINDOW);
   assert.deepEqual(s.loop.state().owed, [], 'the pruned debt is gone, not merely unreported');
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(
@@ -496,6 +512,7 @@ test('a peer created after the cached roster read keeps its debt', async (t) => 
   // T: a DM debt exists, so the settle reads the roster and caches it at T.
   await send(s.platform, sibling.token, s.me.id, 'ping');
   await s.cycle();
+  await s.timer(WINDOW);
   await s.settle();
   assert.ok(
     s.loop.state().owed.includes(dmId(s.me.id, sibling.id)),
@@ -512,6 +529,7 @@ test('a peer created after the cached roster read keeps its debt', async (t) => 
   s.clock.advance(5_000);
   await send(s.platform, freshToken, s.me.id, 'hi, I just started');
   await s.cycle();
+  await s.timer(WINDOW);
 
   const freshDm = dmId(s.me.id, fresh.id);
   assert.ok(s.loop.state().owed.includes(freshDm), 'the fresh peer wrote to me: this is a real debt');
@@ -519,6 +537,7 @@ test('a peer created after the cached roster read keeps its debt', async (t) => 
 
   // The settle 5 s later still sees the roster read at T, where the fresh peer did not exist.
   await s.settle();
+  await s.timer(WINDOW);
   assert.ok(
     s.loop.state().owed.includes(freshDm),
     `a debt younger than the roster snapshot must not be pruned as unanswerable: ${JSON.stringify(s.loop.state().owed)}`,
@@ -537,6 +556,7 @@ test('a debt older than the snapshot to a peer missing from it is still pruned',
 
   await send(s.platform, sibling.token, s.me.id, 'ping');
   await s.cycle();
+  await s.timer(WINDOW);
   await s.settle(); // caches the roster at T, with the sibling alive
   assert.deepEqual(s.loop.state().owed, [dmId(s.me.id, sibling.id)]);
   await s.settle(); // still owed: the peer is alive and I have not answered
@@ -611,6 +631,7 @@ async function makeLoop(tree: (signal?: AbortSignal) => Promise<unknown>): Promi
       attentionToolMs: 300_000,
       remindWindowMs: 300_000,
       nudgeMax: 3,
+      deliveryWindowMs: WINDOW,
       spawnCmd: 'pi',
     },
     now: clock.now,
@@ -626,6 +647,11 @@ async function settleWithRoster(tree: () => Promise<unknown>): Promise<{ owed: s
   clock.advance(60_000);
   surface.settle();
   await loop.settled();
+  // The nudge is a windowed item (概念稿 §8.4): close its window so the test can see whether
+  // a pruned debt would still have been nudged.
+  clock.advance(WINDOW);
+  loop.tick();
+  await loop.flush();
   const owed = loop.state().owed;
   await loop.stop();
   await rm(dir, { recursive: true, force: true });
@@ -801,6 +827,7 @@ test('terminate drops the debts of every member the platform cascaded', async (t
   // The grandchild writes to me privately: a debt I can only pay in that conversation.
   await send(s.platform, grandchild.token, s.me.id, 'ping from the grandchild');
   await s.cycle();
+  await s.timer(WINDOW);
   const grandchildDm = dmId(s.me.id, grandchild.id);
   assert.ok(s.loop.state().owed.includes(grandchildDm), 'precondition: the grandchild debt exists');
 
@@ -825,6 +852,7 @@ test('say() answering 410 forgets the conversation the peer can no longer answer
 
   await send(s.platform, sibling.token, s.me.id, 'ping');
   await s.cycle();
+  await s.timer(WINDOW);
   assert.ok(s.loop.state().owed.includes(dmId(s.me.id, sibling.id)), 'precondition: the debt exists');
 
   await removeMember(s.platform, s.parent!.token, sibling.id);

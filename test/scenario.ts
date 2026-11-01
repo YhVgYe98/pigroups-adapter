@@ -30,6 +30,8 @@ import {
 export const DEFAULT_ATTENTION_TOOL_MS = 300_000;
 export const DEFAULT_REMIND_WINDOW_MS = 300_000;
 export const DEFAULT_NUDGE_MAX = 3;
+/** 概念稿 §8.1: the production default. Tests close a window by moving the fake clock. */
+export const DEFAULT_DELIVERY_WINDOW_MS = 60_000;
 
 export interface LoopConfigOverrides {
   token?: string;
@@ -40,6 +42,7 @@ export interface LoopConfigOverrides {
   attentionToolMs?: number;
   remindWindowMs?: number;
   nudgeMax?: number;
+  deliveryWindowMs?: number;
 }
 
 /** A loop plus its fakes, all pointed at one platform and one member identity. */
@@ -79,6 +82,7 @@ export async function createLoop(
     attentionToolMs: opts.attentionToolMs ?? DEFAULT_ATTENTION_TOOL_MS,
     remindWindowMs: opts.remindWindowMs ?? DEFAULT_REMIND_WINDOW_MS,
     nudgeMax: opts.nudgeMax ?? DEFAULT_NUDGE_MAX,
+    deliveryWindowMs: opts.deliveryWindowMs ?? DEFAULT_DELIVERY_WINDOW_MS,
     spawnCmd: 'pi',
   };
   const pg = new PgClient({ url: config.url, token: config.token });
@@ -104,8 +108,11 @@ export async function createLoop(
       await loop.flush();
     },
     async timer(ms) {
-      clock.advance(ms ?? config.remindWindowMs + 1);
+      // The default advance closes both the reminder window and the delivery window.
+      clock.advance(ms ?? Math.max(config.remindWindowMs, config.deliveryWindowMs) + 1);
       loop.tick();
+      // `tick()` starts the delivery itself when the window is due; this second call
+      // is the single-flight merge, so the batch is done when the test continues.
       await delay(10);
       await loop.flush();
     },

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
 
 import { quiet, send, waitFor } from './support.ts';
-import { createLoop, scenario } from './scenario.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, scenario } from './scenario.ts';
 
 /** The injected text carries `[<to>#<seq>]`; count how often one message id appears. */
 function injections(text: string, dm: string, seq: number): number {
@@ -60,11 +60,13 @@ test('the injection watermark is per member: one member advancing it must not dr
     const sent = await send(s.platform, s.parent!.token, s.group, body, [s.me.id, sibling.id]);
 
     await s.cycle();
+    await s.timer(WINDOW);
     const mine = s.surface.texts().join('\n');
     assert.equal(injections(mine, s.group, sent.seq), 1, `the first member injects its copy once, got:\n${mine}`);
     assert.equal(mine.split(body).length - 1, 1, `the body reaches the first member exactly once, got:\n${mine}`);
 
     await peer.cycle();
+    await peer.timer(WINDOW);
     const theirs = peer.surface.texts().join('\n');
     assert.equal(
       injections(theirs, s.group, sent.seq),
@@ -156,6 +158,7 @@ test('a gap does not advance the injection watermark: the message at seq === gap
 
   // The newest two slots are the DMs, so the group has no retained item: this is the second shape.
   await s.cycle();
+  await s.timer(WINDOW);
 
   const batchText = s.surface.texts().join('\n');
   const anchor = Number(/before=(\d+)/.exec(batchText)?.[1]);
@@ -171,6 +174,7 @@ test('a gap does not advance the injection watermark: the message at seq === gap
   assert.equal(next.seq, anchor, 'the next message in the conversation takes exactly the anchor seq');
 
   await s.cycle();
+  await s.timer(WINDOW);
 
   const text = s.surface.texts().join('\n');
   assert.equal(

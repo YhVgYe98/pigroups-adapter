@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { Journal } from './journal.ts';
 import { ObligationTable, TelemetryTable } from './state.ts';
 import { Watermarks } from './watermark.ts';
-import type { AttentionEvent, AttentionState, AttentionTool, Obligation } from './state.ts';
+import type { AttentionEvent, AttentionState, AttentionTool, LastRound, LastTool, Obligation } from './state.ts';
 import { PgError, PgGone, PgPollBusy, PgUnavailable } from './pgclient.ts';
 import type {
   PgClient,
@@ -35,6 +35,8 @@ export interface LoopConfig {
   remindWindowMs: number;
   nudgeMax: number;
   spawnCmd: string;
+  /** Tumbling delivery window (概念稿 §8.1): the first queued item opens it. */
+  deliveryWindowMs: number;
 }
 
 export interface InspectResult {
@@ -43,6 +45,8 @@ export interface InspectResult {
   owed: string[];
   children: number;
   tool?: { name: string; elapsed_ms: number; preview: string };
+  /** What the member's last round did (概念稿 §8.5). */
+  last?: LastRound;
 }
 
 export interface ChildSnapshot {
@@ -52,6 +56,37 @@ export interface ChildSnapshot {
   since: number;
   tool?: { name: string; elapsed_ms: number; preview: string };
   count: number;
+  /** What that child's last round did (概念稿 §8.5). */
+  last?: LastRound;
+}
+
+/** One row of the live roster behind `pg_members` (概念稿 §7.1). */
+export interface RosterMember {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  parent_name: string | null;
+  relation: 'self' | 'parent' | 'child' | 'sibling' | 'peer';
+  child_count: number;
+  /** The last time that member authenticated — not a liveness signal. */
+  last_seen_at: number | null;
+}
+
+export interface MembersResult {
+  /** This member's own id; it also appears in `members` with `relation: 'self'`. */
+  self: string;
+  /** Every living member before the filter, so `matched: 0` reads as "bad query", not "nobody exists". */
+  total: number;
+  /** Rows after the name filter. */
+  matched: number;
+  members: RosterMember[];
+}
+
+export interface ScheduleResult {
+  /** When the wake will fire, on the injected clock. */
+  due_at: number;
+  /** Wakes still waiting, including this one. */
+  pending: number;
 }
 
 export interface LoopDeps {
@@ -65,6 +100,12 @@ export interface LoopDeps {
 interface PendingDelivery {
   text: string;
   kind: DeliverKind;
+  /**
+   * This item does not wait for a window (概念稿 §8.4: the start-up brief is injected
+   * at startup, not 60 s later). It still rides the same queue, so a batch that is
+   * already held goes out with it in one call.
+   */
+  windowless?: true;
   /** Journal entry this item belongs to, so the entry survives until delivery. */
   journalId?: string;
   /** Conversation this item makes me owe a reply in (§4.2). */
@@ -78,16 +119,25 @@ interface PendingDelivery {
 }
 
 /**
- * What one `flush` did (§2.3). `flush()` answers only "did something go out", which
- * is what a caller needs; the settle reaction needs the difference between "the
- * surface is busy, hold everything" and "nothing was pending", because only the
- * latter leaves the turn to a nudge.
+ * What one `flush` did. `flush()` answers only "did something go out", which is what
+ * a caller needs; `tick()` and the abort path also care whether the window is still
+ * open (`waiting`) or an abort is holding delivery (`aborting`).
  */
-type FlushOutcome = 'delivered' | 'busy' | 'empty' | 'failed';
+type FlushOutcome = 'delivered' | 'waiting' | 'aborting' | 'stopped' | 'empty' | 'failed';
 
 const TICK_MS = 5000;
-/** At most this many items per `deliver` (§3.4). */
+/**
+ * At most this many items per `deliver` (§3.5). A size cap, never a trigger: a
+ * window that holds more closes, sends this many, and reopens a window for the rest
+ * (概念稿 §8.1: count may be a safety valve, never the thing that starts a delivery).
+ */
 const DELIVER_BATCH = 10;
+/** §13.5: the last assistant text travels truncated; the tool preview is already 200. */
+const LAST_TEXT_CHARS = 500;
+/** §7.5 / §13.2: the bounds of `pg_schedule`. */
+const SCHEDULE_MIN_SECONDS = 5;
+const SCHEDULE_MAX_SECONDS = 86_400;
+const SCHEDULE_MAX_PENDING = 8;
 /** §9: after five `poll_in_progress` conflicts in a row, rest this long. */
 const POLL_CONFLICT_LIMIT = 5;
 const POLL_CONFLICT_REST_MS = 30_000;
@@ -116,6 +166,12 @@ const ROSTER_RETRY_BACKOFF_MS = 5000;
  * `GET /v1/members/{id}` per TTL, and a dead one is closed within that TTL.
  */
 const PANE_CHECK_TTL_MS = 30_000;
+
+/** The state of one `pg_schedule` wake: one shot, in memory only (§7.5). */
+interface ScheduledWake {
+  dueAt: number;
+  note: string;
+}
 
 /** One roster read. `at` is what makes a snapshot safe to prune against (§4.1). */
 interface RosterSnapshot {
@@ -165,6 +221,29 @@ export class AdapterLoop {
   private readonly queuedByJournal = new Map<string, number>();
   private readonly inspectWaiters = new Map<string, (result: InspectResult) => void>();
   /**
+   * The tumbling window (概念稿 §8.1): set when the first queued item arrives, cleared
+   * when its batch is delivered. There is no second timer — `tick()` reads the clock.
+   */
+  private windowStart: number | null = null;
+  /** A nudge is due but must wait for a window with nothing else in it (§8.4). */
+  private nudgeDue = false;
+  /**
+   * The next windowed item goes out at the next opportunity, without waiting for a
+   * window. Armed by an abort (概念稿 §8.3 ①): the window exists to avoid interrupting
+   * work, and the abort just stopped the work, so a message that follows — the "abort,
+   * then say" pair the concept calls immediately effective — must not wait 60 s.
+   */
+  private windowImmediate = false;
+  /**
+   * The batch handed to pi by the last successful delivery, kept until the turn it
+   * entered ends. pi can drop a still-queued steer when an abort lands (§8.3); the copy
+   * is in memory only, because losing it on a crash costs at most one re-delivery and
+   * the injected text already carries `[conv#seq]` markers against duplicates.
+   */
+  private lastDelivered: PendingDelivery[] | undefined;
+  /** One-shot wakes, in memory only: a restart drops them (§7.5). */
+  private schedules: ScheduledWake[] = [];
+  /**
    * The pane each spawned child lives in. `terminate()` closes it after the platform
    * has marked the subtree gone: a pi process can exit on `sys.terminated` and still
    * leave its pane behind at a shell prompt (§5.3, 概念稿 §5.1).
@@ -195,6 +274,10 @@ export class AdapterLoop {
   private ready = false;
 
   private tool: { name: string; preview: string; startedAt: number } | undefined;
+  /** The args preview of every running tool, so `lastTool` can name what actually ran. */
+  private readonly runningToolPreviews = new Map<string, string>();
+  /** The last finished tool call, reported as part of the last-round block (§8.5). */
+  private lastTool: LastTool | undefined;
   private turnStartedAt: number | null = null;
 
   private started = false;
@@ -214,8 +297,6 @@ export class AdapterLoop {
    * `deliveries` could return while a delivery was still about to start.
    */
   private readonly settles = new Set<Promise<unknown>>();
-  /** Deliveries started so far. One settle may deliver once, whoever started it (§2.3). */
-  private deliveredCount = 0;
   /** The last good roster (§4.4), cached: an obligation check must not cost a request per settle. */
   private roster: RosterSnapshot | undefined;
   /** After a failed roster read, the next attempt waits until this instant. */
@@ -248,7 +329,7 @@ export class AdapterLoop {
     this.subscribeSettled();
   }
 
-  /** Start the three tasks (poll / flush / tick). Idempotent. */
+  /** Start the three tasks (poll / tick / settle reaction). Idempotent. */
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -304,7 +385,11 @@ export class AdapterLoop {
     await withTimeout(Promise.all(work), STOP_TIMEOUT_MS).catch(() => undefined);
   }
 
-  /** One pull: journal, classify, dispatch, then deliver whatever is held. */
+  /**
+   * One pull: journal, classify, dispatch, then let the window decide. `flush()` here
+   * only delivers a window that is already due; an item this poll just enqueued opens
+   * (or joins) a window and waits for `tick()`.
+   */
   async pollOnce(): Promise<void> {
     try {
       await this.ensureReady();
@@ -338,54 +423,115 @@ export class AdapterLoop {
   }
 
   /**
-   * Deliver what is held, if the agent is idle. A busy agent never gets a delivery (§3.4).
+   * Deliver the current window if it is due (概念稿 §8.1). A window that is still
+   * open, or an abort that is cutting a turn, delivers nothing — but a window is no
+   * longer held back by a busy agent: delivery is a pi `steer`.
    *
-   * Returns whether this call actually delivered. The settle reaction is the caller
-   * that needs it — a nudge may only take the turn when nothing was delivered (§2.3).
+   * Returns whether this call actually delivered. `tick()` is what closes a window in
+   * production; tests drive it by advancing the injected clock and calling `tick()`.
    *
-   * Single-flight (§2.3): the constructor's settle subscription calls this on every
-   * settle, so a tool, a test and the timer can call it at the same time. A second
-   * caller awaits the batch already in flight instead of splicing its own, which
-   * would re-concatenate the taken batch and append the chatter count twice.
+   * Single-flight (§2.3): the timer, a tool and a test can call this at the same
+   * time. A second caller awaits the batch already in flight instead of splicing its
+   * own, which would re-concatenate the taken batch and append the chatter count twice.
    */
   async flush(): Promise<boolean> {
     return (await this.flushOutcome()) === 'delivered';
   }
 
-  /** The same single-flight call, keeping *why* nothing went out (see `FlushOutcome`). */
-  private flushOutcome(): Promise<FlushOutcome> {
+  /**
+   * The same single-flight call, keeping *why* nothing went out (see `FlushOutcome`).
+   * `force` is the abort path (概念稿 §8.3 ①): once a turn has been cut, the reason the
+   * window exists — don't interrupt running work — is gone, so what is pending goes out
+   * at once instead of waiting for the timer.
+   */
+  private async flushOutcome(force = false): Promise<FlushOutcome> {
     const inFlight = this.flushInFlight;
-    if (inFlight) return inFlight;
-    const tracked = this.deliverPending().finally(() => {
+    if (inFlight) {
+      const outcome = await inFlight;
+      // A forced call must not be answered by a window check that ran before the
+      // abort landed; anything else (delivered, empty, failed) is already the answer.
+      if (!force || outcome !== 'waiting') return outcome;
+    }
+    const tracked = this.deliverPending(force).finally(() => {
       if (this.flushInFlight === tracked) this.flushInFlight = undefined;
     });
     this.flushInFlight = tracked;
     return tracked;
   }
 
-  private async deliverPending(): Promise<FlushOutcome> {
-    // §3.2: an abort is cutting the turn. Starting one now would be the very turn
-    // the abort then waits for — and the settle that fires *because* the turn ended
-    // is exactly the caller that would start it.
-    if (this.aborting) return 'busy';
-    if (this.surface.isBusy()) return 'busy';
-    if (this.pending.length === 0) return 'empty';
+  /** True when the window has run its course (or something in it may not wait). */
+  private windowDue(now: number): boolean {
+    if (this.pending.length === 0 && !this.nudgeDue) return false;
+    // The start-up brief does not wait for a window (§8.4), and neither does the first
+    // batch after an abort (§8.3 ①), nor a batch already holding one: they go out
+    // together, in one call.
+    if (this.windowImmediate) return true;
+    if (this.pending.some((item) => item.windowless === true)) return true;
+    return this.windowStart !== null && now - this.windowStart >= this.config.deliveryWindowMs;
+  }
 
-    const batch = this.pending.splice(0, DELIVER_BATCH);
-    let text = batch.map((item) => item.text).join('\n');
-    if (this.chatter > 0) text += `\n[另有 ${this.chatter} 条无关消息]`;
-    const kind = batch.some((item) => item.kind === 'control') ? 'control' : batch[0].kind;
+  private async deliverPending(force = false): Promise<FlushOutcome> {
+    // A stopped loop delivers nothing: `stop()` is the last step of the delete path and of
+    // process exit, and a manual `flush()` must not start a turn behind it.
+    if (this.stopped) return 'stopped';
+    // §3.2: an abort is cutting the turn. Delivering now would be the very turn the
+    // abort then waits for; the abort path itself calls back with `force` once the
+    // cut is over (概念稿 §8.3 ①).
+    if (this.aborting) return 'aborting';
+    if (this.pending.length === 0 && !this.nudgeDue) {
+      this.windowStart = null;
+      return 'empty';
+    }
+    const now = this.now();
+    if (!force && !this.windowDue(now)) return 'waiting';
+
+    // §8.4: real items win the window; the nudge is only delivered when there is
+    // nothing else to put in front of the model, and otherwise waits for a quiet one.
+    const batch = this.pending.slice(0, DELIVER_BATCH);
+    let text: string;
+    let kind: DeliverKind;
+    let nudged: Obligation[] = [];
+    if (batch.length > 0) {
+      let joined = batch.map((item) => item.text).join('\n');
+      if (this.chatter > 0) joined += `\n[另有 ${this.chatter} 条无关消息]`;
+      text = joined;
+      kind = batch.some((item) => item.kind === 'control') ? 'control' : batch[0].kind;
+    } else {
+      nudged = this.owableNudges();
+      if (nudged.length === 0) {
+        this.nudgeDue = false;
+        this.windowStart = null;
+        return 'empty';
+      }
+      text = nudgeText(nudged);
+      kind = 'nudge';
+    }
 
     try {
       await this.trackDelivery(this.surface.deliver(text, kind));
     } catch {
-      // Nothing was delivered: the batch and its journal entry stay queued so the
-      // next settle retries (§9).
-      this.pending.unshift(...batch);
+      // Nothing was delivered: the batch and its journal entry stay queued, and the
+      // window is left as it was so the next flush retries (§9).
       return 'failed';
     }
 
+    if (batch.length === 0) {
+      // §4.3: only a delivered nudge counts against the budget.
+      for (const entry of nudged) this.obligations.recordNudge(entry.conv);
+      this.nudgeDue = false;
+      this.windowStart = null;
+      this.windowImmediate = false;
+      return 'delivered';
+    }
+
+    const sent = new Set(batch);
+    for (let i = this.pending.length - 1; i >= 0; i -= 1) {
+      if (sent.has(this.pending[i])) this.pending.splice(i, 1);
+    }
     this.chatter = 0;
+    // §8.3 ②: "pi accepted it" is not "the model saw it". Keep the batch in memory so
+    // an aborted turn can put it back (`handleEvent` → `requeueLastDelivered`).
+    this.lastDelivered = batch;
     for (const item of batch) {
       if (item.conv !== undefined) {
         // `mark` keeps `nudges`, so it must not re-arm `blockedReported` either:
@@ -403,19 +549,34 @@ export class AdapterLoop {
       }
       if (item.journalId !== undefined) await this.releaseJournal(item.journalId);
     }
+    // A batch cap or a held-back nudge leaves something behind: open the next window
+    // now, so the remainder waits a whole window rather than riding this close (§8.1).
+    // Read the clock after the delivery: a slow `deliver` must not eat into it.
+    this.windowStart = this.pending.length > 0 || this.nudgeDue ? this.now() : null;
+    this.windowImmediate = false;
     return 'delivered';
   }
 
+  /** Conversations the nudge may name: owed, and not past their budget. */
+  private owableNudges(): Obligation[] {
+    return this.obligations.entries().filter((entry) => entry.nudges < this.config.nudgeMax);
+  }
+
   /**
-   * One timer scan: owed replies, telemetry window, stalled detection (§3, §5).
-   * Decisions only; `flush()` is what delivers, so a test can advance the fake
-   * clock, call `tick()` and then `flush()` without sleeping.
+   * One timer scan: schedules, telemetry, stalled detection, and window expiry (§3, §5).
+   * The window is checked here — the existing 5 s tick is the only clock delivery has
+   * (概念稿 §8.1), so there is no second timer.
    */
   tick(): void {
     if (this.stopped) return;
     const now = this.now();
+    this.fireDueSchedules(now);
     this.evaluateAttention(now);
     this.queueReminder(now);
+    if (!this.windowDue(now)) return;
+    void this.flush().catch((err: unknown) => {
+      console.warn(`[pigroups] delivery failed: ${(err as Error)?.message ?? String(err)}`);
+    });
   }
 
   /** The only send path: keeps the owed table honest (§2.3). */
@@ -504,7 +665,80 @@ export class AdapterLoop {
       since: entry.stateSince,
       tool: entry.tool,
       count: entry.count,
+      last: entry.last,
     }));
+  }
+
+  /**
+   * The live roster behind `pg_members` (概念稿 §7.1). `query` is a case-insensitive
+   * substring over the name — the only handle a model has: ids are opaque, and name is
+   * the sole index the platform keeps. `total` is the roster size *before* filtering,
+   * so `matched: 0` reads as "the query missed", not "nobody exists".
+   *
+   * `last_seen_at` is copied from the platform unchanged: it is the last time that
+   * member authenticated, which proves the token was used, not that the member lives.
+   * Liveness is the roster's own filter (`/v1/tree` lists only `alive` members).
+   */
+  async members(query?: string): Promise<MembersResult> {
+    await this.ensureReady();
+    const self = this.selfId;
+    if (self === undefined) throw new Error('pigroups adapter has no identity yet');
+    const tree = await this.pg.tree();
+    const nodes = tree.nodes;
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const needle = (query ?? '').trim().toLowerCase();
+    const rows: RosterMember[] = [];
+    for (const node of nodes) {
+      const name = typeof node.name === 'string' ? node.name : node.id;
+      if (needle !== '' && !name.toLowerCase().includes(needle)) continue;
+      rows.push({
+        id: node.id,
+        name,
+        parent_id: typeof node.parent_id === 'string' ? node.parent_id : null,
+        parent_name:
+          typeof node.parent_id === 'string' ? (byId.get(node.parent_id)?.name ?? null) : null,
+        relation: relationOf(node, self, this.parentId),
+        child_count: typeof node.child_count === 'number' ? node.child_count : 0,
+        last_seen_at: typeof node.last_seen_at === 'number' ? node.last_seen_at : null,
+      });
+    }
+    return { self, total: nodes.length, matched: rows.length, members: rows };
+  }
+
+  /**
+   * `pg_schedule` (概念稿 §7.5): one in-memory wake, at least 5 s and at most 24 h
+   * away, at most eight pending. It is deliberately not persisted: after a restart
+   * "should that intention still fire?" is a question nobody can answer.
+   *
+   * A due wake enters the delivery queue like any other item — it does not bypass the
+   * window, so the model may see it a window later than the second it asked for.
+   */
+  schedule(afterSeconds: number, note: string): ScheduleResult {
+    if (!Number.isFinite(afterSeconds)) throw new Error('pg_schedule: after_seconds must be a number');
+    if (afterSeconds < SCHEDULE_MIN_SECONDS) {
+      throw new Error(`pg_schedule: after_seconds must be at least ${SCHEDULE_MIN_SECONDS} (the tick period)`);
+    }
+    if (afterSeconds > SCHEDULE_MAX_SECONDS) {
+      throw new Error(`pg_schedule: after_seconds must be at most ${SCHEDULE_MAX_SECONDS} (24 hours)`);
+    }
+    if (note.trim() === '') throw new Error('pg_schedule: note must not be empty');
+    if (this.schedules.length >= SCHEDULE_MAX_PENDING) {
+      throw new Error(
+        `pg_schedule: ${SCHEDULE_MAX_PENDING} wakes are already pending; let one fire instead of adding another`,
+      );
+    }
+    const dueAt = this.now() + Math.round(afterSeconds * 1000);
+    this.schedules.push({ dueAt, note });
+    return { due_at: dueAt, pending: this.schedules.length };
+  }
+
+  /** Move every due wake into the queue. Called by `tick()`, never by a timer of its own. */
+  private fireDueSchedules(now: number): void {
+    if (this.schedules.length === 0) return;
+    const due = this.schedules.filter((wake) => wake.dueAt <= now);
+    if (due.length === 0) return;
+    this.schedules = this.schedules.filter((wake) => wake.dueAt > now);
+    for (const wake of due) this.enqueue({ text: `[scheduled] ${wake.note}`, kind: 'scheduled' });
   }
 
   state(): { owed: string[]; nudges: Record<string, number> } {
@@ -650,7 +884,7 @@ export class AdapterLoop {
     this.ready = true;
   }
 
-  /** §8.3: the parent's last DM is the briefing, injected once. */
+  /** §8.3: the parent's last DM is the briefing, injected once, without waiting for a window. */
   private async injectBrief(): Promise<void> {
     const parent = this.parentId;
     const self = this.selfId;
@@ -663,6 +897,8 @@ export class AdapterLoop {
     this.enqueue({
       text: `[${conv}#${brief.seq}] ${brief.sender_name}: ${brief.body}`,
       kind: 'message',
+      // 概念稿 §8.4: the brief is the one source that does not wait for a window.
+      windowless: true,
       conv,
       seq: brief.seq,
     });
@@ -792,14 +1028,16 @@ export class AdapterLoop {
         return;
 
       case 'pg.steer': {
+        // Kept as a wire command, not as a tool (概念稿 §7): a steer is a delivered
+        // instruction, so it now enters the queue and waits for the window like any
+        // other item. It must NOT abort a busy member any more — `pg_abort` is the
+        // only way to change a member that is inside a long tool (§8.2).
         if (!this.fromHigherUp(item)) {
           this.logIgnored(item);
           return;
         }
-        if (this.surface.isBusy()) await this.abortTurn();
         const text = typeof payload.text === 'string' ? payload.text : '';
         this.enqueue({ text, kind: 'control', journalId });
-        await this.flush();
         return;
       }
 
@@ -827,7 +1065,8 @@ export class AdapterLoop {
   /**
    * §3.2: a command this adapter does not interpret — an unknown `cmd`, or a `pg.*`
    * from a newer version (§6) — is injected verbatim as a control. The adapter does
-   * not know the content, so it must not drop it.
+   * not know the content, so it must not drop it. It enters the delivery window like
+   * anything else (概念稿 §8.4: unknown commands go out with the message batch).
    */
   private async injectUnknownControl(
     item: PollControlItem,
@@ -839,7 +1078,6 @@ export class AdapterLoop {
       kind: 'control',
       journalId,
     });
-    await this.flush();
   }
 
   /**
@@ -855,6 +1093,9 @@ export class AdapterLoop {
       await this.journal.discard();
       this.pending.length = 0;
       this.queuedByJournal.clear();
+      // Nothing is re-delivered after a termination: the member is gone, so a copy
+      // that an abort would normally requeue has nowhere to go.
+      this.lastDelivered = undefined;
       await this.stop();
       const reason = typeof payload.reason === 'string' ? payload.reason : 'terminated';
       this.surface.shutdown(reason);
@@ -867,13 +1108,17 @@ export class AdapterLoop {
    * §3.2: cut the running turn without holding the loop.
    *
    * Control items are handled serially, so an abort that waits for the turn to end
-   * parks every later `pg.abort`, `pg.steer` and `sys.terminated` behind it — and the
-   * settle that fires *because* the turn ended would call `flush()`, start a new turn,
-   * and keep the wait from ever finishing. Two rules close that: nothing is delivered
-   * while `aborting` (`deliverPending` answers busy), and the wait itself is bounded —
-   * `surface.abort` gives up after `ABORT_IDLE_TIMEOUT_MS`, this race gives up then or
-   * earlier when `stop()` runs. Giving up is not an error: the abort is requested and
-   * the turn is still running, and the next settle delivers what is held.
+   * parks every later `pg.abort` and `sys.terminated` behind it — and a delivery that
+   * started a new turn would keep the wait from ever finishing. Two rules close that:
+   * nothing is delivered while `aborting` (`deliverPending` answers `aborting`), and
+   * the wait itself is bounded — `surface.abort` gives up after `ABORT_IDLE_TIMEOUT_MS`,
+   * this race gives up then or earlier when `stop()` runs. Giving up is not an error:
+   * the abort request stands and the turn is still running.
+   *
+   * 概念稿 §8.3 ①: once the cut is over, the window is forced shut and what is pending
+   * goes out at once. The window exists to avoid interrupting work; the abort already
+   * stopped the work, so that reason is gone. This is what makes "abort, then say"
+   * take effect on the next poll instead of up to a window later.
    */
   private async abortTurn(): Promise<void> {
     this.aborting = true;
@@ -882,6 +1127,12 @@ export class AdapterLoop {
     } finally {
       this.aborting = false;
     }
+    if (this.stopped) return;
+    await this.flushOutcome(true);
+    // 概念稿 §8.3 ①: the window's reason is gone once the work was cut, so whatever
+    // the abort could not deliver (nothing was pending yet) goes out as soon as it
+    // arrives. This is what makes "abort, then say" take effect immediately.
+    this.windowImmediate = true;
   }
 
   /** The bounded cut itself; the caller owns the `aborting` guard. */
@@ -942,6 +1193,9 @@ export class AdapterLoop {
       tool: this.tool
         ? { name: this.tool.name, elapsed_ms: now - this.tool.startedAt, preview: this.tool.preview }
         : undefined,
+      // 概念稿 §8.5: an answer that omits the last round makes `pg_inspect` blind
+      // exactly where it matters — a member stuck inside a tool.
+      last: this.lastRound(),
     };
   }
 
@@ -956,6 +1210,7 @@ export class AdapterLoop {
       owed: Array.isArray(payload.owed) ? payload.owed.filter((c): c is string => typeof c === 'string') : [],
       children: typeof payload.children === 'number' ? payload.children : 0,
       tool: isAttentionTool(payload.tool) ? payload.tool : undefined,
+      last: isLastRound(payload.last) ? payload.last : undefined,
     });
   }
 
@@ -972,6 +1227,7 @@ export class AdapterLoop {
       tool: isAttentionTool(payload.tool) ? payload.tool : undefined,
       owed: Array.isArray(payload.owed) ? payload.owed.filter((c): c is string => typeof c === 'string') : undefined,
       note: typeof payload.note === 'string' ? payload.note : undefined,
+      last: isLastRound(payload.last) ? payload.last : undefined,
     };
     this.telemetry.apply(event, this.now());
   }
@@ -986,6 +1242,9 @@ export class AdapterLoop {
     // is redundant), but `deliverPending` never writes it.
     if (item.conv !== undefined && item.seq !== undefined && this.watermark.seen(item.conv, item.seq)) return;
     this.pending.push(item);
+    // 概念稿 §8.1: the first queued item opens the window. A windowless item does not
+    // need one, but it still opens it for whatever follows in the same batch.
+    if (this.windowStart === null) this.windowStart = this.now();
     if (item.journalId !== undefined) {
       this.queuedByJournal.set(item.journalId, (this.queuedByJournal.get(item.journalId) ?? 0) + 1);
     }
@@ -993,11 +1252,10 @@ export class AdapterLoop {
 
   /**
    * Register a delivery the surface has in hand, so `stop()` can wait for it (§2.3).
-   * Both delivery paths — the batch and the nudge — go through here; the nudge has no
-   * single-flight of its own, so this set is the only thing that knows about it.
+   * Both delivery paths — a batch and a nudge — go through here, and this set is the
+   * only thing that knows about them.
    */
   private trackDelivery<T>(delivery: Promise<T>): Promise<T> {
-    this.deliveredCount += 1;
     this.deliveries.add(delivery);
     const settle = (): void => {
       this.deliveries.delete(delivery);
@@ -1050,29 +1308,15 @@ export class AdapterLoop {
   }
 
   /**
-   * The settle reaction (§2.3): decide, deliver, then nudge. One delivery per
-   * settle, and `flush()` has first claim on it.
+   * The settle reaction (§2.3): reconcile what only a turn end can reveal, then let
+   * the timer scan decide. A settle is no longer a delivery trigger (概念稿 §8.1); it
+   * can enqueue a nudge, and that nudge is delivered by the next window.
    *
-   * The order is liveness, not taste. `deliver` starts a turn, so the surface is
-   * busy for the rest of this settle. Nudging first therefore means: every settle
-   * of a conversation that owes a reply fires a nudge, the nudge makes the surface
-   * busy, and the `flush()` behind it no-ops — the held messages never arrive, and
-   * the conversation that owes a reply is precisely the one that never gets the
-   * input that could make it speak. `flush()`'s return value is what keeps a
-   * settle down to a single delivery: the nudge takes the turn only when nothing
-   * was delivered.
-   *
-   * The reminder (§5.2) keeps its own path: `tick()` queues it when idle, and
-   * `flush()` delivers it.
+   * The blocked report (§4.3) stays here because it is adapter-authored: it does not
+   * enter the model's context at all, so no window applies to it.
    */
   private async onSettled(): Promise<void> {
     if (this.stopped) return;
-    // The awaits below are windows, not pauses: `ingest() → flush()` runs on its own
-    // path and can deliver while this reaction is still asking the platform. Count
-    // deliveries, not just this call's outcome — `flushOutcome()` answering `empty`
-    // because the other path just drained `pending` is not "nothing was delivered",
-    // and nudging then would spend a second delivery on one settle (§2.3).
-    const deliveriesBefore = this.deliveredCount;
     // Before `tick()`: a debt whose peer no longer exists must not reach the reminder
     // or the nudge. Cached, so this is free in the common case.
     await this.pruneUnanswerableDms();
@@ -1081,17 +1325,11 @@ export class AdapterLoop {
     if (this.stopped) return;
     await this.reconcilePanes();
     if (this.stopped) return;
+    // The window is checked here, by the same scan the 5 s timer runs. Nothing is
+    // delivered outside that check — except the two documented cases: the start-up
+    // brief (`windowless`) and the forced flush that follows an abort.
     this.tick();
-    // Only "nothing was pending" leaves this settle's single delivery to a nudge
-    // (§2.3). After a delivery the surface is busy; after a busy surface — including
-    // one held for an abort — or a failed delivery there is still something to
-    // deliver, and a nudge would land in a running turn. pi 1.4.0 steers or follows
-    // such a message up by default (it is not refused), but it would enter a turn that
-    // was not meant to carry it and spend this settle's one delivery on the wrong
-    // thing.
-    if ((await this.flushOutcome()) !== 'empty') return;
-    if (this.deliveredCount !== deliveriesBefore) return;
-    await this.nudgeOwed();
+    await this.markNudgeDue();
   }
 
   /**
@@ -1181,25 +1419,26 @@ export class AdapterLoop {
   }
 
   /**
-   * §4.3: one coalesced `deliver(…, 'nudge')` per settle, covering every owed
-   * conversation — never one delivery per conversation. A settle allows a single
-   * delivery (§2.3), so a second nudge would land mid-turn: pi 1.4.0 steers it into
-   * the running turn rather than dropping it, which is exactly the uncontrolled input
-   * the one-delivery rule exists to avoid. And a nudge exists to wake the model once
-   * to look at all of its debts, so one wake-up must show all of them. Not folded into
-   * the injection batch either, whose kind and batching (§3.4) belong to polled messages.
+   * §4.3: mark that a nudge is due, and report the conversations that have spent
+   * their budget. The nudge itself is not delivered here — it is a windowed item
+   * (概念稿 §8.4: "窗口关闭，且只在没别的东西可投时"): it opens/takes a window and the
+   * timer delivers it when nothing else is in the queue.
    *
-   * Only called when the settle delivered nothing (§2.3).
+   * A settle that leaves queued work does not set the flag: that batch is the wake-up,
+   * and a nudge on top would be noise in the same turn. That is the old "`flush()`
+   * first, nudge only when it had nothing" rule, expressed on the queue.
    */
-  private async nudgeOwed(): Promise<void> {
-    // §3.2: an abort is cutting the turn, so starting a nudge now would be the very
-    // turn `surface.abort` then waits for. `onSettled` already refuses when the abort
-    // began before the settle; this covers a nudge that reaches here by another path.
+  private async markNudgeDue(): Promise<void> {
+    // §3.2: an abort is cutting the turn, so a nudge now would be the very turn
+    // `surface.abort` then waits for. The flag is set on the next settle instead.
     if (this.aborting || this.stopped) return;
     const owed = this.obligations.entries();
-    if (owed.length === 0) return;
+    if (owed.length === 0) {
+      this.nudgeDue = false;
+      return;
+    }
 
-    const due: Obligation[] = [];
+    let due = 0;
     for (const entry of owed) {
       if (entry.nudges >= this.config.nudgeMax) {
         if (!this.blockedReported.has(entry.conv)) {
@@ -1208,37 +1447,30 @@ export class AdapterLoop {
         }
         continue;
       }
-      due.push(entry);
+      due += 1;
     }
-    if (due.length === 0) return;
-
-    // The blocked report above awaits the platform, which is long enough for a
-    // `pg.abort` to land in between. Delivering now would start a run during the
-    // abort; check again at the last moment (§3.2).
-    if (this.aborting) return;
-
-    const debts = due.map((entry) => `${entry.conv} #${entry.lastSeq}`).join(', ');
-    try {
-      await this.trackDelivery(
-        this.surface.deliver(`你在这些会话还有未回复的消息：${debts}。回复，或说明为什么不需要回。`, 'nudge'),
-      );
-    } catch {
-      // The nudge never reached the model, so the budget is not spent: counting it
-      // would report a member `blocked` for a turn it was never woken for. The next
-      // settle tries again (§9).
-      console.warn('[pigroups] nudge failed; retrying on the next settle');
+    if (due === 0) {
+      this.nudgeDue = false;
       return;
     }
-    // §4.3: only a delivered nudge counts against the budget.
-    for (const entry of due) this.obligations.recordNudge(entry.conv);
+    // Queued work is this settle's wake-up; the nudge waits for a window that has
+    // nothing else in it. Checked after the blocked report's await, on purpose.
+    if (this.pending.length > 0) return;
+    // §3.2 again: a `pg.abort` may have landed while the blocked report was in flight.
+    if (this.aborting) return;
+    this.nudgeDue = true;
+    if (this.windowStart === null) this.windowStart = this.now();
   }
 
-  /** The window expires into one held reminder, never into an interrupting delivery (§5.2). */
+  /**
+   * The telemetry window expires into one queued reminder (§5.2). It waits for the
+   * delivery window like any other item; there is no busy gate, because delivery is a
+   * steer now and a busy member is a normal recipient (概念稿 §8.1).
+   */
   private queueReminder(now: number): void {
-    if (this.surface.isBusy()) return;
     const decision = this.telemetry.due(now);
     if (decision.kind !== 'remind') return;
-    this.pending.push({ text: decision.text, kind: 'nudge' });
+    this.enqueue({ text: decision.text, kind: 'nudge' });
   }
 
   private async reportBlocked(text: string): Promise<void> {
@@ -1271,18 +1503,67 @@ export class AdapterLoop {
       case 'turn_end':
         this.turnStartedAt = null;
         this.tool = undefined;
+        this.runningToolPreviews.clear();
         // A provider error sticks until a later turn ends cleanly.
         this.errorNote = event.error ? event.error.message : undefined;
+        // 概念稿 §8.3 ②: an aborted turn can swallow a steer that was still queued —
+        // the only measured way a delivered message disappears. Put the batch back.
+        // A clean end proves pi persisted it, so the copy is dropped; an errored end
+        // proves neither, so the copy waits for a later abort rather than vanishing.
+        if (event.aborted === true) this.requeueLastDelivered();
+        else if (event.error === undefined) this.lastDelivered = undefined;
         this.evaluateAttention(now);
         return;
       case 'tool_start':
         this.tool = { name: event.name, preview: event.argsPreview, startedAt: now };
+        this.runningToolPreviews.set(event.name, event.argsPreview);
         return;
       case 'tool_end':
+        // Keep the last finished call for the last-round block (§8.5). `tool_end`
+        // carries no call id, so a parallel call of the same tool is the one case in
+        // which the preview can be another call's; it is a diagnostic, not a fact.
+        this.lastTool = {
+          name: event.name,
+          preview: this.runningToolPreviews.get(event.name) ?? '',
+          ok: event.ok,
+        };
+        this.runningToolPreviews.delete(event.name);
         if (this.tool?.name === event.name) this.tool = undefined;
         this.evaluateAttention(now);
         return;
     }
+  }
+
+  /**
+   * Put the last delivered batch back in front of the queue (概念稿 §8.3 ②). It must
+   * bypass `enqueue`: the watermark already advanced past these items when pi accepted
+   * them, and that acceptance is exactly what the abort took back.
+   *
+   * The window is set to "due now" so the next opportunity — the tick, or the forced
+   * flush at the end of the abort — delivers it. Duplicates are acceptable; the
+   * injected text already carries `[conv#seq]` markers.
+   */
+  private requeueLastDelivered(): void {
+    const batch = this.lastDelivered;
+    this.lastDelivered = undefined;
+    if (batch === undefined || batch.length === 0) return;
+    this.pending.unshift(...batch);
+    this.windowStart = this.now() - this.config.deliveryWindowMs;
+  }
+
+  /**
+   * The last-round block (概念稿 §8.5): the last assistant text, truncated, and the
+   * last finished tool call. `undefined` when the member has produced neither yet.
+   */
+  private lastRound(): LastRound | undefined {
+    const raw = this.surface.lastAssistantText();
+    const text = raw === undefined ? undefined : truncate(raw, LAST_TEXT_CHARS);
+    const tool = this.lastTool;
+    if (text === undefined && tool === undefined) return undefined;
+    return {
+      ...(text === undefined ? {} : { text }),
+      ...(tool === undefined ? {} : { tool }),
+    };
   }
 
   /**
@@ -1330,12 +1611,14 @@ export class AdapterLoop {
     const parent = this.parentId;
     const self = this.selfId;
     if (!parent || !self) return;
+    // §8.5: every attention report carries what the last round did, so the state line
+    // is never the only thing the parent has to decide with.
     void this.pg
       .sendControl({
         to: parent,
         id: randomUUID(),
         cmd: 'pg.attention',
-        payload: { v: 1, child: self, name: this.selfName, ...event },
+        payload: { v: 1, child: self, name: this.selfName, ...event, last: this.lastRound() },
       })
       .catch(() => {
         // Telemetry is best effort; the loop must not stop on a failed report.
@@ -1494,6 +1777,47 @@ function isAttentionTool(value: unknown): value is AttentionTool {
     typeof tool.elapsed_ms === 'number' &&
     typeof tool.preview === 'string'
   );
+}
+
+/** §8.5: a `last` block from a child; anything malformed is dropped, never guessed at. */
+function isLastRound(value: unknown): value is LastRound {
+  if (typeof value !== 'object' || value === null) return false;
+  const last = value as Record<string, unknown>;
+  const text = last.text;
+  if (text !== undefined && typeof text !== 'string') return false;
+  const tool = last.tool;
+  if (tool !== undefined) {
+    if (typeof tool !== 'object' || tool === null) return false;
+    const record = tool as Record<string, unknown>;
+    if (typeof record.name !== 'string' || typeof record.preview !== 'string' || typeof record.ok !== 'boolean') {
+      return false;
+    }
+  }
+  return text !== undefined || tool !== undefined;
+}
+
+/** The structural relation the roster row carries (概念稿 §7.1 ③). */
+function relationOf(
+  node: { id: string; parent_id?: string | null },
+  self: string,
+  parent: string | null,
+): RosterMember['relation'] {
+  if (node.id === self) return 'self';
+  if (parent !== null && node.id === parent) return 'parent';
+  if (typeof node.parent_id === 'string' && node.parent_id === self) return 'child';
+  if (parent !== null && typeof node.parent_id === 'string' && node.parent_id === parent) return 'sibling';
+  return 'peer';
+}
+
+/** §4.3: every owed conversation in one line, so one wake-up shows all of them. */
+function nudgeText(due: Obligation[]): string {
+  const debts = due.map((entry) => `${entry.conv} #${entry.lastSeq}`).join(', ');
+  return `你在这些会话还有未回复的消息：${debts}。回复，或说明为什么不需要回。`;
+}
+
+/** Cut a string to `max` characters, marking that there is more. */
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
 function isAbort(err: unknown): boolean {

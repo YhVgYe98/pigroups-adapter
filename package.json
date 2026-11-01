@@ -1,6 +1,6 @@
 {
   "name": "pigroups-adapter-pi",
-  "version": "0.4.0+platform.0.2.0",
+  "version": "0.5.0+platform.0.2.0",
   "private": true,
   "type": "module",
   "description": "A Pi extension that turns a pi session into a member of a PiGroups workspace.",
@@ -11,9 +11,10 @@
   },
   "keywords": ["pi-package", "pi", "extension", "pigroups"],
   "pi": {
-    "extensions": ["./src/extension.ts"]
+    "extensions": ["./src/extension.ts"],
+    "skills": ["./skills"]
   },
-  "files": ["src", "README.md", "CHANGELOG.md", "docs"],
+  "files": ["src", "skills", "README.md", "CHANGELOG.md", "docs"],
   "engines": { "node": ">=24" },
   "scripts": {
     "test": "node --test test/*.test.ts",

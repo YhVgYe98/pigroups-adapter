@@ -90,6 +90,9 @@ function readConfig(): LoopConfig | null {
     attentionToolMs: envInt('PIGROUPS_ATTENTION_TOOL_MS', 300_000),
     remindWindowMs: envInt('PIGROUPS_REMIND_WINDOW_MS', 300_000),
     nudgeMax: envInt('PIGROUPS_NUDGE_MAX', 3),
+    // 概念稿 §8.1 / §13.3: the tumbling delivery window. 60 s covers two 25 s polls, so
+    // a window usually sees a whole batch; `tick()` (5 s) checks when it expires.
+    deliveryWindowMs: envInt('PIGROUPS_DELIVERY_WINDOW_MS', 60_000),
     spawnCmd: resolveSpawnCmd(),
   };
 }
@@ -134,16 +137,64 @@ function buildTools(
 
   return [
     {
+      name: 'pg_members',
+      label: 'PiGroups members',
+      description:
+        'The live roster: id, name, parent_id, parent_name, relation (self|parent|child|sibling|peer), ' +
+        'child_count and last_seen_at for every living member. `query` is a case-insensitive substring ' +
+        'over the name — names are the only handle; ids are opaque. `total` is the roster size before ' +
+        'filtering and `matched` is the number of rows returned, so `total: 23, matched: 0` means the ' +
+        'query missed, not that nobody exists. `last_seen_at` is the last time that member ' +
+        'authenticated — NOT liveness (the roster already lists only living members). Only a `child` ' +
+        'can be aborted; a `peer` can only be messaged.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Case-insensitive substring of the member name.' },
+        },
+        additionalProperties: false,
+      },
+      execute: async (_id, params) => {
+        const query = typeof params.query === 'string' ? params.query : undefined;
+        const roster = await requireLoop().members(query);
+        return text(JSON.stringify(roster, null, 2));
+      },
+    },
+    {
+      name: 'pg_say',
+      label: 'PiGroups say',
+      description: 'Send a message to a group (`g:<owner>`) or to a member id. Clears the owed reply for that conversation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: '`g:<owner>` or a member id.' },
+          text: { type: 'string', description: 'Message body.' },
+          mentions: { type: 'array', items: { type: 'string' }, description: 'Member ids, or ["all"].' },
+        },
+        required: ['to', 'text'],
+        additionalProperties: false,
+      },
+      execute: async (_id, params) => {
+        const mentions = Array.isArray(params.mentions) ? params.mentions.map(String) : undefined;
+        const sent = await requireLoop().say(String(params.to), String(params.text), mentions);
+        return text(JSON.stringify(sent));
+      },
+    },
+    {
       name: 'pg_children',
       label: 'PiGroups children',
-      description: 'Telemetry snapshot of this member’s direct children (state, since, tool, count).',
+      description:
+        'Telemetry snapshot of this member’s direct children (state, since, tool, count) including what ' +
+        'each one’s last round did (last assistant text and last tool call).',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
       execute: async () => text(JSON.stringify(requireLoop().children(), null, 2)),
     },
     {
       name: 'pg_inspect',
       label: 'PiGroups inspect',
-      description: 'Ask a member (usually a direct child) for its current phase, tool, owed replies and children.',
+      description:
+        'Ask a member (usually a direct child) for its current phase, tool, owed replies, children, and ' +
+        'its last round: the last assistant text and the last tool call (name, args preview, ok).',
       parameters: {
         type: 'object',
         properties: { member: { type: 'string', description: 'Member id to inspect.' } },
@@ -176,47 +227,26 @@ function buildTools(
       },
     },
     {
-      name: 'pg_steer',
-      label: 'PiGroups steer',
-      description: 'Send pg.steer with new instructions to a member (usually a direct child).',
+      name: 'pg_schedule',
+      label: 'PiGroups schedule',
+      description:
+        'Wake this member once, `after_seconds` from now (at least 5 s, at most 24 h): the adapter ' +
+        'delivers `[scheduled] note` and starts a turn. One-shot, never periodic. At most 8 wakes may be ' +
+        'pending; the 9th is rejected. In memory only — a restart drops every pending wake. It does not ' +
+        'bypass the delivery window, so the wake may arrive up to one window after the delay.',
       parameters: {
         type: 'object',
         properties: {
-          member: { type: 'string', description: 'Member id to steer.' },
-          text: { type: 'string', description: 'Instruction to inject.' },
+          after_seconds: { type: 'number', description: 'Delay in seconds (5 to 86400).' },
+          note: { type: 'string', description: 'The line to deliver, prefixed with `[scheduled]`.' },
         },
-        required: ['member', 'text'],
+        required: ['after_seconds', 'note'],
         additionalProperties: false,
       },
       execute: async (_id, params) => {
-        const member = String(params.member);
-        await pg.sendControl({
-          to: member,
-          id: randomUUID(),
-          cmd: 'pg.steer',
-          payload: { v: 1, text: String(params.text) },
-        });
-        return text(`pg.steer sent to ${member}`);
-      },
-    },
-    {
-      name: 'pg_say',
-      label: 'PiGroups say',
-      description: 'Send a message to a group (`g:<owner>`) or to a member id. Clears the owed reply for that conversation.',
-      parameters: {
-        type: 'object',
-        properties: {
-          to: { type: 'string', description: '`g:<owner>` or a member id.' },
-          text: { type: 'string', description: 'Message body.' },
-          mentions: { type: 'array', items: { type: 'string' }, description: 'Member ids, or ["all"].' },
-        },
-        required: ['to', 'text'],
-        additionalProperties: false,
-      },
-      execute: async (_id, params) => {
-        const mentions = Array.isArray(params.mentions) ? params.mentions.map(String) : undefined;
-        const sent = await requireLoop().say(String(params.to), String(params.text), mentions);
-        return text(JSON.stringify(sent));
+        const after = Number(params.after_seconds);
+        const result = requireLoop().schedule(after, String(params.note));
+        return text(JSON.stringify(result));
       },
     },
     {

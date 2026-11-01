@@ -61,6 +61,29 @@ export interface AttentionTool {
   preview: string;
 }
 
+/** The last tool call a member finished: what it ran and whether pi called it ok. */
+export interface LastTool {
+  name: string;
+  /** The 200-character argument preview (the same one `tool_start` carries). */
+  preview: string;
+  /**
+   * pi's `isError` inverted. Not proof of success: a tool cut short by an abort can
+   * end with `isError: false` (概念稿 §9 D4), which is why the report carries the
+   * values rather than a verdict.
+   */
+  ok: boolean;
+}
+
+/**
+ * What a member's last round was doing (概念稿 §8.5): the last assistant text and the
+ * last finished tool call. This is what makes `pg_abort`/`pg_inspect` something other
+ * than a blind operation for the parent.
+ */
+export interface LastRound {
+  text?: string;
+  tool?: LastTool;
+}
+
 /** A `pg.attention` payload (设计说明 §6). */
 export interface AttentionEvent {
   child: string;
@@ -71,6 +94,7 @@ export interface AttentionEvent {
   tool?: AttentionTool;
   owed?: string[];
   note?: string;
+  last?: LastRound;
 }
 
 export interface TelemetryEntry {
@@ -84,6 +108,8 @@ export interface TelemetryEntry {
   tool?: AttentionTool;
   owed?: string[];
   note?: string;
+  /** The last round the child reported (概念稿 §8.5). */
+  last?: LastRound;
   /** Events folded into this entry since the last reminder. */
   count: number;
   /** When this state was last reminded to the member; `null` means never. */
@@ -133,6 +159,7 @@ export class TelemetryTable {
       tool: event.tool,
       owed: event.owed,
       note: event.note,
+      last: event.last,
       count: (prev?.count ?? 0) + 1,
       // (a) once a new event arrives, this child may be reminded again.
       remindedAt: null,
@@ -208,8 +235,22 @@ export class TelemetryTable {
 
 function renderAttention(entries: TelemetryEntry[], now: number): string {
   const lines = [`你的 ${entries.length} 个下级需要处理：`];
-  for (const entry of entries) lines.push(`- ${entry.child}（${entry.name}）${renderState(entry, now)}`);
+  for (const entry of entries) lines.push(`- ${entry.child}（${entry.name}）${renderState(entry, now)}${renderLast(entry)}`);
   return lines.join('\n');
+}
+
+/** The last round, appended to the state line so the parent reads one row per child (§8.4). */
+function renderLast(entry: TelemetryEntry): string {
+  const last = entry.last;
+  if (!last) return '';
+  const parts: string[] = [];
+  if (last.text !== undefined) parts.push(`说：${last.text}`);
+  if (last.tool !== undefined) {
+    const verdict = last.tool.ok ? '' : '（失败）';
+    const preview = last.tool.preview === '' ? '' : `：${last.tool.preview}`;
+    parts.push(`最后工具 ${last.tool.name}${preview}${verdict}`);
+  }
+  return parts.length === 0 ? '' : `；最后一轮${parts.join('，')}`;
 }
 
 function renderState(entry: TelemetryEntry, now: number): string {

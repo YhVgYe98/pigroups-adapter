@@ -12,12 +12,12 @@ type Handler = (event: never, ctx: never) => void;
 function fakePi(): {
   pi: PiLike;
   fire: (event: string, payload?: unknown) => void;
-  sent: { message: PiMessage; options?: { triggerTurn?: boolean } }[];
+  sent: { message: PiMessage; options?: { triggerTurn?: boolean; deliverAs?: string } }[];
 } {
   const handlers = new Map<string, Handler[]>();
-  const sent: { message: PiMessage; options?: { triggerTurn?: boolean } }[] = [];
+  const sent: { message: PiMessage; options?: { triggerTurn?: boolean; deliverAs?: string } }[] = [];
   const pi = {
-    sendMessage(message: PiMessage, options?: { triggerTurn?: boolean }): void {
+    sendMessage(message: PiMessage, options?: { triggerTurn?: boolean; deliverAs?: string }): void {
       sent.push(options ? { message, options } : { message });
     },
     registerTool(): void {},

@@ -13,12 +13,12 @@ type Handler = (event: never) => void;
 function fakePi(): {
   pi: PiLike;
   fire: (event: string, payload?: unknown) => void;
-  sent: { message: PiMessage; options?: { triggerTurn?: boolean } }[];
+  sent: { message: PiMessage; options?: { triggerTurn?: boolean; deliverAs?: string } }[];
 } {
   const handlers = new Map<string, Handler[]>();
-  const sent: { message: PiMessage; options?: { triggerTurn?: boolean } }[] = [];
+  const sent: { message: PiMessage; options?: { triggerTurn?: boolean; deliverAs?: string } }[] = [];
   const pi = {
-    sendMessage(message: PiMessage, options?: { triggerTurn?: boolean }): void {
+    sendMessage(message: PiMessage, options?: { triggerTurn?: boolean; deliverAs?: string }): void {
       sent.push(options ? { message, options } : { message });
     },
     registerTool(): void {},
@@ -99,6 +99,7 @@ test('an aborted run closes the turn from agent_settled, because it skips before
   assert.equal(ends.length, 1, 'the loop must not be left with a turn that never ended');
   assert.ok(ends[0].error, 'the parent has to hear that the turn was cut');
   assert.match(ends[0].error!.message, /abort/i);
+  assert.equal(ends[0].type === 'turn_end' ? ends[0].aborted : undefined, true, 'the delivery layer requeues on this flag');
 });
 
 test('a completed run\'s settle closes nothing', () => {
@@ -179,7 +180,7 @@ test('the settle callback runs for every run, aborted or not, and the turn_end p
   assert.deepEqual(order, ['turn_start', 'turn_end', 'settled', 'turn_start', 'turn_end', 'settled']);
 });
 
-test('deliver sends a custom message that asks pi to start a turn', () => {
+test('deliver sends a custom message that asks pi to start a turn, as a steer', () => {
   const { pi, sent } = fakePi();
   const surface = new PiSurfaceAdapter(pi);
 
@@ -191,4 +192,34 @@ test('deliver sends a custom message that asks pi to start a turn', () => {
   assert.equal(sent[0].message.display, true, 'the member is meant to see the delivered text');
   assert.deepEqual(sent[0].message.details, { kind: 'message' }, 'the kind travels with the message');
   assert.equal(sent[0].options?.triggerTurn, true, 'without triggerTurn the member is never woken');
+  assert.equal(sent[0].options?.deliverAs, 'steer', '概念稿 §8.1: a busy member is steered, not refused');
+});
+
+test('message_end keeps the last assistant text, and only assistant text', () => {
+  const { pi, fire } = fakePi();
+  const surface = new PiSurfaceAdapter(pi);
+
+  assert.equal(surface.lastAssistantText(), undefined, 'nothing has been said yet');
+
+  fire('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] } });
+  assert.equal(surface.lastAssistantText(), 'first answer');
+
+  // A tool-call-only message is not something the member said: the previous text stands.
+  fire('message_end', {
+    message: { role: 'assistant', content: [{ type: 'toolCall', name: 'bash', arguments: {} }] },
+  });
+  assert.equal(surface.lastAssistantText(), 'first answer', 'a tool call does not erase the last words');
+
+  // Multiple text blocks are one utterance; a user/tool message is not the member's.
+  fire('message_end', {
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'second' },
+        { type: 'text', text: 'answer' },
+      ],
+    },
+  });
+  fire('message_end', { message: { role: 'user', content: [{ type: 'text', text: 'the operator' }] } });
+  assert.equal(surface.lastAssistantText(), 'second\nanswer');
 });

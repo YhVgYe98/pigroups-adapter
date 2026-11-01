@@ -3,8 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { command, createMember, send } from './support.ts';
-import { createLoop, payloads, scenario } from './scenario.ts';
+import { command, createMember, delay, send } from './support.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, payloads, scenario } from './scenario.ts';
 
 test('a tool call past the threshold emits exactly one stalled attention, and recovery emits recovered', async (t) => {
   const s = await scenario({ attentionToolMs: 60_000 });
@@ -60,13 +60,15 @@ test('two children stalled in one window produce one consolidated nudge; a windo
   await s.cycle();
   assert.equal(s.surface.deliveries.length, 0, 'inbound attention updates the table, it is not injected');
 
-  await s.timer();
+  await s.timer(); // the reminder merge window expires and the reminder enters the queue
+  assert.equal(s.surface.textsOfKind('nudge').length, 0, 'a reminder still waits for the delivery window');
+  await s.timer(WINDOW); // the delivery window closes
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(nudges.length, 1, `two events in one window mean one nudge, got ${nudges.length}`);
   assert.ok(nudges[0].includes(a.id), `the summary must name the stalled child: ${nudges[0]}`);
   assert.ok(nudges[0].includes(b.id), `the summary must name the failing child: ${nudges[0]}`);
 
-  await s.timer();
+  await s.timer(WINDOW);
   assert.equal(s.surface.textsOfKind('nudge').length, 1, 'an already reminded state is not reminded again');
 
   // A second, independent window: everything recovers before it expires.
@@ -95,6 +97,7 @@ test('two children stalled in one window produce one consolidated nudge; a windo
   });
   await quietWindow.cycle();
   await quietWindow.timer(300_000);
+  await quietWindow.timer(WINDOW);
 
   assert.equal(
     quietWindow.surface.textsOfKind('nudge').length,
@@ -143,7 +146,7 @@ test('two attentions from one child build a real table entry: state, since, coun
   assert.ok(String(row.tool?.preview).includes('loop.ts'), `the row keeps the preview: ${JSON.stringify(row.tool)}`);
 });
 
-test('state gone bypasses the window and is delivered immediately', async (t) => {
+test('state gone skips the reminder merge window, but still waits for the delivery window', async (t) => {
   const s = await scenario({ role: 'root', remindWindowMs: 3_600_000 });
   t.after(() => s.close());
   const child = await createMember(s.platform, s.me, 'vanished');
@@ -156,10 +159,12 @@ test('state gone bypasses the window and is delivered immediately', async (t) =>
     since: s.clock.now(),
   });
   await s.cycle();
-  await s.timer(0); // the clock does not move: the 1h reminder window cannot have expired
+  await s.timer(0); // the 1h reminder window cannot have expired
+  assert.equal(s.surface.textsOfKind('nudge').length, 0, 'the delivery window still applies to a reminder');
 
+  await s.timer(WINDOW);
   const nudges = s.surface.textsOfKind('nudge');
-  assert.equal(nudges.length, 1, 'gone must be delivered without waiting for the reminder window');
+  assert.equal(nudges.length, 1, 'gone must not wait for the reminder merge window');
   assert.ok(nudges[0].includes(child.id), `the report must name the child that went away: ${nudges[0]}`);
 });
 
@@ -203,13 +208,88 @@ test('idle with an unanswered message past the threshold reports one idle_owed n
 
   await send(s.platform, s.parent!.token, s.me.id, 'still waiting');
   await s.cycle();
-  for (let i = 0; i < 4; i += 1) {
-    await s.settle(); // nudges stop at nudgeMax, which leaves the member idle and still owing
-    await s.timer(0);
-  }
-  await s.timer(61_000);
+  await s.timer(WINDOW); // the message is delivered and the conversation becomes owed
+  await s.settle(); // the turn ends, so the member is idle but still owes a reply
+  await s.timer(61_000); // owed for longer than attentionToolMs
+  await delay(50); // the attention report is fire-and-forget, like every telemetry control
 
   const idleOwed = payloads(await s.controlsToParent(), 'pg.attention').filter((p) => p.state === 'idle_owed');
   assert.equal(idleOwed.length, 1, `one idle_owed attention expected, got ${JSON.stringify(idleOwed)}`);
   assert.deepEqual(idleOwed[0].owed, [s.dm], 'idle_owed names the conversations still owed');
+});
+
+// 概念稿 §8.5: without the last round, pg_abort is a blind operation. The child reports
+// what it last said and what it last ran; the parent reads it in the snapshot and in the
+// consolidated reminder.
+test('a child’s attention report carries its last round: last assistant text and last finished tool', async (t) => {
+  const s = await scenario({ attentionToolMs: 60_000 });
+  t.after(() => s.close());
+  await s.cycle();
+
+  s.surface.lastText = 'I am testing the parser now';
+  s.surface.beginTurn();
+  s.surface.emit({ type: 'turn_start' });
+  s.surface.emit({ type: 'tool_start', name: 'bash', argsPreview: "npm test -- --grep 'parser'" });
+  s.surface.emit({ type: 'tool_end', name: 'bash', ok: true });
+  s.surface.emit({ type: 'tool_start', name: 'edit', argsPreview: 'src/parser.ts' });
+
+  await s.timer(61_000);
+  await delay(50);
+
+  const stalled = payloads(await s.controlsToParent(), 'pg.attention').filter((p) => p.state === 'stalled');
+  assert.equal(stalled.length, 1, `precondition: a stalled report went out, got ${JSON.stringify(stalled)}`);
+  assert.equal(stalled[0].last?.text, 'I am testing the parser now', 'the parent reads what the child last said');
+  assert.equal(stalled[0].last?.tool?.name, 'bash', 'and the last tool it finished, not the one still running');
+  assert.match(String(stalled[0].last?.tool?.preview), /parser/, 'with the argument preview');
+  assert.equal(stalled[0].last?.tool?.ok, true, 'and whether pi called it ok');
+});
+
+test('the last assistant text is truncated before it travels', async (t) => {
+  const s = await scenario({ attentionToolMs: 60_000 });
+  t.after(() => s.close());
+  await s.cycle();
+
+  s.surface.lastText = 'x'.repeat(600);
+  s.surface.beginTurn();
+  s.surface.emit({ type: 'turn_start' });
+  s.surface.emit({ type: 'tool_start', name: 'bash', argsPreview: 'sleep 600' });
+  await s.timer(61_000);
+  await delay(50);
+
+  const stalled = payloads(await s.controlsToParent(), 'pg.attention').filter((p) => p.state === 'stalled');
+  const text = String(stalled[0]?.last?.text ?? '');
+  assert.equal(text.length, 501, '§13.5: the assistant text is cut at 500 characters, plus the ellipsis');
+  assert.ok(text.endsWith('…'), 'and says that it was cut');
+});
+
+test('the parent sees a child’s last round in its snapshot and in the consolidated reminder', async (t) => {
+  const s = await scenario({ role: 'root', remindWindowMs: 300_000 });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'coder');
+
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'stalled',
+    since: s.clock.now(),
+    tool: { name: 'bash', elapsed_ms: 720_000, preview: 'sleep 600' },
+    last: {
+      text: 'refactoring the scheduler',
+      tool: { name: 'edit', preview: 'src/scheduler.ts', ok: false },
+    },
+  });
+  await s.cycle();
+
+  const [row] = s.loop.children();
+  assert.equal(row.last?.text, 'refactoring the scheduler', 'pg_children carries the last round');
+  assert.equal(row.last?.tool?.name, 'edit');
+  assert.equal(row.last?.tool?.ok, false, 'a failed last tool stays visibly failed');
+
+  await s.timer(); // the reminder merge window expires
+  await s.timer(WINDOW); // the delivery window closes
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, `precondition: one consolidated reminder, got ${JSON.stringify(s.surface.texts())}`);
+  assert.ok(nudges[0].includes('refactoring the scheduler'), `the reminder says what the child last said: ${nudges[0]}`);
+  assert.ok(nudges[0].includes('edit'), `the reminder names the last tool: ${nudges[0]}`);
 });

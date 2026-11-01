@@ -10,9 +10,12 @@ spawn (`args`); it does not mirror pi's flags, so `pi --help` is the reference. 
 
 - `docs/概念稿.md` — what it is, what it is not, and the three failures it closes.
 - `docs/设计说明.md` — the contracts: `PiSurface`, `Herdr`, the loop, the journal, the `pg.*` command schema.
+- `skills/pigroups-org` and `skills/pigroups-message` — how to run the organisation (briefs,
+  roster, telemetry, abort/terminate) and how to talk (tasks close by message, conversation
+  ids, mentions, no polling). Registered under `pi.skills` and shipped with the package.
 - `CHANGELOG.md` — version policy and per-version changes (Chinese). A release records one
   pair: both sides share a number when both move, and only the side that changed takes the
-  version step otherwise. `v0.4.0+platform.0.2.0` is the adapter alone, on platform 0.2.0;
+  version step otherwise. `v0.5.0+platform.0.2.0` is the adapter alone, on platform 0.2.0;
   the metadata records what it was tested against and is not a compatibility gate.
 
 ```bash

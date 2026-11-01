@@ -389,6 +389,8 @@ export class FakeSurface implements PiSurface {
   readonly events: PiEvent[] = [];
   readonly #held: Array<() => void> = [];
   #busy = false;
+  /** What the surface would report for `lastAssistantText()` (概念稿 §8.5). */
+  lastText: string | undefined;
   /** When set, `deliver` stays pending until `releaseDeliveries()` (simulates a turn that never commits). */
   holdDeliveries = false;
   /** When set, `abort` stays pending until the returned resolver is called. */
@@ -397,6 +399,10 @@ export class FakeSurface implements PiSurface {
 
   isBusy(): boolean {
     return this.#busy;
+  }
+
+  lastAssistantText(): string | undefined {
+    return this.lastText;
   }
 
   onSettled(cb: () => void): () => void {
@@ -449,6 +455,17 @@ export class FakeSurface implements PiSurface {
     this.#busy = false;
     this.settles.push(Date.now());
     this.emit(error === undefined ? { type: 'turn_end' } : { type: 'turn_end', error });
+    for (const cb of [...this.#settledCallbacks]) cb();
+  }
+
+  /**
+   * The turn was cut: what pi does on an abort (`agent_settled aborted:true`, no
+   * `agent_before_settle`). The loop must requeue the batch it delivered into it.
+   */
+  settleAborted(): void {
+    this.#busy = false;
+    this.settles.push(Date.now());
+    this.emit({ type: 'turn_end', error: { message: 'turn ended: aborted' }, aborted: true });
     for (const cb of [...this.#settledCallbacks]) cb();
   }
 

@@ -18,6 +18,103 @@
 
 ---
 
+## v0.5.0+platform.0.2.0（2026-11-02，与平台 0.2.0 配套）
+
+**适配器的 minor。** `0.4.0 → 0.5.0`，平台不动（仍是 `0.2.0`）。依据是概念稿 v3（§7 工具面、§8 投递）
+与 2026-11-01 的 steer/abort 真机实验（`probe/logs/steer-20261101T170244Z/`）。这一版**改了接口**，
+不只是改了行为：
+
+| 接口 | 变化 |
+|---|---|
+| `PiSurface` | **新增 `lastAssistantText(): string \| undefined`**（由 pi 的 `message_end` 维护） |
+| `PiEvent` | `turn_end` 新增 `aborted?: true`。投递层只对这个值做重投；provider error 不算 |
+| `DeliverKind` | 新增 `'scheduled'`（`pg_schedule` 的唤醒） |
+| `PiLike` | 新增 `on('message_end', …)`；`sendMessage` 的 `deliverAs:'steer'` 从"已声明"变成"真的用" |
+| `LoopConfig` | 新增 `deliveryWindowMs`（环境变量 `PIGROUPS_DELIVERY_WINDOW_MS`，默认 60000） |
+| `AdapterLoop` | 新增 `members(query?)`、`schedule(afterSeconds, note)`；`InspectResult.last`、`ChildSnapshot.last` 是新字段 |
+| `PgClient.tree()` | 返回完整的名册行（`TreeMember`），不再只声明 `id` |
+
+`package.json` 的 `pi` 也变了：`skills: ["./skills"]`，`files` 增加 `skills`。
+
+### 投递：一条队列 + 翻滚窗口 + steer
+
+- **一条队列。** 聊天消息、未知控制项、子成员遥测汇总、催办、预约唤醒、启动简报全进同一个队列。
+- **翻滚时间窗。** 第一个 `windowed` 项开窗；`tick()`（已有的 5 秒定时器，没有第二个定时器）发现
+  `now - windowStart >= 60000` 时，整批**一次** `deliver`。窗口长度可配。
+- **不再等空闲。** `deliver` 走 `pi.sendMessage(…, {triggerTurn:true, deliverAs:'steer'})`。
+  `isBusy()` 闸门和"一次 settle 只投一次"整条删掉；settle 不再是投递触发器，它只做名册/pane
+  复核、跑一次 `tick()`、标记催办。
+- **例外只有两个**：启动简报不等窗口；abort 之后立刻关窗把排队的东西投出去，并把下一批也标成
+  "立即投"——否则"先 abort 再 say"里那条 say 要白等一个窗口。
+- **条数只是尺寸阀门。** 一个窗口最多 10 条，剩下的重新开窗、等下一个窗口；条数永远不会触发投递。
+- **催办只在安静的窗口投。** settle 只标 `nudgeDue`；队列里有真实消息时，消息就是唤醒。
+- **实测边界写进代码注释，不粉饰**：`sendMessage` 返回 = 排队，不是被看到；一条 steer 排在一个
+  长工具后面，要等工具返回（+1 ms 才落盘）。所以投递延迟 = 窗口剩余 + 当前工具剩余。
+- **abort 丢失的兜底。** 已经交给 pi、但还排在长工具后面的 steer，遇到 abort 会整份 session 文件里
+  一次都不出现。现在每次成功投递留一份内存副本；`turn_end(aborted:true)` 时放回队首并立刻重投
+  （绕过水位——水位已推进），干净结束才丢。重复注入由正文里的 `[会话#序号]` 兜住；崩溃丢副本
+  最多少一次重投。
+
+### 工具面
+
+- **删掉 `pg_steer`。** 改方向用 `pg_say`；只有 `pg_abort` 能在长工具期间改变一个成员的行为。
+  线协议里的 `pg.steer` 仍兼容，但它**不再先 abort**，而是和普通项一样走投递窗口。
+- **新增 `pg_members(query?)`。** 平台名册：id、名字、`parent_id`、`parent_name`、`relation`
+  （`self|parent|child|sibling|peer`）、`child_count`、`last_seen_at`，外加 `total`/`matched`。
+  `query` 只按名字做大小写不敏感子串；`total: 23, matched: 0` 让模型知道是筛错了而不是没人。
+  工具描述明说 **`last_seen_at` 是最近一次鉴权，不是存活**。
+- **新增 `pg_schedule(after_seconds, note)`。** 一次性唤醒：5 秒–24 小时，最多 8 条待触发，只在
+  进程内；到点入投递队列（`[scheduled] note`），**不绕过窗口**；重启即失。
+- **`pg_children` / `pg_inspect` 带 last 块。** 最后一条助手正文（截断到 500 字）与最后一个完成的
+  工具调用（名字、参数预览、`ok`）。子成员的 `pg.attention` 也带同一块——父终于能在 `pg_abort`
+  之前看到子成员最后一轮在做什么（概念稿 §8.5）。
+
+### 两个 skill
+
+`skills/pigroups-org/SKILL.md`（怎么带组织：写不需要追问的简报、按名字起名/找人、读遥测、
+何时 inspect/abort/terminate、何时自己干、不要轮询）与 `skills/pigroups-message/SKILL.md`
+（怎么说话：任务由消息关闭、用前缀里的会话 id 认会话、`mentions` 只覆盖自己的群、一对一可对任何人、
+不要轮询、不要复述对方已知的事）。两个都在 `package.json` 的 `pi.skills` 里注册，并随包发布。
+
+### 测试与变异证明
+
+- **103 → 122 条**，`npm run typecheck` 干净，`npm test` 122/122。新增 19 条：
+  `delivery` +4（窗口合并、忙碌时 steer、abort 重投、provider error 保留副本）、`control` +3
+  （abort 关窗、abort 后 say、steer 不再 abort）、`telemetry` +3（last 块、截断、父侧汇总）、
+  `surface` +1（`message_end`）、`members` +3、`schedule` +3、`toolsurface` +1（十个工具、没有
+  `pg_steer`）。
+  改写的是行为真的变了的那些：投递不再等空闲、settle 不再投递、催办按窗口、遥测的 gone 仍等窗口、
+  journal 重放也走窗口。
+- **变异证明（只回退 src，保留测试，全部当场红过）：**
+  1. 把 `isBusy()` 闸门加回 `deliverPending` → `a busy member still receives the window batch` 与
+     条数阀门用例红。
+  2. 去掉 `deliverAs:'steer'` → `deliver … as a steer` 红。
+  3. 删掉 abort 之后的 `flushOutcome(true)` + `windowImmediate` → `control` 三条红（abort 关窗、
+     abort 后 say、abort+steer 同批）。
+  4. 把 `turn_end` 的 aborted 分支改成只丢副本 → `a batch delivered into an aborted turn …` 红。
+  4b. 把"只有干净结束才清副本"改成"任何非 abort 结束都清" → `a batch delivered into a
+      provider-error turn is kept …` 红。
+  5. 让重投走 `enqueue`（被水位挡下）→ 同一条红。
+  6. 把 `pg_steer` 工具加回去 → `toolsurface` 红。
+  7. 把 `pg.steer` 的"忙就先 abort"加回去 → `pg.steer no longer cuts a busy member` 红。
+  8. `pg_members` 的 query 改成大小写敏感 → `a query filters by name, case-insensitively` 红。
+  9. `pg.attention` 不带 last → `telemetry` 两条红；`inspectSelf` 不带 last → `tools` 红。
+  10. 去掉 `message_end` 订阅 → `surface` 的 last 用例红。
+  11. `pg_schedule` 的下界改成 0 → 边界用例红；让 due 的 wake 带 `windowless` → `a due wake …
+      waits for the delivery window` 红。
+  12. 三个版本号改一个 → `version` 红；删掉 `pi.skills` → `package` 红。
+
+### 已知边界（不是这一版能修的）
+
+- **窗口让重放和唤醒都慢一拍。** 崩溃恢复的 journal 批次、到点的 `pg_schedule`、以及遥测汇总，
+  都按窗口走（启动简报除外）。这是"一条队列"的直接代价，不是遗漏。
+- **确认边界没有收紧。** `deliver` 返回仍只表示 pi 收下了（D2）；这一版只是把"abort 会丢"这一种
+  实测到的丢失补上了。
+- **`dm:` 不是发送地址。** 注入前缀里的 `dm:<a>_<b>` 只能用于 `pg_read` 认会话；说话要发给对方
+  的成员 id。skill 里写清了，工具 schema 没有改（平台契约就是这样）。
+
+---
+
 ## v0.4.0+platform.0.2.0（2026-11-01，与平台 0.2.0 配套）
 
 **一次只动适配器的 minor。** `PIGROUPS_SPAWN_CMD` 的默认值变了，这是操作者可见的行为变化，所以 `0.3.0 → 0.4.0`；平台不动，仍是 `0.2.0`。版本串带 build metadata `+platform.0.2.0`：**它只记录这一版在哪个平台上验过，不参与任何判定**——兼容性由启动 warning 和 `pg.*` 的 `v` 字段决定，平台以后变了而适配器不用改，就重发同一个数字、换 metadata。

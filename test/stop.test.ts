@@ -13,8 +13,8 @@ import { join } from 'node:path';
 import { AdapterLoop } from '../src/loop.ts';
 import { PgClient } from '../src/pgclient.ts';
 import type { PiSurface } from '../src/surface.ts';
-import { delay, quiet, send, waitFor, within } from './support.ts';
-import { createLoop, scenario, type Scenario } from './scenario.ts';
+import { delay, send, waitFor, within } from './support.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, scenario, type Scenario } from './scenario.ts';
 
 /** The loop is already stopped; the platform and the shared directory are all that is left. */
 async function closeAfterStop(s: Scenario): Promise<void> {
@@ -40,7 +40,9 @@ test('stop() waits for the delivery in flight and does not abandon it', async (t
   // group message proves that a re-injection could have come from the journal.
   s.surface.holdDeliveries = true;
   await send(s.platform, sibling.token, s.group, 'the delivery that is in flight', [s.me.id]);
-  const polling = s.loop.pollOnce();
+  await s.loop.pollOnce(); // journalled and queued
+  s.clock.advance(WINDOW);
+  s.loop.tick(); // the closed window enters the surface, which is holding it
   await waitFor(() => s.surface.deliveries.length === 1, 'the delivery to enter the surface');
 
   const stopping = s.loop.stop();
@@ -52,14 +54,13 @@ test('stop() waits for the delivery in flight and does not abandon it', async (t
 
   s.surface.releaseDeliveries();
   await within(stopping, 'stop() to resolve once the delivery committed');
-  await polling;
 
   // The delivery committed before stop() resolved, so it is not waiting in the journal for a replay.
   const restarted = await createLoop(s.platform, s.me, { adapterDir: s.adapterDir });
   try {
-    restarted.loop.start();
-    await quiet(500);
-    await restarted.loop.pollOnce();
+    await restarted.loop.pollOnce(); // initialise: journal replay is queued, if there is any
+    restarted.clock.advance(WINDOW); // close the replay window
+    restarted.loop.tick();
     await restarted.loop.flush();
     const text = restarted.surface.texts().join('\n');
     assert.ok(
@@ -73,8 +74,8 @@ test('stop() waits for the delivery in flight and does not abandon it', async (t
 
 // d19a179 made the settle reaction await the platform before delivering. That await is
 // not visible in `deliveries`, so `stop()` must wait for the reaction itself: otherwise
-// it returns 0 ms while the delivery it was supposed to wait for lands afterwards.
-test('stop() waits for a settle that is still reading the roster, and nothing is delivered afterwards', async () => {
+// it returns while the reaction is still about to spend a delivery.
+test('stop() waits for a settle that is still reading the roster, and a stopped loop never delivers', async () => {
   const SELF = 'm_aaaaaa';
   const PEER = 'm_bbbbb1';
   const dm = `dm:${SELF}_${PEER}`;
@@ -93,6 +94,7 @@ test('stop() waits for a settle that is still reading the roster, and nothing is
     },
     abort: async () => undefined,
     isBusy: () => busy,
+    lastAssistantText: () => undefined,
     onSettled: (cb) => {
       fireSettled = cb;
       return () => undefined;
@@ -169,17 +171,16 @@ test('stop() waits for a settle that is still reading the roster, and nothing is
       attentionToolMs: 300_000,
       remindWindowMs: 300_000,
       nudgeMax: 3,
+      deliveryWindowMs: 60_000,
       spawnCmd: 'pi',
     },
     now: () => now,
   });
   try {
-    // The polled message stays queued: the surface is inside a turn.
-    busy = true;
+    // The polled message stays queued: the window was just opened.
     await loop.pollOnce();
-    busy = false;
     assert.deepEqual(deliveries, [], 'precondition: the message is queued, not delivered');
-    now += 31_000; // the startup roster snapshot is stale, so the settle must read again
+    now += 31_000; // the roster snapshot is stale; the delivery window is still open
 
     fireSettled?.(); // the settle starts and stops inside `pruneUnanswerableDms()`
     await delay(30);
@@ -196,6 +197,12 @@ test('stop() waits for a settle that is still reading the roster, and nothing is
     await within(stopping, 'stop() to resolve once the settle reaction finished');
     await delay(50);
     assert.deepEqual(deliveries, [], 'a stopped loop must not deliver from the settle stop() waited for');
+
+    // The window is now past its deadline; even a manual drive must not deliver.
+    now += 60_000;
+    loop.tick();
+    assert.equal(await loop.flush(), false, 'a stopped loop reports that it delivered nothing');
+    assert.deepEqual(deliveries, [], 'a stopped loop delivers nothing, window or no window');
   } finally {
     await loop.stop();
     await rm(dir, { recursive: true, force: true });

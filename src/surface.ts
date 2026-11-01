@@ -8,21 +8,28 @@
  * `pi-coding-agent@1.4.0` (`dist/core/extensions/types.d.ts`) that are used.
  */
 
-export type DeliverKind = 'message' | 'control' | 'nudge' | 'digest';
+export type DeliverKind = 'message' | 'control' | 'nudge' | 'digest' | 'scheduled';
 
 /** The only observability channel the loop has (设计说明 §2.1). */
 export type PiEvent =
   | { type: 'turn_start' }
-  | { type: 'turn_end'; error?: { message: string } }
+  /**
+   * `aborted` is the one turn end the delivery layer must act on: a message still
+   * queued when an abort lands is dropped by pi without a trace (probe/, 2026-11-01),
+   * so the batch delivered into that turn has to go back into the queue.
+   */
+  | { type: 'turn_end'; error?: { message: string }; aborted?: true }
   | { type: 'tool_start'; name: string; argsPreview: string }
   | { type: 'tool_end'; name: string; ok: boolean };
 
+/**
+ * Hand a block of text to the agent. Resolves once pi has accepted the message, not
+ * when a run has started: `pi.sendMessage` is void and swallows start errors, so a
+ * run that fails to start is invisible from here (设计说明 §2.1). The real adapter
+ * sends it as a `steer`: an idle agent starts a turn, a busy one sees it at its next
+ * model call (概念稿 §8.1).
+ */
 export interface PiSurface {
-  /**
-   * Hand a block of text to the agent as one turn. Resolves once pi has accepted the
-   * message, not when a run has started: `pi.sendMessage` is void and swallows start
-   * errors, so a run that fails to start is invisible from here (设计说明 §2.1).
-   */
   deliver(text: string, kind: DeliverKind): Promise<void>;
   /**
    * Cut the running turn and wait until idle. Returns at once when already idle.
@@ -32,6 +39,12 @@ export interface PiSurface {
   abort(signal?: AbortSignal): Promise<void>;
   /** Is a turn running right now. */
   isBusy(): boolean;
+  /**
+   * The last assistant text this session produced, or `undefined` before the first
+   * one. Kept by the surface from pi's `message_end` (概念稿 §8.5): the parent reads
+   * it through `pg.attention` / `pg.inspect_result` to see what a child last said.
+   */
+  lastAssistantText(): string | undefined;
   /** Call back when idle. Returns an unsubscribe function. */
   onSettled(cb: () => void): () => void;
   /** Raw event stream: the only observability channel (必需成员, §2.1). */
@@ -76,6 +89,8 @@ export interface PiLike {
     handler: (event: { outcome: 'completed' | 'aborted' | 'error' }) => void,
   ): () => void;
   on(event: 'agent_settled', handler: (event: { aborted: boolean }) => void): () => void;
+  /** Carries every finished message; only assistant messages are kept (概念稿 §8.5). */
+  on(event: 'message_end', handler: (event: { message: unknown }) => void): () => void;
   on(event: 'session_start', handler: (event: { reason: string }, ctx: PiContext) => void): () => void;
   on(event: 'session_shutdown', handler: (event: { reason: string }) => void): () => void;
 }
@@ -116,8 +131,8 @@ export interface PiSurfaceOptions {
 
 /**
  * The real `PiSurface`. It is the whole of the pi-specific glue:
- * `pi.sendMessage(..., {triggerTurn:true})` to deliver, the session abort to cut
- * a turn, `ctx.shutdown()` to exit, and five pi events mapped onto `PiEvent`.
+ * `pi.sendMessage(..., {triggerTurn:true, deliverAs:'steer'})` to deliver, the session
+ * abort to cut a turn, `ctx.shutdown()` to exit, and six pi events mapped onto `PiEvent`.
  */
 export class PiSurfaceAdapter implements PiSurface {
   private readonly pi: PiLike;
@@ -128,6 +143,8 @@ export class PiSurfaceAdapter implements PiSurface {
   private context: PiContext | undefined;
   /** Whether `agent_start` opened a turn that `agent_before_settle` has not closed. */
   private turnOpen = false;
+  /** The last assistant text pi reported; `undefined` until the first one (概念稿 §8.5). */
+  private lastAssistant: string | undefined;
 
   constructor(pi: PiLike, opts: PiSurfaceOptions = {}) {
     this.pi = pi;
@@ -152,7 +169,15 @@ export class PiSurfaceAdapter implements PiSurface {
       this.publish({
         type: 'turn_end',
         error: event.outcome === 'completed' ? undefined : { message: `turn ended: ${event.outcome}` },
+        aborted: event.outcome === 'aborted' ? true : undefined,
       });
+    });
+    // The last assistant text is the one fact the parent needs and no pi event above
+    // carries (概念稿 §8.5). Tool-call-only messages leave the previous text in place:
+    // "the last thing it said" is not "the last message it produced".
+    pi.on('message_end', (event) => {
+      const text = assistantTextOf(event.message);
+      if (text !== undefined) this.lastAssistant = text;
     });
     pi.on('agent_settled', (event) => {
       // An aborted run never reaches `agent_before_settle`: pi breaks out of the run
@@ -168,7 +193,7 @@ export class PiSurfaceAdapter implements PiSurface {
       // before_settle closed is ours to close here.
       if (event.aborted && this.turnOpen) {
         this.turnOpen = false;
-        this.publish({ type: 'turn_end', error: { message: 'turn ended: aborted' } });
+        this.publish({ type: 'turn_end', error: { message: 'turn ended: aborted' }, aborted: true });
       }
       for (const listener of this.settleListeners) listener();
     });
@@ -182,9 +207,14 @@ export class PiSurfaceAdapter implements PiSurface {
   async deliver(text: string, kind: DeliverKind): Promise<void> {
     // Fire-and-forget by pi's contract: `sendMessage` returns void and pi swallows a
     // start failure. The loop may not treat this return as "a run is now going".
+    //
+    // `deliverAs: 'steer'` is the whole point of 概念稿 §8.1: with an idle agent the
+    // message starts a turn; with a busy one it joins the running turn at its next
+    // model call instead of being refused. The measured cost is that a steer queued
+    // behind a long tool is only persisted after the tool returns (probe/, 2026-11-01).
     this.pi.sendMessage(
       { customType: PIGROUPS_CUSTOM_TYPE, content: text, display: true, details: { kind } },
-      { triggerTurn: true },
+      { triggerTurn: true, deliverAs: 'steer' },
     );
   }
 
@@ -215,6 +245,10 @@ export class PiSurfaceAdapter implements PiSurface {
     return this.context ? !this.context.isIdle() : false;
   }
 
+  lastAssistantText(): string | undefined {
+    return this.lastAssistant;
+  }
+
   onSettled(cb: () => void): () => void {
     this.settleListeners.add(cb);
     return () => this.settleListeners.delete(cb);
@@ -232,6 +266,25 @@ export class PiSurfaceAdapter implements PiSurface {
   private publish(event: PiEvent): void {
     for (const listener of this.eventListeners) listener(event);
   }
+}
+
+/**
+ * The text blocks of one finished pi message, or `undefined` when it is not an
+ * assistant message or carries no text. pi's `message_end.message` is an
+ * `AgentMessage`; only `role: 'assistant'` messages are the member's own words.
+ */
+function assistantTextOf(message: unknown): string | undefined {
+  if (typeof message !== 'object' || message === null) return undefined;
+  const record = message as { role?: unknown; content?: unknown };
+  if (record.role !== 'assistant' || !Array.isArray(record.content)) return undefined;
+  const parts: string[] = [];
+  for (const block of record.content) {
+    if (typeof block !== 'object' || block === null) continue;
+    const candidate = block as { type?: unknown; text?: unknown };
+    if (candidate.type === 'text' && typeof candidate.text === 'string') parts.push(candidate.text);
+  }
+  const text = parts.join('\n');
+  return text.trim() === '' ? undefined : text;
 }
 
 function previewArgs(args: unknown): string {

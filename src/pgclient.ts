@@ -49,6 +49,19 @@ export interface Conversation {
   last_at: number | null;
 }
 
+/**
+ * One row of `GET /v1/tree` (platform §10.3). `last_seen_at` is stamped when the
+ * member authenticates: it proves the token was used recently, not that the member
+ * is alive. The roster already only lists `alive` members.
+ */
+export interface TreeMember {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  child_count: number;
+  last_seen_at: number | null;
+}
+
 export interface MessageRecord {
   to: string;
   seq: number;
@@ -216,9 +229,9 @@ export class PgClient {
     });
   }
 
-  /** §4.4 the roster: only living members, which is what an obligation needs (§4.1). */
-  async tree(signal?: AbortSignal): Promise<{ nodes: { id: string }[] }> {
-    return this.request<{ nodes: { id: string }[] }>('GET', '/v1/tree', { signal });
+  /** §4.4 the roster: every living member, which is what an obligation needs (§4.1). */
+  async tree(signal?: AbortSignal): Promise<{ nodes: TreeMember[] }> {
+    return this.request<{ nodes: TreeMember[] }>('GET', '/v1/tree', { signal });
   }
 
   async conversations(): Promise<{ items: Conversation[] }> {

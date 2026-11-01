@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { command, delay, dmId, history, member, poll, removeMember, send, whoami, type ControlItem } from './support.ts';
-import { driveUntil, pollUntil, scenario, type Scenario } from './scenario.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, driveUntil, pollUntil, scenario, type Scenario } from './scenario.ts';
 
 /** The parent's control queue, scanned for the `pg.inspect_result` that answers `request`. */
 async function inspectResultFor(s: Scenario, request: string): Promise<Record<string, any>> {
@@ -38,6 +38,7 @@ test('pg.inspect gets a pg.inspect_result whose request matches, and an unanswer
     owed: [s.dm],
     children: 2,
     tool: { name: 'bash', elapsed_ms: 5000, preview: 'ls' },
+    last: { text: 'the last thing it said', tool: { name: 'edit', preview: 'src/loop.ts', ok: false } },
   });
 
   const answered = await driveUntil(s, pending);
@@ -46,6 +47,8 @@ test('pg.inspect gets a pg.inspect_result whose request matches, and an unanswer
   assert.deepEqual(answered.owed, [s.dm]);
   assert.equal(answered.children, 2);
   assert.equal(answered.tool?.name, 'bash');
+  assert.equal(answered.last?.text, 'the last thing it said', 'the answer carries the last-round block');
+  assert.deepEqual(answered.last?.tool, { name: 'edit', preview: 'src/loop.ts', ok: false });
 
   const unanswered = await driveUntil(s, s.loop.inspect(s.siblings[0].id, 150));
   assert.equal(unanswered.phase, 'unknown', 'a timed-out inspect resolves as unknown, it does not invent a phase');
@@ -73,6 +76,7 @@ test('pg.inspect sent to the adapter is answered with its own phase, owed and ch
   // 2) After a DM the member owes a reply to, the same three fields move with the state.
   await send(s.platform, s.parent!.token, s.me.id, 'the task the member owes a reply to');
   await s.cycle();
+  await s.timer(WINDOW); // the debt is marked when the window delivers it
   assert.deepEqual(s.loop.state().owed, [s.dm], 'precondition: the DM is owed');
 
   const owedRequest = 'r-owed-1';
@@ -88,6 +92,21 @@ test('pg.inspect sent to the adapter is answered with its own phase, owed and ch
   );
   assert.deepEqual(result.owed, [s.dm], "the answer reports the adapter's own obligation table");
   assert.equal(result.children, 0, 'this member still has no children');
+
+  // 3) The last-round block (§8.5) is what makes an inspect useful about a member that
+  // is inside a tool: the parent sees what it last said and what it last ran.
+  s.surface.lastText = 'the answer I would give';
+  s.surface.emit({ type: 'tool_start', name: 'bash', argsPreview: 'ls -la' });
+  s.surface.emit({ type: 'tool_end', name: 'bash', ok: true });
+
+  const lastRequest = 'r-last-1';
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.inspect', { v: 1, request: lastRequest });
+  await s.loop.pollOnce();
+
+  const withLast = await inspectResultFor(s, lastRequest);
+  assert.equal(withLast.last?.text, 'the answer I would give', 'a live inspect reports the last assistant text');
+  assert.equal(withLast.last?.tool?.name, 'bash', 'and the last finished tool call');
+  assert.equal(withLast.last?.tool?.ok, true);
 });
 
 test('pg_spawn creates a member, DMs the brief, and starts one pane with the child token in the env', async (t) => {
