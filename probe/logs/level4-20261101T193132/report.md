@@ -30,9 +30,13 @@ Adapter `src/` was **not** modified. Evidence files are named after the journal.
    11:32:32.951). The platform's `controls` table contains exactly **one** row for the whole
    run — `sys.terminated` — so no `pg.report` was ever sent (`db-inspect.txt`).
    The adapter's own exit report cannot cover this either: `session_shutdown` →
-   `reportExiting` starts with `GET /v1/whoami`, and `src/http.ts:20-23` answers **410
-   `member_gone`** for a `gone` member, so the catch swallows it. Delete-then-report is
-   impossible by construction.
+   `reportExiting` starts with `GET /v1/whoami`, and `PiGroups/src/http.ts:20-23` answers
+   **410 `member_gone`** for a `gone` member; the adapter's catch at
+   `pigroups-adapter/src/extension.ts:91-93` swallows it. Delete-then-report over *that
+   path* is impossible by construction. (The missing tool is not the whole story: the
+   model can and did report by speaking — `pg_say` → `{"conv":"g:m_d1becc","seq":1}` in
+   `transcripts/alpha.md`. The level-4 criterion was later corrected to "the child
+   speaks"; see `docs/handoff.md` §3.6.)
 2. **The child's pane is not gone.** After the delete `herdr pane list` still shows
    `wE:pX agent=- status=unknown`, title `yang@yangPC:/tmp/pigroups-l4-scratch…`: the pane
    returned to a shell prompt and stayed in the user's tab. Nothing in `src/` calls

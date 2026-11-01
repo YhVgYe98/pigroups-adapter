@@ -129,14 +129,23 @@ herdr agent prompt "$PANE" "Call pg_terminate with the member id returned by pg_
   ```
 - 删除后：成员 `status:"gone"`；`herdr pane list` 里子 pane 消失；`herdr agent list` 没有它；
   `ps` 没有子 `pi`。
-- **当前已知失败**：模型侧没有 `pg_report` 工具（`searchTools("pg")` 只有 9 个），所以根不会收到
-  子模型主动发的 `pg.report`；只有适配器自发的 `pg.report{"status":"blocked",…}` 可能出现。
-  不要把这个当成通过。
+- **第 4 级的状态是“部分通过”，不是“通过”。** 通过标准是“子成员说了一句话（`pg_say`）”，
+  不是“根收到模型主动发的 `pg.report`”。这条判据改过（原来要求 `pg.report`），而且 2 个子成员
+  的通过标准也在记录那次 run 的提交里降成了“子成员”；两处都记账在
+  `docs/handoff.md` §3.6。实际只跑了 1 个子成员，所以别把它读成整级通过。
+- **模型侧确实没有 `pg_report` 工具**（`searchTools("pg")` 只有 9 个），只有适配器自发的
+  `pg.report{"status":"blocked",…}` 能到根。这是产品缺口（`docs/handoff.md` §7），不是第 4 级
+  判据，也不要用它反推 run 失败。
 - 清理：`herdr pane close "$PANE"`（子 pane 若因 bug 残留也一并关）、`kill "$PLATFORM_PID"`、
   `rm -rf "$DATA" "$ADIR" "$SCRATCH"`。
 
 > 必须用 `-ne`，否则 root 会继承你全局安装的扩展。2026-11-01 第一次第 4 级跑就因此把消息
 > 经 `pi-intercom` 转进了用户主会话，还让 `pi-straw-boss` 重排了用户的 tab。
+
+> 复跑一个失败点时，把那次 run 的树记下来：`git rev-parse HEAD` 加
+> `sha256sum src/loop.ts`。2026-11-01 的 pane 复跑没有在 run.log 里写这两个值，事后补在
+> `probe/logs/level4-fix-20261101T193945/tree.txt`（树 = `9453f6d`），驱动命令在
+> `commands.md`。`run.log` 本身不改——它是当时打印的。
 
 ## 日志格式
 

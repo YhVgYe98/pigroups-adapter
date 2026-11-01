@@ -1,0 +1,29 @@
+# Which tree this run exercised
+
+Recorded 2026-11-01, **after the fact**: the run itself printed no hash, and `run.log`
+is left exactly as it was printed (it is the run's own output, not a place to
+retroactively add facts).
+
+The run window is 19:39:45–19:40 (+08:00). `9453f6d` was committed at 19:41:10, so this
+was a focused rerun on the working tree that **became** `9453f6d`, not on a commit that
+already existed.
+
+```
+commit              9453f6d2fd51afd482460f6035cea4dee5d20450
+subject             loop: close a terminated child's pane
+src/loop.ts sha256  2322bccf870c2ceb669dac1059a79fec91958c5d24b81bd5d76fb1ea92300857
+                    (git show 9453f6d:src/loop.ts | sha256sum)
+```
+
+What makes this the tree that ran (rather than an assumption):
+
+- the only source change in `9453f6d` is the pane map + `close()` inside `terminate()`,
+  which is exactly the path this run exercised (spawn → terminate → pane absent);
+- this evidence directory was committed in `9453f6d` itself, i.e. it is the run the
+  commit message refers to;
+- `agent-start-root.json` records the argv the run used
+  (`pi -ne -e .../src/extension.ts --model deepseek/deepseek-flash`), and
+  `run.log` records the ids (`root=m_dcfea5`, `child=m_6713a6`, panes `wE:p0`/`wE:p11`).
+
+The driver script lived in `/tmp` and was not committed. The exact command sequence,
+reconstructed from the files in this directory, is in `commands.md`.
