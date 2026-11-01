@@ -1,0 +1,21 @@
+# e2-native-steer-platform-abort/session.jsonl
+# raw JSONL: probe/logs/steer-20261101T170244Z/e2-native-steer-platform-abort/session.jsonl
+
+[4] 2026-11-01T17:04:19.082Z user
+    Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+    RAW {"type":"message","id":"1eb2a4c3","parentId":"59c08817","timestamp":"2026-11-01T17:04:19.082Z","message":{"role":"user","content":[{"type":"text","text":"Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop."}],"timestamp":1793552659080}}
+
+[5] 2026-11-01T17:04:20.391Z assistant stopReason=toolUse
+    [thinking] The user wants me to call bash exactly once with `sleep 60; echo SLEEPDONE`, then after the result comes back, follow the newest instruction. Let me do that.
+    
+    Note: there may be a "newest instruction" arriving during the sleep via steering. Let me just run the command.
+    [toolCall bash {"command":"sleep 60; echo SLEEPDONE","timeout":120}]
+    RAW {"type":"message","id":"9c2479f7","parentId":"1eb2a4c3","timestamp":"2026-11-01T17:04:20.391Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"The user wants me to call bash exactly once with `sleep 60; echo SLEEPDONE`, then after the result comes back, follow the newest instruction. Let me do that.\n\nNote: there may be a \"newest instruction\" arriving during the sleep via steering. Let me just run the command.","thinkingSignature":"reasoning_content"},{"type":"toolCall","id":"call_00_EiJMcFXUHqEUslI9qjp02758","name":"bash","arguments":{"command":"sleep 60; echo SLEEPDONE","timeout":120}}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":157,"output":125,"cacheRead":2560,"cacheWrite":0,"reasoning":63,"totalTokens":2842,"cost":{"input":0.0000471,"output":0.00015,"cacheRead":0.00001536,"cacheWrite":0,"total":0.00021245999999999998}},"stopReason":"toolUse","timestamp":1793552659088,"responseId":"0cdd383d-aa9f-4f3a-af8f-fd8ebcfa97a3","rawStopReason":"tool_calls","durationMs":1303,"thinkingLevel":"max"}}
+
+[6] 2026-11-01T17:04:26.038Z toolResult toolName=bash isError=true durationMs=5645
+    Command aborted
+    RAW {"type":"message","id":"19f8d25d","parentId":"9c2479f7","timestamp":"2026-11-01T17:04:26.038Z","message":{"role":"toolResult","toolCallId":"call_00_EiJMcFXUHqEUslI9qjp02758","toolName":"bash","content":[{"type":"text","text":"Command aborted"}],"details":{},"isError":true,"durationMs":5645,"timestamp":1793552666038}}
+
+[7] 2026-11-01T17:04:26.040Z assistant stopReason=error errorMessage="This operation was aborted"
+    RAW {"type":"message","id":"67afc21e","parentId":"19f8d25d","timestamp":"2026-11-01T17:04:26.040Z","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"This operation was aborted","timestamp":1793552666039,"durationMs":0,"thinkingLevel":"max"}}
+

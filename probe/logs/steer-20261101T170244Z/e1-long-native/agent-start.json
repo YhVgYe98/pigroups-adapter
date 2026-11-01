@@ -1,0 +1,39 @@
+{
+  "id": "cli:agent:start",
+  "result": {
+    "agent": {
+      "agent": "pi",
+      "agent_status": "idle",
+      "cwd": "/tmp/pigroups-steer-scratch.pIuOts",
+      "focused": false,
+      "foreground_cwd": "/tmp/pigroups-steer-scratch.pIuOts",
+      "interactive_ready": true,
+      "name": "e1-long-native",
+      "pane_id": "wE:p2V",
+      "revision": 3,
+      "state_change_seq": 431,
+      "tab_id": "wE:t1K",
+      "terminal_id": "term_65f39ff83988455",
+      "terminal_title": "π - pigroups-steer-scratch.pIuOts",
+      "terminal_title_stripped": "π - pigroups-steer-scratch.pIuOts",
+      "workspace_id": "wE"
+    },
+    "argv": [
+      "pi",
+      "-ne",
+      "-e",
+      "/home/yang/Documents/pigroups-adapter/src/extension.ts",
+      "-e",
+      "/home/yang/Documents/pigroups-adapter/probe/steer-probe.ts",
+      "-ns",
+      "-np",
+      "-nc",
+      "--no-mcp",
+      "--session-dir",
+      "/home/yang/Documents/pigroups-adapter/probe/logs/steer-20261101T170244Z/e1-long-native/sessions",
+      "--model",
+      "deepseek/deepseek-flash"
+    ],
+    "type": "agent_started"
+  }
+}

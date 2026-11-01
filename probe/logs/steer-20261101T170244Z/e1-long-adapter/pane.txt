@@ -1,0 +1,46 @@
+[Extensions]
+  extension.ts, steer-probe.ts
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Package Updates Available
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-web-access
+ - pi-subagents
+ - @juicesharp/rpiv-ask-user-question
+ - @juicesharp/rpiv-todo
+ - @quintinshaw/pi-dynamic-workflows
+ - pi-straw-boss
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+ Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep.
+ After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+
+
+
+ $ sleep 60; echo SLEEPDONE (timeout 90s)
+
+ Command aborted
+
+ Took 5.1s
+
+
+ Error: This operation was aborted
+
+
+ [pigroups]
+
+ STEER-MARK-7f31A: when you next see this marker, reply with exactly "STEER-MARK-7f31A" and then stop. Do not call any tool.
+
+
+ Thinking...
+
+ STEER-MARK-7f31A
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pigroups-steer-scratch.pIuOts
+↑304 ↓174 R5.2k CH94.8% $0.000 0.3%/1.0M (auto)                                                             (deepseek) deepseek-flash • max

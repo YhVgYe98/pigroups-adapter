@@ -1,0 +1,39 @@
+{
+  "id": "cli:agent:start",
+  "result": {
+    "agent": {
+      "agent": "pi",
+      "agent_status": "idle",
+      "cwd": "/tmp/pigroups-steer-scratch.pIuOts",
+      "focused": false,
+      "foreground_cwd": "/tmp/pigroups-steer-scratch.pIuOts",
+      "interactive_ready": true,
+      "name": "e2-native-steer-platform-abort",
+      "pane_id": "wE:p2Y",
+      "revision": 3,
+      "state_change_seq": 440,
+      "tab_id": "wE:t1P",
+      "terminal_id": "term_65f3a04e0f39a58",
+      "terminal_title": "π - pigroups-steer-scratch.pIuOts",
+      "terminal_title_stripped": "π - pigroups-steer-scratch.pIuOts",
+      "workspace_id": "wE"
+    },
+    "argv": [
+      "pi",
+      "-ne",
+      "-e",
+      "/home/yang/Documents/pigroups-adapter/src/extension.ts",
+      "-e",
+      "/home/yang/Documents/pigroups-adapter/probe/steer-probe.ts",
+      "-ns",
+      "-np",
+      "-nc",
+      "--no-mcp",
+      "--session-dir",
+      "/home/yang/Documents/pigroups-adapter/probe/logs/steer-20261101T170244Z/e2-native-steer-platform-abort/sessions",
+      "--model",
+      "deepseek/deepseek-flash"
+    ],
+    "type": "agent_started"
+  }
+}

@@ -1,0 +1,28 @@
+# e1-long-adapter/session.jsonl
+# raw JSONL: probe/logs/steer-20261101T170244Z/e1-long-adapter/session.jsonl
+
+[4] 2026-11-01T17:04:07.040Z user
+    Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+    RAW {"type":"message","id":"5ec37172","parentId":"3a4b6a83","timestamp":"2026-11-01T17:04:07.040Z","message":{"role":"user","content":[{"type":"text","text":"Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop."}],"timestamp":1793552647038}}
+
+[5] 2026-11-01T17:04:08.015Z assistant stopReason=toolUse
+    [toolCall bash {"command":"sleep 60; echo SLEEPDONE","timeout":90}]
+    RAW {"type":"message","id":"7b168fb0","parentId":"5ec37172","timestamp":"2026-11-01T17:04:08.015Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_00_ET_FQoKgrKnS7OS5Be2Y1tb7238","name":"bash","arguments":{"command":"sleep 60; echo SLEEPDONE","timeout":90}}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":157,"output":62,"cacheRead":2560,"cacheWrite":0,"reasoning":0,"totalTokens":2779,"cost":{"input":0.0000471,"output":0.00007439999999999999,"cacheRead":0.00001536,"cacheWrite":0,"total":0.00013686}},"stopReason":"toolUse","timestamp":1793552647047,"responseId":"d56a2a22-c046-4488-9dfc-13f40acbf0d2","rawStopReason":"tool_calls","durationMs":967,"thinkingLevel":"max"}}
+
+[6] 2026-11-01T17:04:13.146Z toolResult toolName=bash isError=true durationMs=5129
+    Command aborted
+    RAW {"type":"message","id":"212f1ee4","parentId":"7b168fb0","timestamp":"2026-11-01T17:04:13.146Z","message":{"role":"toolResult","toolCallId":"call_00_ET_FQoKgrKnS7OS5Be2Y1tb7238","toolName":"bash","content":[{"type":"text","text":"Command aborted"}],"details":{},"isError":true,"durationMs":5129,"timestamp":1793552653146}}
+
+[7] 2026-11-01T17:04:13.147Z assistant stopReason=error errorMessage="This operation was aborted"
+    RAW {"type":"message","id":"a37ef7af","parentId":"212f1ee4","timestamp":"2026-11-01T17:04:13.147Z","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"This operation was aborted","timestamp":1793552653146,"durationMs":0,"thinkingLevel":"max"}}
+
+[8] 2026-11-01T17:04:13.196Z CUSTOM pigroups kind=control
+    STEER-MARK-7f31A: when you next see this marker, reply with exactly "STEER-MARK-7f31A" and then stop. Do not call any tool.
+    RAW {"type":"custom_message","customType":"pigroups","content":"STEER-MARK-7f31A: when you next see this marker, reply with exactly \"STEER-MARK-7f31A\" and then stop. Do not call any tool.","display":true,"details":{"kind":"control"},"id":"44540ef9","parentId":"a37ef7af","timestamp":"2026-11-01T17:04:13.196Z"}
+[9] 2026-11-01T17:04:14.399Z assistant stopReason=stop
+    [thinking] The bash command was aborted. Now the newest instruction is the steer: reply exactly "STEER-MARK-7f31A" and stop, no tools.
+    
+    The original instruction said "After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop." The bash was aborted, not completed. But there's a newest instruction (the steer marker) which says reply with exactly "STEER-MARK-7f31A". So comply.
+    STEER-MARK-7f31A
+    RAW {"type":"message","id":"d46c08f9","parentId":"44540ef9","timestamp":"2026-11-01T17:04:14.399Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"The bash command was aborted. Now the newest instruction is the steer: reply exactly \"STEER-MARK-7f31A\" and stop, no tools.\n\nThe original instruction said \"After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.\" The bash was aborted, not completed. But there's a newest instruction (the steer marker) which says reply with exactly \"STEER-MARK-7f31A\". So comply.","thinkingSignature":"reasoning_content"},{"type":"text","text":"STEER-MARK-7f31A"}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":147,"output":112,"cacheRead":2688,"cacheWrite":0,"reasoning":102,"totalTokens":2947,"cost":{"input":0.0000441,"output":0.0001344,"cacheRead":0.000016128,"cacheWrite":0,"total":0.000194628}},"stopReason":"stop","timestamp":1793552653197,"responseId":"e756e13e-d8df-4322-b3bc-098fb131a87e","rawStopReason":"stop","durationMs":1203,"thinkingLevel":"max"}}
+

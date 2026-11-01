@@ -1,0 +1,23 @@
+# e1-long-native/session.jsonl
+# raw JSONL: probe/logs/steer-20261101T170244Z/e1-long-native/session.jsonl
+
+[4] 2026-11-01T17:02:49.077Z user
+    Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+    RAW {"type":"message","id":"da2f8f6d","parentId":"62b7f179","timestamp":"2026-11-01T17:02:49.077Z","message":{"role":"user","content":[{"type":"text","text":"Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop."}],"timestamp":1793552569075}}
+
+[5] 2026-11-01T17:02:49.875Z assistant stopReason=toolUse
+    [toolCall bash {"command":"sleep 60; echo SLEEPDONE","timeout":90}]
+    RAW {"type":"message","id":"f8fea11d","parentId":"da2f8f6d","timestamp":"2026-11-01T17:02:49.875Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_00_ET_QJP3D1YqZlKVlrznnyXa2991","name":"bash","arguments":{"command":"sleep 60; echo SLEEPDONE","timeout":90}}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":2205,"output":62,"cacheRead":512,"cacheWrite":0,"reasoning":0,"totalTokens":2779,"cost":{"input":0.0006615,"output":0.00007439999999999999,"cacheRead":0.000003072,"cacheWrite":0,"total":0.000738972}},"stopReason":"toolUse","timestamp":1793552569082,"responseId":"2897946d-c8a0-4ef9-8a95-eeb1dd98ef11","rawStopReason":"tool_calls","durationMs":792,"thinkingLevel":"max"}}
+
+[6] 2026-11-01T17:03:49.880Z toolResult toolName=bash isError=false durationMs=60004
+    SLEEPDONE
+    
+    RAW {"type":"message","id":"430216e0","parentId":"f8fea11d","timestamp":"2026-11-01T17:03:49.880Z","message":{"role":"toolResult","toolCallId":"call_00_ET_QJP3D1YqZlKVlrznnyXa2991","toolName":"bash","content":[{"type":"text","text":"SLEEPDONE\n"}],"isError":false,"durationMs":60004,"timestamp":1793552629880}}
+
+[7] 2026-11-01T17:03:49.881Z CUSTOM steer-probe kind=?
+    STEER-MARK-7f31: when you next see this marker, reply with exactly "STEER-MARK-7f31" and then stop. Do not call any tool.
+    RAW {"type":"custom_message","customType":"steer-probe","content":"STEER-MARK-7f31: when you next see this marker, reply with exactly \"STEER-MARK-7f31\" and then stop. Do not call any tool.","display":true,"details":{"marker":"STEER-MARK-7f31","probe":true},"id":"b1511afb","parentId":"430216e0","timestamp":"2026-11-01T17:03:49.881Z"}
+[8] 2026-11-01T17:03:50.468Z assistant stopReason=stop
+    STEER-MARK-7f31
+    RAW {"type":"message","id":"313735dc","parentId":"b1511afb","timestamp":"2026-11-01T17:03:50.468Z","message":{"role":"assistant","content":[{"type":"text","text":"STEER-MARK-7f31"}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":147,"output":9,"cacheRead":2688,"cacheWrite":0,"reasoning":0,"totalTokens":2844,"cost":{"input":0.0000441,"output":0.0000108,"cacheRead":0.000016128,"cacheWrite":0,"total":0.000071028}},"stopReason":"stop","timestamp":1793552629882,"responseId":"8aa706f6-508c-4c9b-b23e-64397944020d","rawStopReason":"stop","durationMs":586,"thinkingLevel":"max"}}
+

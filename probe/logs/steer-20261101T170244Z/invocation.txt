@@ -1,0 +1,9 @@
+Run at 2026-11-01T17:02:44Z (local commit 48feef2).
+
+cd /home/yang/Documents/pigroups-adapter
+EVID="$PWD/probe/logs/steer-20261101T170244Z"
+mkdir -p "$EVID"
+node probe/logs/steer-driver.mjs "$EVID"
+
+The driver was archived after the run as $EVID/driver.mjs; the probe extension as
+$EVID/steer-probe.ts (the live run loaded /home/yang/Documents/pigroups-adapter/probe/steer-probe.ts).

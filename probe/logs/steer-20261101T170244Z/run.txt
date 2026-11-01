@@ -1,0 +1,45 @@
+[2026-11-01T17:02:44.612Z] platform pid 357735 on http://127.0.0.1:36691, data=/tmp/pigroups-steer-data.o45iK5, adir=/tmp/pigroups-steer-adir.5KZjQX, scratch=/tmp/pigroups-steer-scratch.pIuOts
+[2026-11-01T17:02:44.848Z] bootstrapped root=m_36b6db, human=h_dd0466
+[2026-11-01T17:02:44.848Z] === CASE e1-long-native ===
+[2026-11-01T17:02:48.772Z] member m_1d2949 ready in pane wE:p2V
+[2026-11-01T17:02:48.772Z] prompt attempt 1: Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+[2026-11-01T17:02:49.976Z] tool_start at 2026-11-01T17:02:49.875Z
+[2026-11-01T17:02:54.978Z] native steer trigger written at 2026-11-01T17:02:54.978Z
+[2026-11-01T17:02:55.179Z] native steer send returned at 2026-11-01T17:02:55.000Z (isIdle=false)
+[2026-11-01T17:03:50.757Z] immediate marker verdict for STEER-MARK-7f31: SEEN
+[2026-11-01T17:03:50.966Z] === CASE e1-short-native ===
+[2026-11-01T17:03:54.889Z] member m_03cdac ready in pane wE:p2W
+[2026-11-01T17:03:54.889Z] prompt attempt 1: Call the bash tool exactly once with this exact command, and call no other tool: sleep 5; echo SLEEPDONE. Do not lengthen the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+[2026-11-01T17:03:56.894Z] tool_start at 2026-11-01T17:03:56.766Z
+[2026-11-01T17:03:58.395Z] native steer trigger written at 2026-11-01T17:03:58.395Z
+[2026-11-01T17:03:58.596Z] native steer send returned at 2026-11-01T17:03:58.435Z (isIdle=false)
+[2026-11-01T17:04:02.602Z] immediate marker verdict for STEER-MARK-7f31: SEEN
+[2026-11-01T17:04:02.811Z] === CASE e1-long-adapter ===
+[2026-11-01T17:04:06.734Z] member m_6b94ee ready in pane wE:p2X
+[2026-11-01T17:04:06.734Z] prompt attempt 1: Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+[2026-11-01T17:04:08.137Z] tool_start at 2026-11-01T17:04:08.015Z
+[2026-11-01T17:04:13.143Z] platform pg.steer posted at 2026-11-01T17:04:13.140Z (3 ms) -> {"control_seq":3,"receipts":[{"to_id":"m_6b94ee","state":"pending"}],"server_version":"0.2.0"}
+[2026-11-01T17:04:14.645Z] immediate marker verdict for STEER-MARK-7f31A: SEEN
+[2026-11-01T17:04:14.853Z] === CASE e2-native-steer-platform-abort ===
+[2026-11-01T17:04:18.777Z] member m_02169b ready in pane wE:p2Y
+[2026-11-01T17:04:18.777Z] prompt attempt 1: Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+[2026-11-01T17:04:20.580Z] tool_start at 2026-11-01T17:04:20.392Z
+[2026-11-01T17:04:25.583Z] native steer trigger written at 2026-11-01T17:04:25.583Z
+[2026-11-01T17:04:25.783Z] native steer send returned at 2026-11-01T17:04:25.585Z (isIdle=false)
+[2026-11-01T17:04:26.036Z] platform pg.abort posted at 2026-11-01T17:04:26.034Z (2 ms) -> {"control_seq":7,"receipts":[{"to_id":"m_02169b","state":"pending"}],"server_version":"0.2.0"}
+[2026-11-01T17:04:35.048Z] immediate marker verdict for STEER-MARK-9c02: LOST
+[2026-11-01T17:04:35.048Z] sending follow-up prompt BANANA after the immediate snapshot
+[2026-11-01T17:04:36.653Z] after-followup marker verdict for STEER-MARK-9c02: LOST
+[2026-11-01T17:04:36.861Z] === CASE e2-adapter-steer-then-abort ===
+[2026-11-01T17:04:40.783Z] member m_e50a57 ready in pane wE:p2Z
+[2026-11-01T17:04:40.783Z] prompt attempt 1: Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+[2026-11-01T17:04:42.786Z] tool_start at 2026-11-01T17:04:42.598Z
+[2026-11-01T17:04:47.793Z] platform pg.steer posted at 2026-11-01T17:04:47.790Z (3 ms) -> {"control_seq":11,"receipts":[{"to_id":"m_e50a57","state":"pending"}],"server_version":"0.2.0"}
+[2026-11-01T17:04:48.045Z] platform pg.abort posted at 2026-11-01T17:04:48.043Z (2 ms) -> {"control_seq":13,"receipts":[{"to_id":"m_e50a57","state":"pending"}],"server_version":"0.2.0"}
+[2026-11-01T17:04:57.056Z] immediate marker verdict for STEER-MARK-9c02A: KEPT-BUT-UNSEEN
+[2026-11-01T17:04:57.056Z] sending follow-up prompt BANANA after the immediate snapshot
+[2026-11-01T17:04:58.660Z] after-followup marker verdict for STEER-MARK-9c02A: SEEN
+[2026-11-01T17:04:58.869Z] all cases done
+[2026-11-01T17:04:58.869Z] cleanup: closing platform and removing temp dirs
+[2026-11-01T17:04:58.875Z] cleanup: final panes=wD:p1E wE:p1 wE:p12 wE:p2Q; extra=wE:p2Q; platformAlive=false
+[2026-11-01T17:04:58.995Z] wrote README.md

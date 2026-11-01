@@ -1,0 +1,22 @@
+{
+  "id": "cli:pane:process_info",
+  "result": {
+    "process_info": {
+      "foreground_process_group_id": 358861,
+      "foreground_processes": [
+        {
+          "argv": [
+            "pi"
+          ],
+          "cmdline": "pi",
+          "cwd": "/tmp/pigroups-steer-scratch.pIuOts",
+          "name": "pi",
+          "pid": 358861
+        }
+      ],
+      "pane_id": "wE:p2X",
+      "shell_pid": 358735
+    },
+    "type": "pane_process_info"
+  }
+}

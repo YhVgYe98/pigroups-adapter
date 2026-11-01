@@ -1,0 +1,13 @@
+{
+  "finalPaneIds": [
+    "wD:p1E",
+    "wE:p1",
+    "wE:p12",
+    "wE:p2Q"
+  ],
+  "onlyBossPanes": [
+    "wE:p2Q"
+  ],
+  "platformPid": 357735,
+  "platformAlive": false
+}

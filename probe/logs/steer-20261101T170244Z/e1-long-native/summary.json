@@ -1,0 +1,148 @@
+{
+  "case": "e1-long-native",
+  "member": {
+    "id": "m_1d2949",
+    "name": "e1-long-native",
+    "parent_id": "m_36b6db",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_36b6db",
+        "owner": "m_36b6db"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793552564850
+  },
+  "model": "deepseek/deepseek-flash",
+  "paneId": "wE:p2V",
+  "tabId": "wE:t1K",
+  "marker": "STEER-MARK-7f31",
+  "steerVia": "native",
+  "abortVia": null,
+  "steerFileTime": "2026-11-01T17:02:54.978Z",
+  "probePath": "/home/yang/Documents/pigroups-adapter/probe/logs/steer-20261101T170244Z/e1-long-native/probe.jsonl",
+  "sessionPath": "/home/yang/Documents/pigroups-adapter/probe/logs/steer-20261101T170244Z/e1-long-native/session.jsonl",
+  "immediate": {
+    "verdict": "SEEN"
+  },
+  "afterFollowUp": null,
+  "adapterView": {
+    "injectedFile": "/tmp/pigroups-steer-adir.5KZjQX/injected/m_1d2949.json",
+    "injectedExists": false,
+    "journalDir": "/tmp/pigroups-steer-adir.5KZjQX/journal/m_1d2949",
+    "journalListing": []
+  },
+  "analysis": {
+    "sessionPath": "/home/yang/Documents/pigroups-adapter/probe/logs/steer-20261101T170244Z/e1-long-native/session.jsonl",
+    "entryCount": 9,
+    "firstTimestamp": "2026-11-01T17:02:45.058Z",
+    "lastTimestamp": "2026-11-01T17:03:50.468Z",
+    "sleepCalls": [
+      {
+        "entryIndex": 5,
+        "id": "call_00_ET_QJP3D1YqZlKVlrznnyXa2991",
+        "name": "bash",
+        "args": {
+          "command": "sleep 60; echo SLEEPDONE",
+          "timeout": 90
+        },
+        "timestamp": "2026-11-01T17:02:49.875Z",
+        "result": {
+          "entryIndex": 6,
+          "toolCallId": "call_00_ET_QJP3D1YqZlKVlrznnyXa2991",
+          "toolName": "bash",
+          "isError": false,
+          "durationMs": 60004,
+          "timestamp": "2026-11-01T17:03:49.880Z",
+          "text": "SLEEPDONE\n"
+        }
+      }
+    ],
+    "toolResults": [
+      {
+        "entryIndex": 6,
+        "toolCallId": "call_00_ET_QJP3D1YqZlKVlrznnyXa2991",
+        "toolName": "bash",
+        "isError": false,
+        "durationMs": 60004,
+        "timestamp": "2026-11-01T17:03:49.880Z",
+        "text": "SLEEPDONE\n"
+      }
+    ],
+    "markers": {
+      "STEER-MARK-7f31": {
+        "steerEntries": [
+          {
+            "index": 7,
+            "timestamp": "2026-11-01T17:03:49.881Z",
+            "customType": "steer-probe",
+            "content": "STEER-MARK-7f31: when you next see this marker, reply with exactly \"STEER-MARK-7f31\" and then stop. Do not call any tool."
+          }
+        ],
+        "assistantMentions": [
+          {
+            "index": 8,
+            "timestamp": "2026-11-01T17:03:50.468Z",
+            "stopReason": "stop",
+            "text": "STEER-MARK-7f31"
+          }
+        ],
+        "allMentions": [
+          {
+            "index": 7,
+            "type": "custom_message",
+            "timestamp": "2026-11-01T17:03:49.881Z",
+            "text": "STEER-MARK-7f31: when you next see this marker, reply with exactly \"STEER-MARK-7f31\" and then stop. Do not call any tool."
+          },
+          {
+            "index": 8,
+            "type": "message",
+            "role": "assistant",
+            "timestamp": "2026-11-01T17:03:50.468Z",
+            "text": "STEER-MARK-7f31"
+          }
+        ]
+      }
+    },
+    "errorAssistants": [],
+    "relevant": [
+      {
+        "index": 5,
+        "type": "message",
+        "timestamp": "2026-11-01T17:02:49.875Z",
+        "role": "assistant",
+        "stopReason": "toolUse",
+        "toolCalls": [
+          {
+            "id": "call_00_ET_QJP3D1YqZlKVlrznnyXa2991",
+            "name": "bash",
+            "args": {
+              "command": "sleep 60; echo SLEEPDONE",
+              "timeout": 90
+            }
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "type": "message",
+        "timestamp": "2026-11-01T17:03:49.880Z",
+        "role": "toolResult",
+        "toolName": "bash",
+        "toolCallId": "call_00_ET_QJP3D1YqZlKVlrznnyXa2991",
+        "isError": false,
+        "text": "SLEEPDONE\n"
+      },
+      {
+        "index": 7,
+        "type": "custom_message",
+        "timestamp": "2026-11-01T17:03:49.881Z",
+        "customType": "steer-probe",
+        "content": "STEER-MARK-7f31: when you next see this marker, reply with exactly \"STEER-MARK-7f31\" and then stop. Do not call any tool."
+      }
+    ]
+  }
+}

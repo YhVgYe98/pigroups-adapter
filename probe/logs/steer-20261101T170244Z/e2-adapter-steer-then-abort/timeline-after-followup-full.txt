@@ -1,0 +1,38 @@
+# e2-adapter-steer-then-abort/session-after-followup.jsonl
+# raw JSONL: probe/logs/steer-20261101T170244Z/e2-adapter-steer-then-abort/session-after-followup.jsonl
+
+[4] 2026-11-01T17:04:41.088Z user
+    Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+    RAW {"type":"message","id":"540290cb","parentId":"c93a9ba0","timestamp":"2026-11-01T17:04:41.088Z","message":{"role":"user","content":[{"type":"text","text":"Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop."}],"timestamp":1793552681086}}
+
+[5] 2026-11-01T17:04:42.598Z assistant stopReason=toolUse
+    [thinking] The user wants me to call the bash tool exactly once with the exact command `sleep 60; echo SLEEPDONE`. They explicitly say not to shorten the sleep. However, there's a potential issue: the bash tool may have a timeout. Let me use an appropriate timeout, e.g., 120 seconds.
+    
+    I should call it exactly once with no other tool. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY.
+    
+    There might be a newer instruction injected while I'm waiting (pg_steer). Let's just do the call.
+    [toolCall bash {"command":"sleep 60; echo SLEEPDONE","timeout":120}]
+    RAW {"type":"message","id":"c7d3e40f","parentId":"540290cb","timestamp":"2026-11-01T17:04:42.598Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"The user wants me to call the bash tool exactly once with the exact command `sleep 60; echo SLEEPDONE`. They explicitly say not to shorten the sleep. However, there's a potential issue: the bash tool may have a timeout. Let me use an appropriate timeout, e.g., 120 seconds.\n\nI should call it exactly once with no other tool. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY.\n\nThere might be a newer instruction injected while I'm waiting (pg_steer). Let's just do the call.","thinkingSignature":"reasoning_content"},{"type":"toolCall","id":"call_00_XjNjq16k3HlnKGmXUIeL6879","name":"bash","arguments":{"command":"sleep 60; echo SLEEPDONE","timeout":120}}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":157,"output":184,"cacheRead":2560,"cacheWrite":0,"reasoning":122,"totalTokens":2901,"cost":{"input":0.0000471,"output":0.0002208,"cacheRead":0.00001536,"cacheWrite":0,"total":0.00028326}},"stopReason":"toolUse","timestamp":1793552681094,"responseId":"57808b86-1c3c-4c1d-9022-ed6c8d7f7c31","rawStopReason":"tool_calls","durationMs":1504,"thinkingLevel":"max"}}
+
+[6] 2026-11-01T17:04:47.796Z toolResult toolName=bash isError=true durationMs=5196
+    Command aborted
+    RAW {"type":"message","id":"509657ea","parentId":"c7d3e40f","timestamp":"2026-11-01T17:04:47.796Z","message":{"role":"toolResult","toolCallId":"call_00_XjNjq16k3HlnKGmXUIeL6879","toolName":"bash","content":[{"type":"text","text":"Command aborted"}],"details":{},"isError":true,"durationMs":5196,"timestamp":1793552687795}}
+
+[7] 2026-11-01T17:04:47.797Z assistant stopReason=error errorMessage="This operation was aborted"
+    RAW {"type":"message","id":"823ddbe8","parentId":"509657ea","timestamp":"2026-11-01T17:04:47.797Z","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"This operation was aborted","timestamp":1793552687796,"durationMs":0,"thinkingLevel":"max"}}
+
+[8] 2026-11-01T17:04:47.846Z CUSTOM pigroups kind=control
+    STEER-MARK-9c02A: when you next see this marker, reply with exactly "STEER-MARK-9c02A" and then stop. Do not call any tool.
+    RAW {"type":"custom_message","customType":"pigroups","content":"STEER-MARK-9c02A: when you next see this marker, reply with exactly \"STEER-MARK-9c02A\" and then stop. Do not call any tool.","display":true,"details":{"kind":"control"},"id":"84f71bca","parentId":"823ddbe8","timestamp":"2026-11-01T17:04:47.846Z"}
+[9] 2026-11-01T17:04:48.047Z assistant stopReason=aborted errorMessage="Operation aborted"
+    RAW {"type":"message","id":"d5d94083","parentId":"84f71bca","timestamp":"2026-11-01T17:04:48.047Z","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"aborted","timestamp":1793552687847,"errorMessage":"Operation aborted","durationMs":200,"thinkingLevel":"max"}}
+
+[10] 2026-11-01T17:04:57.360Z user
+    Reply with exactly BANANA and stop. Do not call any tool.
+    RAW {"type":"message","id":"ceea6c60","parentId":"d5d94083","timestamp":"2026-11-01T17:04:57.360Z","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly BANANA and stop. Do not call any tool."}],"timestamp":1793552697359}}
+
+[11] 2026-11-01T17:04:58.357Z assistant stopReason=stop
+    [thinking] The newest instruction is "Reply with exactly BANANA and stop. Do not call any tool." The steer marker says reply with STEER-MARK-9c02A and stop. But the newest instruction is BANANA. Follow the newest instruction.
+    BANANA
+    RAW {"type":"message","id":"90a721c5","parentId":"ceea6c60","timestamp":"2026-11-01T17:04:58.357Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"The newest instruction is \"Reply with exactly BANANA and stop. Do not call any tool.\" The steer marker says reply with STEER-MARK-9c02A and stop. But the newest instruction is BANANA. Follow the newest instruction.","thinkingSignature":"reasoning_content"},{"type":"text","text":"BANANA"}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":156,"output":56,"cacheRead":2816,"cacheWrite":0,"reasoning":52,"totalTokens":3028,"cost":{"input":0.0000468,"output":0.0000672,"cacheRead":0.000016896,"cacheWrite":0,"total":0.000130896}},"stopReason":"stop","timestamp":1793552697360,"responseId":"c700aea6-578c-4f41-be02-f4c74bffed0a","rawStopReason":"stop","durationMs":996,"thinkingLevel":"max"}}
+

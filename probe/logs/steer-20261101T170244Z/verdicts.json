@@ -1,0 +1,102 @@
+{
+  "run": "steer-20261101T170244Z",
+  "pi": "1.4.0",
+  "adapterHead": "48feef2a56e95a6b6279c387ac9f8a68d4f1cbf6",
+  "model": "deepseek/deepseek-flash",
+  "cases": {
+    "e1-long-native": {
+      "marker": "STEER-MARK-7f31",
+      "steerVia": "native",
+      "abortVia": null,
+      "steerSend": "2026-11-01T17:02:54.999Z",
+      "steerSendEpochMs": 1793552574999,
+      "toolCall": "2026-11-01T17:02:49.875Z",
+      "toolResult": "2026-11-01T17:03:49.880Z",
+      "toolResultIsError": false,
+      "markerEntry": "2026-11-01T17:03:49.881Z",
+      "firstAssistantMention": "2026-11-01T17:03:50.468Z",
+      "immediate": {
+        "verdict": "SEEN"
+      },
+      "afterFollowUp": null,
+      "adapterJournal": [],
+      "injectedExists": false
+    },
+    "e1-short-native": {
+      "marker": "STEER-MARK-7f31",
+      "steerVia": "native",
+      "abortVia": null,
+      "steerSend": "2026-11-01T17:03:58.435Z",
+      "steerSendEpochMs": 1793552638435,
+      "toolCall": "2026-11-01T17:03:56.766Z",
+      "toolResult": "2026-11-01T17:04:01.772Z",
+      "toolResultIsError": false,
+      "markerEntry": "2026-11-01T17:04:01.773Z",
+      "firstAssistantMention": "2026-11-01T17:04:02.539Z",
+      "immediate": {
+        "verdict": "SEEN"
+      },
+      "afterFollowUp": null,
+      "adapterJournal": [],
+      "injectedExists": false
+    },
+    "e1-long-adapter": {
+      "marker": "STEER-MARK-7f31A",
+      "steerVia": "platform",
+      "abortVia": null,
+      "steerSend": null,
+      "steerSendEpochMs": null,
+      "toolCall": "2026-11-01T17:04:08.015Z",
+      "toolResult": "2026-11-01T17:04:13.146Z",
+      "toolResultIsError": true,
+      "markerEntry": "2026-11-01T17:04:13.196Z",
+      "firstAssistantMention": "2026-11-01T17:04:14.399Z",
+      "immediate": {
+        "verdict": "SEEN"
+      },
+      "afterFollowUp": null,
+      "adapterJournal": [],
+      "injectedExists": false
+    },
+    "e2-native-steer-platform-abort": {
+      "marker": "STEER-MARK-9c02",
+      "steerVia": "native",
+      "abortVia": "platform",
+      "steerSend": "2026-11-01T17:04:25.585Z",
+      "steerSendEpochMs": 1793552665585,
+      "toolCall": "2026-11-01T17:04:20.391Z",
+      "toolResult": "2026-11-01T17:04:26.038Z",
+      "toolResultIsError": true,
+      "markerEntry": null,
+      "firstAssistantMention": null,
+      "immediate": {
+        "verdict": "LOST"
+      },
+      "afterFollowUp": {
+        "verdict": "LOST"
+      },
+      "adapterJournal": [],
+      "injectedExists": false
+    },
+    "e2-adapter-steer-then-abort": {
+      "marker": "STEER-MARK-9c02A",
+      "steerVia": "platform",
+      "abortVia": "platform",
+      "steerSend": null,
+      "steerSendEpochMs": null,
+      "toolCall": "2026-11-01T17:04:42.598Z",
+      "toolResult": "2026-11-01T17:04:47.796Z",
+      "toolResultIsError": true,
+      "markerEntry": "2026-11-01T17:04:47.846Z",
+      "firstAssistantMention": "2026-11-01T17:04:58.357Z",
+      "immediate": {
+        "verdict": "KEPT-BUT-UNSEEN"
+      },
+      "afterFollowUp": {
+        "verdict": "SEEN"
+      },
+      "adapterJournal": [],
+      "injectedExists": false
+    }
+  }
+}

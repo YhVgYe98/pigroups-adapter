@@ -1,0 +1,3 @@
+{"index":5,"type":"message","timestamp":"2026-11-01T17:03:56.766Z","role":"assistant","stopReason":"toolUse","toolCalls":[{"id":"call_00_0R43sa9PijQ9wYh0jEi34347","name":"bash","args":{"command":"sleep 5; echo SLEEPDONE","timeout":20}}]}
+{"index":6,"type":"message","timestamp":"2026-11-01T17:04:01.772Z","role":"toolResult","toolName":"bash","toolCallId":"call_00_0R43sa9PijQ9wYh0jEi34347","isError":false,"text":"SLEEPDONE\n"}
+{"index":7,"type":"custom_message","timestamp":"2026-11-01T17:04:01.773Z","customType":"steer-probe","content":"STEER-MARK-7f31: when you next see this marker, reply with exactly \"STEER-MARK-7f31\" and then stop. Do not call any tool."}

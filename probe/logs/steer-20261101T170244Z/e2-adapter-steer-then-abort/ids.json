@@ -1,0 +1,20 @@
+{
+  "member": {
+    "id": "m_e50a57",
+    "name": "e2-adapter-steer-then-abort",
+    "parent_id": "m_36b6db",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_36b6db",
+        "owner": "m_36b6db"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793552676862
+  },
+  "token": "pgt_REDACTED",
+  "model": "deepseek/deepseek-flash"
+}

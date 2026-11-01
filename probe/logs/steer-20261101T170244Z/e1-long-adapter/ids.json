@@ -1,0 +1,20 @@
+{
+  "member": {
+    "id": "m_6b94ee",
+    "name": "e1-long-adapter",
+    "parent_id": "m_36b6db",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_36b6db",
+        "owner": "m_36b6db"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793552642813
+  },
+  "token": "pgt_REDACTED",
+  "model": "deepseek/deepseek-flash"
+}

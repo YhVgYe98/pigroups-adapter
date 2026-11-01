@@ -1,0 +1,15 @@
+{
+  "member": {
+    "id": "m_36b6db",
+    "name": "root",
+    "parent_id": null,
+    "status": "alive",
+    "is_root": true,
+    "child_count": 0,
+    "groups": [],
+    "last_seen_at": null,
+    "created_at": 1793552564845
+  },
+  "token": "pgt_REDACTED",
+  "server_version": "0.2.0"
+}

@@ -1,0 +1,26 @@
+# e1-short-native/session.jsonl
+# raw JSONL: probe/logs/steer-20261101T170244Z/e1-short-native/session.jsonl
+
+[4] 2026-11-01T17:03:55.194Z user
+    Call the bash tool exactly once with this exact command, and call no other tool: sleep 5; echo SLEEPDONE. Do not lengthen the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+    RAW {"type":"message","id":"eea3d7bc","parentId":"6345072f","timestamp":"2026-11-01T17:03:55.194Z","message":{"role":"user","content":[{"type":"text","text":"Call the bash tool exactly once with this exact command, and call no other tool: sleep 5; echo SLEEPDONE. Do not lengthen the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop."}],"timestamp":1793552635192}}
+
+[5] 2026-11-01T17:03:56.766Z assistant stopReason=toolUse
+    [thinking] The user wants me to call bash exactly once with `sleep 5; echo SLEEPDONE`. Then after the result comes back, follow the newest instruction — which is this same instruction? The newest instruction is the one given. After the bash result, I should check for newest instruction. There is none new, so reply exactly READY.
+    
+    Let me just do it.
+    [toolCall bash {"command":"sleep 5; echo SLEEPDONE","timeout":20}]
+    RAW {"type":"message","id":"03361f56","parentId":"eea3d7bc","timestamp":"2026-11-01T17:03:56.766Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"The user wants me to call bash exactly once with `sleep 5; echo SLEEPDONE`. Then after the result comes back, follow the newest instruction — which is this same instruction? The newest instruction is the one given. After the bash result, I should check for newest instruction. There is none new, so reply exactly READY.\n\nLet me just do it.","thinkingSignature":"reasoning_content"},{"type":"toolCall","id":"call_00_0R43sa9PijQ9wYh0jEi34347","name":"bash","arguments":{"command":"sleep 5; echo SLEEPDONE","timeout":20}}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":286,"output":138,"cacheRead":2432,"cacheWrite":0,"reasoning":76,"totalTokens":2856,"cost":{"input":0.0000858,"output":0.0001656,"cacheRead":0.000014592,"cacheWrite":0,"total":0.000265992}},"stopReason":"toolUse","timestamp":1793552635199,"responseId":"fb6806f4-1d0b-4eca-ba0e-9251033a16f8","rawStopReason":"tool_calls","durationMs":1566,"thinkingLevel":"max"}}
+
+[6] 2026-11-01T17:04:01.772Z toolResult toolName=bash isError=false durationMs=5005
+    SLEEPDONE
+    
+    RAW {"type":"message","id":"f4db0017","parentId":"03361f56","timestamp":"2026-11-01T17:04:01.772Z","message":{"role":"toolResult","toolCallId":"call_00_0R43sa9PijQ9wYh0jEi34347","toolName":"bash","content":[{"type":"text","text":"SLEEPDONE\n"}],"isError":false,"durationMs":5005,"timestamp":1793552641772}}
+
+[7] 2026-11-01T17:04:01.773Z CUSTOM steer-probe kind=?
+    STEER-MARK-7f31: when you next see this marker, reply with exactly "STEER-MARK-7f31" and then stop. Do not call any tool.
+    RAW {"type":"custom_message","customType":"steer-probe","content":"STEER-MARK-7f31: when you next see this marker, reply with exactly \"STEER-MARK-7f31\" and then stop. Do not call any tool.","display":true,"details":{"marker":"STEER-MARK-7f31","probe":true},"id":"99851da2","parentId":"f4db0017","timestamp":"2026-11-01T17:04:01.773Z"}
+[8] 2026-11-01T17:04:02.539Z assistant stopReason=stop
+    STEER-MARK-7f31
+    RAW {"type":"message","id":"4edc2941","parentId":"99851da2","timestamp":"2026-11-01T17:04:02.539Z","message":{"role":"assistant","content":[{"type":"text","text":"STEER-MARK-7f31"}],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":224,"output":9,"cacheRead":2688,"cacheWrite":0,"reasoning":0,"totalTokens":2921,"cost":{"input":0.0000672,"output":0.0000108,"cacheRead":0.000016128,"cacheWrite":0,"total":0.00009412799999999999}},"stopReason":"stop","timestamp":1793552641773,"responseId":"b6c8b5c5-b7f7-4caf-af05-a46086ad621e","rawStopReason":"stop","durationMs":765,"thinkingLevel":"max"}}
+

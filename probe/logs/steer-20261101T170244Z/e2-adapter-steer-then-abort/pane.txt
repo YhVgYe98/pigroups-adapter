@@ -1,0 +1,46 @@
+ - pi-web-access
+ - pi-subagents
+ - @juicesharp/rpiv-ask-user-question
+ - @juicesharp/rpiv-todo
+ - @quintinshaw/pi-dynamic-workflows
+ - pi-straw-boss
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+ Call the bash tool exactly once with this exact command, and call no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep.
+ After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+
+
+ Thinking...
+
+
+ $ sleep 60; echo SLEEPDONE (timeout 120s)
+
+ Command aborted
+
+ Took 5.2s
+
+
+ Error: This operation was aborted
+
+
+ [pigroups]
+
+ STEER-MARK-9c02A: when you next see this marker, reply with exactly "STEER-MARK-9c02A" and then stop. Do not call any tool.
+
+
+ Operation aborted
+
+
+ Reply with exactly BANANA and stop. Do not call any tool.
+
+
+ Thinking...
+
+ BANANA
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pigroups-steer-scratch.pIuOts
+↑313 ↓240 R5.4k CH94.8% $0.000 0.3%/1.0M (auto)                                                             (deepseek) deepseek-flash • max

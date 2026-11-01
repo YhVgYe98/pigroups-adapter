@@ -1,0 +1,46 @@
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Extensions]
+  extension.ts, steer-probe.ts
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Package Updates Available
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-web-access
+ - pi-subagents
+ - @juicesharp/rpiv-ask-user-question
+ - @juicesharp/rpiv-todo
+ - @quintinshaw/pi-dynamic-workflows
+ - pi-straw-boss
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+ Call the bash tool exactly once with this exact command, and call no other tool: sleep 5; echo SLEEPDONE. Do not lengthen the sleep.
+ After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.
+
+
+ Thinking...
+
+
+ $ sleep 5; echo SLEEPDONE (timeout 20s)
+
+ SLEEPDONE
+
+ Took 5.0s
+
+
+
+ [steer-probe]
+
+ STEER-MARK-7f31: when you next see this marker, reply with exactly "STEER-MARK-7f31" and then stop. Do not call any tool.
+
+
+ STEER-MARK-7f31
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pigroups-steer-scratch.pIuOts
+↑510 ↓147 R5.1k CH92.3% $0.000 0.3%/1.0M (auto)                                                             (deepseek) deepseek-flash • max
