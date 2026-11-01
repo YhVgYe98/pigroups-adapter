@@ -1,11 +1,11 @@
 # 交接文档
 
-> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12。**第六轮同日：修 A–D（§13），并把 A 放到真机上复跑四轮——子成员能在 5 s 内退出时成立，卡在长工具里时 `pane close` 仍会切掉活着的 agent（§3.7）。适配器单独发 `v0.2.1`，平台仍是 `0.2.0`（§8）。**）
+> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12。**第六轮同日：修 A–D（§13），并把 A 放到真机上复跑四轮——子成员能在 5 s 内退出时成立，卡在长工具里时 `pane close` 仍会切掉活着的 agent（§3.7）。适配器单独发 `v0.2.1`，平台仍是 `0.2.0`（§8）。**第七轮同日：修 E–F（§14），把“先切断正在跑的那一轮，再收尾”写进 `sys.terminated`，并让强制关 pane 不再伪装成干净关闭；上一轮唯一失败的 `bash sleep 40` 真机复跑现在 3/3 PASS，5 s 硬上限不再是常态路径，但仍是兜底（§3.8）。适配器单独发 `v0.3.0`，平台仍是 `0.2.0`（§8）。**）
 >
 > 两个人（或一个人隔几天回来）之间交接用。
 > 面向：接手「把 PiGroups 在 herdr + pi 上真机跑起来」这件事的人。
 >
-> **本文档描述的是 `v0.2.1` 这一对**：平台 `0.2.0`（未签名 annotated 标签 `v0.2.0`，`1d68dd4`）+ 适配器 `0.2.1`（未签名 annotated 标签 `v0.2.1`，钉在发版提交上，`git rev-parse v0.2.1^{}`）。这是本仓库第一次**单侧发版**：只有适配器动了，所以只有它进 patch 位（§8）。号住在哪、怎么发下一版、以及本轮实测到的问题，见 §8。
+> **本文档描述的是 `v0.3.0` 这一对**：平台 `0.2.0`（未签名 annotated 标签 `v0.2.0`，`1d68dd4`）+ 适配器 `0.3.0`（未签名 annotated 标签 `v0.3.0`，钉在发版提交上，`git rev-parse v0.3.0^{}`）。这是本仓库第二次**单侧发版**：只有适配器动了，所以只有它进号（minor 位），平台保持 `0.2.0`（§8）。号住在哪、怎么发下一版、以及本轮实测到的问题，见 §8。
 
 ---
 
@@ -17,14 +17,14 @@
 
 下一步：**先把 `pg_report` 定为“加第 10 个工具”还是保持“汇报=说话”**（它不再是第 4 级的判据，但仍是产品缺口）；补第 3 级剩下的 print/json 模式；再把第 4 级从 1 个子成员扩到 2 个并验重启/级联。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
 
-**关 pane 的等待只在 5 s 内成立**（§3.7）：四次真机 run 里 3 次 PASS、1 次 FAIL——子成员卡在 `bash sleep 40` 里时，`pane close` 仍在 5031 ms 切掉一个 `agent=pi working` 的活进程，而且 `pg_terminate` 仍报 `pane_close_failed: []`。这条留在 §7，没有关。
+**上一轮“关 pane 切掉活 agent”那条已经不再是常态**（§3.8）：根因是 `sys.terminated` 只丢 journal、停循环、`shutdown()`，从不 `abort()`，而 pi 的 shutdown 会等正在跑的工具。`25b8c1b` 让终止路径先按 `pg.abort` 的同一条 3 s 上限切断那一轮，再收尾；`bash sleep 40` 真机复跑从 5031 ms / FAIL 变成 204 ms / PASS（工具在 DELETE 后 3 ms 收到 `Command aborted`，pi 在 close 前 86 ms 已退出）。**仍未关**的是接口边界而非这条竞态：一个完全忽略 abort signal 的工具仍可能拖过 3 s，那时 `Herdr.close()` 会在 5 s 到点强制关 pane 并报 `forced: true`，`pg_terminate` 把它列进 `pane_close_forced`——可见，但不是干净关闭；`pane list` 读失败时仍是“未知”，pane 映射仍只在内存里。§7 那一行已按实际覆盖改写。
 
 ```
 平台仓库  ~/Documents/PiGroups          0.2.0  v0.2.0  57 tests   typecheck 干净  已发版 v0.2.0
-适配器    ~/Documents/pigroups-adapter  0.2.1  v0.2.1  84 tests   typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
+适配器    ~/Documents/pigroups-adapter  0.3.0  v0.3.0  88 tests   typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
 ```
 
-两个仓库按**一次发布记一对号**：两边都动就同号，只有一侧动就只动那一侧；现在这一对是平台 `0.2.0` + 适配器 `0.2.1`。号住在哪、怎么发下一版见 §8。
+两个仓库按**一次发布记一对号**：两边都动就同号，只有一侧动就只动那一侧；现在这一对是平台 `0.2.0` + 适配器 `0.3.0`。号住在哪、怎么发下一版见 §8。
 
 ---
 
@@ -51,10 +51,10 @@
 
 | | |
 |---|---|
-| 版本 | `0.2.1`，标签 `v0.2.1`（annotated、未签名；平台仍是 `0.2.0` / `v0.2.0`）。`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`、lockfile 三处必须相等（`test/version.test.ts` 会红）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它 |
+| 版本 | `0.3.0`，标签 `v0.3.0`（annotated、未签名；平台仍是 `0.2.0` / `v0.2.0`）。`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`、lockfile 三处必须相等（`test/version.test.ts` 会红）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它 |
 | 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（含 `PiSurface`、`Herdr`、循环、journal、`pg.*` 契约） |
-| 代码 | `src/` 3102 行，8 个模块（见下），**无运行时依赖**（只用 `node:*` 和 `fetch`） |
-| 测试 | `test/` 3641 行，84 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
+| 代码 | `src/` 3160 行，8 个模块（见下），**无运行时依赖**（只用 `node:*` 和 `fetch`） |
+| 测试 | `test/` 3800 行，88 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
 | 提交 | `master`（数量见 `git log`） |
 
 ```
@@ -132,13 +132,14 @@ herdr agent start root --kind pi --pane "$PANE" --timeout 60000 \
 
 ### 3.3 适配器侧的具体数字
 
-- 84 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
+- 88 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
 - 新补的 15 条（44 → 59，之后又补 3 条到 62）：`test/surface.test.ts` 新增 3 条（幂等门；该文件共 9 条）、
   `test/surface.abort.test.ts` 10 条（abort/isBusy/shutdown/退订/preview，含 3 s 放弃分支）、
   `test/obligation.test.ts` 新增 2 条（`nudgeOwed` 的 abort 竞态）；三组都做过撤掉源码再跑红的验证
 - 第五轮再补 13 条到 75（`obligation` 7、`herdr` 2、`tools` 2、`delivery` 1、`stop` 1），清单与变异证明见 §12
 - 版本工作再补 3 条到 78（`test/version.test.ts`：常量与 `package.json`/lockfile 一致、`pg_whoami` 报 `adapter_version`、启动日志那一行）
 - 第六轮（A–D）再补 6 条到 84：`test/herdr.test.ts` 1 条（关 pane 前等 agent 退出）；`test/obligation.test.ts` 5 条（启动即欠死对端、坏名册保留上一份好快照、退避内不重读、超时中止请求、`PgClient.tree` 把 signal 传进 `fetch`）。六条都做过“撤掉 src 就红”的验证，数字在 §13
+- 第七轮（E–F）再补 4 条到 88：`test/control.test.ts` 2 条（`sys.terminated` 先切断再丢 journal、abort 不回时仍在 3 s 到点收尾）；`test/herdr.test.ts` 1 条（到点 agent 仍在时报 `forced: true`）+ `test/tools.test.ts` 1 条（`pg_terminate` 把强制关闭列进 `pane_close_forced`）。四条都做过“撤掉 src 就红”的验证，数字在 §14
 - 变异测试 17 个，抓 12 个；存活 5 个里 3 个已被后补测试覆盖，剩 2 个（水位按成员、`flush()` 返回值）已补并有变异证明
 - 本轮另做 3 个反向变异，全被抓：撤 `turnOpen` 门 → `surface.test.ts` 9 条里 2 条红；撤 `abort()` 放弃时的 warn → `surface.abort.test.ts` 1 条红；撤 `nudgeOwed` 的两处 `aborting` 检查 → `obligation.test.ts` 2 条红。恢复后全绿
 - 此前的两轮独立评审：源码侧 3 blocking + 9 should-fix 全部修完；测试侧 11 条覆盖缺口补了 9 条（2 条判定为文档信息不足，明确跳过）
@@ -348,6 +349,72 @@ shutdown 时正在跑的一轮（#4 等工具跑完才退）。**print/json 模�
 `{"terminated":[…],"pane_close_failed":[]}`，调用者看不出子成员被切断；`pane list` 读失败时
 `close()` 不等待，直接走关闭（herdr 不可达的情形没有覆盖）。
 
+### 3.8 先切断再收尾的真机复跑（2026-11-01，E–F）
+
+**结论：3/3 PASS。§3.7 唯一失败的 `bash sleep 40` 场景现在 PASS——DELETE 后 3 ms 工具被切断，
+118 ms pi 退出，167 ms `pane list` 已看不到 agent，204 ms 才 close。** 这三次 run 是 `25b8c1b`
+的验收，只回答“上一轮失败的那个 case 现在怎样”，不重复 §3.5 / §3.6 已验的其它判据。
+证据：`probe/logs/terminate-20261101T132033/`（`report.md`、`analysis.txt`、三个 `case*/`）。
+
+**机制，读代码读出来的**：`sys.terminated` 的旧路径是 `discardAndShutdown()`——丢 journal、停循环、
+`surface.shutdown(reason)`，**从不 abort 正在跑的那一轮**。pi 的 shutdown 等工具，不等出结果就把
+pane 关掉的是父适配器。现在 `discardAndShutdown()` 先设 `aborting`，用与 `pg.abort` 同一个
+`cutTurn()`（同一根 `ABORT_IDLE_TIMEOUT_MS = 3000`，没有第二个数字）切断，然后才丢 journal、
+清队列、停循环、shutdown；`aborting` 一直保持到 shutdown 结束，中途的 settle 不能插进来投递。
+
+**触发方式**：三个 case 都先让子成员正常起来并 idle；长工具 case 由 root `pg_say` 让它跑
+`bash sleep 40`，等真正的 `"type":"toolCall" … "name":"bash"` 写进会话后才 `pg_terminate`。
+midturn case 为了确保删除时一轮 **turn 一定在跑**，先从外部直接给子 pane 一个长文生成 prompt，
+`herdr agent wait --until working` 确认 working 后再删；所以它和上一轮的 midturn 数字**不是同一个
+触发方式**，只能作量级对照。
+
+| case | 上一轮（`7ae1adc`） | 本轮（`25b8c1b`） | 变化 |
+|---|---|---|---|
+| 空闲 | 608 ms，PASS | **406 ms**，PASS 11/11 | −202 ms |
+| 模型 turn 中 | 4626 ms，PASS（余量 374 ms） | **404 ms**，PASS 11/11 | −4222 ms（触发方式不同） |
+| `bash sleep 40` 中 | **5031 ms，FAIL**（close 时仍 `agent=pi working`） | **204 ms**，PASS 13/13 | −4827 ms；FAIL → PASS |
+
+`bash sleep 6`（上一轮 3825 ms）本轮没重跑：要回答的是上一轮唯一失败的那个 case。
+
+**FAIL 那次现在的逐项时间线**（子成员 `m_6f8d83`，pane `wE:p1P`，pi pid `145923`）：
+
+```
+13:23:22.979  bash sleep 40 toolCall 写入
+13:23:25.652  DELETE / sys.terminated（删除前最后一次 pane 采样 = working）
+13:23:25.653  notice 送达子成员
+13:23:25.655  toolResult: isError=true, "Command aborted"      +3 ms（工具只跑了 2676/40000 ms）
+13:23:25.656  最后一条会话写入：stopReason=error，"This operation was aborted"   +4 ms
+13:23:25.770  第一次 pid 采样：pi 已退出                       +118 ms
+13:23:25.819  pane list 第一次报 pane 在、agent 不在            +167 ms
+13:23:25.856  herdr 收到 pane.close                            +204 ms
+13:23:25.859  herdr signal=Hangup（pi 退出 89 ms 后，关掉它留下的 shell）
+```
+
+上一轮这一个 case 是 5031 ms 到点、close 时仍 `working`、pi 在 close 后才消失、会话最后是悬空的
+`stopReason=toolUse`/无 toolResult。现在三件事全部反过来：工具被切断、pi 在 close 前已退出、
+会话完整（29 条、0 坏行、行尾换行，最后三条是 `assistant(toolUse)` →
+`toolResult("Command aborted")` → `assistant(stopReason=error)`）。三个 case 的回滚都有 pi 的
+`To resume this session:` 行，说明走的是 `ctx.shutdown()` 而非信号打断。
+
+**`pg_terminate` 的原文**（三例同形）：
+
+```json
+{"terminated":["m_6f8d83"],"pane_close_failed":[],"pane_close_forced":[]}
+```
+
+close 等到了正常退出，所以按 F 的语义 `pane_close_forced` 为空是**正确**的，不是把失败吞掉：
+如果 abort 没生效、5 s 到点仍关活 agent，这里会出现 `{"member":"m_6f8d83","pane":"wE:p1P"}`。
+三个 case 的会话也都完整（idle 27 条 / midturn 21 条 / midtool40 29 条，均 0 坏行）。
+
+**这一层仍然没覆盖的**（不是 E–F 能修的）：
+
+| 没覆盖 | 现在的行为 |
+|---|---|
+| 一个**忽略 abort signal** 的工具 | `abort()` 是协作式的：pi 不杀它，3 s 后 `abort()` 放弃并打 warn；父适配器仍可能在 5 s 到点强制关 pane。区别是现在会报 `pane_close_forced: [{member, pane}]`，而不是报“成功” |
+| `herdr pane list` 读失败 | `close()` 观察不到活 agent，只能报 `forced: false`；这是“未知”，不是干净退出的证明（`docs/设计说明.md` §2.2 / §5.3 已写明） |
+| pane 映射丢失 | 映射仍只在内存里：父适配器重启后丢；孙子 pane 本进程从来没有映射。被删的子成员自己会收尾（它的 `sys.terminated` 不经父进程），所以映射丢失伤害的是“关 pane”，不是“停成员” |
+| 祖先删除路径上的强制关闭 | settle/poll 复核路径只打一条 warn，没有面向调用者的工具答案（那条路径本来就没有调用者） |
+
 ---
 
 ## 4. 真机四级清单（2026-11-01 实测后）
@@ -358,8 +425,8 @@ shutdown 时正在跑的一轮（#4 等工具跑完才退）。**print/json 模�
 |---|---|---|---|---|
 | **1** | 在 `agent_settled` 回调里调 `pi.sendMessage(text, {triggerTurn: true})` **能真起一轮** | 整个消息通道静默失效（最致命，所以排第一） | 探针扩展在 idle 时投一句，日志里出现一次新的 `agent_start` | **通过**。`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮（`delivered p3 → turn_start run 4`） |
 | **2** | 一个卡住的工具在外部 `abort()` 后回到 idle | 卡住的成员永远收不到 `pg.abort`，回到"没人能叫停它" | `abort()` 在有界时间内 resolve，日志里那轮以 `aborted` 结束 | **部分通过**。配合的工具（从 signal 监听器返回）2 ms 结束；**忽略 signal 的工具不会被 pi 杀掉**，settle 要到 58 296 ms 后才来。证据：`run-20261101T1920-control/` 与 `run-20261101T1920-ignore-signal/` |
-| **3** | `shutdown()` 后进程真退、session 落盘 | 被删成员留一个僵尸 pane | 进程 exit 0，session JSONL 有结尾 | **部分通过**。SIGTERM/tui 这条路径已用 3 s 异步体 + `process.on('exit')` 证明 await：`waited_ms=3000`，`process_exit` 在 `shutdown_done` 之后 54 ms，`exit 0`。§3.7 的四次 run 又补上两条：`ctx.shutdown()` 自调用（`sys.terminated` → `discardAndShutdown()`）走通，PASS 的三次都有非信号的 resume 行、会话每行可解析；shutdown 时正在跑的一轮也验了——#4 里 pi 等 `sleep 6` 工具跑完（删除后 2.5 s）才退。**仍没验**：print/json 模式（源码看是 143，未实测）；#3 被 5 s 硬上限切断那次没有正常退出 |
-| **4** | 端到端：根 + 子成员、真模型、派活 → 汇报 → 删除 | — | 子成员收到简报、**说了一句话**（"汇报"就是说话：任务由消息关闭，模型没有也不该有 `pg_report` 工具），删除后子进程与 pane 都消失 | **部分通过（主链路通过；只跑了 1 个子成员）**。`probe/logs/level4-20261101T193132/`：根由 herdr 起、`pg_spawn` 建成员与 pane、简报进子模型、子消息人可读、删除后成员/进程退出都成立；pane 已由 `9453f6d` 修好并在 `probe/logs/level4-fix-20261101T193945/` 复跑确认。**判据被改过两处**（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话），逐条记在 §3.6：原判据里 `pg_report` 那条是写判据的人写错了，`pg.report` 只有适配器自己在 blocked/exiting 时发；但只跑了 1 个子成员，所以整级不记通过。**关 pane 的等待已由 §3.7 四次 run 复验：3 PASS / 1 FAIL**——`bash sleep 40` 那次 5 s 到点仍关掉活 agent，所以“子成员走完退出再关 pane”只在 5 s 内成立 |
+| **3** | `shutdown()` 后进程真退、session 落盘 | 被删成员留一个僵尸 pane | 进程 exit 0，session JSONL 有结尾 | **部分通过**。SIGTERM/tui 这条路径已用 3 s 异步体 + `process.on('exit')` 证明 await：`waited_ms=3000`，`process_exit` 在 `shutdown_done` 之后 54 ms，`exit 0`。§3.7 的四次 run 又补上两条：`ctx.shutdown()` 自调用（`sys.terminated` → `discardAndShutdown()`）走通，PASS 的三次都有非信号的 resume 行、会话每行可解析；shutdown 时正在跑的一轮也验了——#4 里 pi 等 `sleep 6` 工具跑完（删除后 2.5 s）才退。**仍没验**：print/json 模式（源码看是 143，未实测）；#3 被 5 s 硬上限切断那次没有正常退出——**§3.8 已补上这条路径**：同是 `bash sleep 40`，现在工具先被切断、pi 在 close 前正常退出 |
+| **4** | 端到端：根 + 子成员、真模型、派活 → 汇报 → 删除 | — | 子成员收到简报、**说了一句话**（"汇报"就是说话：任务由消息关闭，模型没有也不该有 `pg_report` 工具），删除后子进程与 pane 都消失 | **部分通过（主链路通过；只跑了 1 个子成员）**。`probe/logs/level4-20261101T193132/`：根由 herdr 起、`pg_spawn` 建成员与 pane、简报进子模型、子消息人可读、删除后成员/进程退出都成立；pane 已由 `9453f6d` 修好并在 `probe/logs/level4-fix-20261101T193945/` 复跑确认。**判据被改过两处**（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话），逐条记在 §3.6：原判据里 `pg_report` 那条是写判据的人写错了，`pg.report` 只有适配器自己在 blocked/exiting 时发；但只跑了 1 个子成员，所以整级不记通过。**关 pane 的等待已由 §3.7 四次 run 复验：3 PASS / 1 FAIL**（`bash sleep 40` 那次 5 s 到点仍关掉活 agent）；那个 FAIL 已由 E 修掉，并在 §3.8 复跑 3/3 PASS（DELETE → close 204 ms，pi 先退出） |
 
 三条假设逐条对账（日期 2026-11-01，证据在 `probe/logs/run-20261101T1920-*`）：
 
@@ -487,7 +554,7 @@ shutdown 时正在跑的一轮（#4 等工具跑完才退）。**print/json 模�
 | `deliver()` 只确认"pi 收下了"，不确认"run 起来了" | 丢失窗口仍在：`pi.sendMessage` 是 void，pi 吞掉启动失败，而水位与 journal 在 `deliver()` resolve 后立刻推进（`docs/设计说明.md §3.4`）。消息会被记成已注入但那一轮没起来。本轮只把契约写准（`PiSurface` 注释、§3.4、本节都写了"收下 ≠ 起来"），没有加 ack；要收紧只能给 `PiSurface` 加"下一次 `agent_start`"的确认，属于接口设计决定 |
 | `details.kind` 写了没人读 | `src/surface.ts` 把它塞进 `pi.sendMessage` 的 `details`，`test/surface.test.ts` 也断言了，但仓库里没有任何读取方。要么定为 UI 契约写进 `docs/设计说明.md`，要么删——产品决定，未做 |
 | 投递排队分支没有真实样本 | 留存日志里 `hasPendingMessages` 恒为 `false`：两笔投递同时排队、以及 turn 中途再投都没观测过；`hasPendingMessages` 在 `src/` 里也一次没读。一次 settle 只投一次的规则不覆盖这个场景 |
-| `ctx.shutdown()` 自调用、print/json 模式下的退出 | **部分已验**。外部 `SIGTERM` 的 tui 路径已证明 await（3 s 异步体、`process_exit.after_shutdown_done_ms ≥ 0`、exit 0、只派发一次）；`ctx.shutdown()` 自调用这条路径在 §3.7 的四次 run 里走了四遍（`sys.terminated` → `discardAndShutdown()` → `surface.shutdown()`），PASS 的三次有非信号的 resume 行、会话完整、进程先于 close 退出；shutdown 时正在跑的一轮也验了（#4 等工具跑完才退）。**仍缺**：print/json 模式（源码看是 143，未实测），以及被 5 s 硬上限切断的那次（#3）没有正常退出的证据 |
+| `ctx.shutdown()` 自调用、print/json 模式下的退出 | **部分已验**。外部 `SIGTERM` 的 tui 路径已证明 await（3 s 异步体、`process_exit.after_shutdown_done_ms ≥ 0`、exit 0、只派发一次）；`ctx.shutdown()` 自调用这条路径在 §3.7 的四次 run 里走了四遍（`sys.terminated` → `discardAndShutdown()` → `surface.shutdown()`），PASS 的三次有非信号的 resume 行、会话完整、进程先于 close 退出；shutdown 时正在跑的一轮也验了（#4 等工具跑完才退）。§3.8 三次再验了 abort → shutdown 这一串：工具先被切断（+3 ms），pi 118 ms 退出，三个会话都以非信号的 resume 行结束。**仍缺**：print/json 模式（源码看是 143，未实测） |
 | 一个忽略 abort signal 的工具不会被 pi 杀掉 | **未解决，接口边界**。硬变体：abort 后 3009 ms `idle_timeout`，工具自己 60 s 后返回，aborted settle 晚到 58 296 ms。adapter 的 `abort()` 3 s 后放弃并打 warn；`pg.abort` 对这类成员无法兑现“已切断”。`bash` 内置工具未验 |
 | `herdr agent start` 在真实 pane 里的行为 | **已验证**（第 4 级）：root 与 child 都由 `agent start` 起，返回 `interactive_ready:true`，pane 显示 `agent=pi`。**未验**的是失败后的 `pane send-text` 兜底路径 |
 | `pg_terminate` 关 pane 只覆盖“本适配器内存里记得的 pane” | 本轮补到三种死亡路径：`spawn()` 按成员 id 记住 pane，`terminate()`（自己删，含平台级联返回的每个 id）关；`pollOnce()`/settle 用 `GET /v1/members/{id}` 复核映射里的每个成员，`status:"gone"` 就关——所以**祖先直接删本适配器的直接子成员**（不经过本进程的 `terminate()`）也会在 TTL 内关掉；`pane_not_found` 视为已关，其他失败记 `pane_close_failed` 并保留映射等重试。**仍漏**：映射只在内存里，父适配器重启后丢失；子成员（孙子）由子适配器拉起，父/根删它时本进程没有映射。要补需持久化/共享 pane map，或平台协作。第六轮的 A 只改了关闭前的等待，没有动映射的生命周期 |
@@ -496,7 +563,7 @@ shutdown 时正在跑的一轮（#4 等工具跑完才退）。**print/json 模�
 | 删除后父的义务表残留 | **已修到这些路径**（`d19a179` + 第五轮 + 第六轮）：`terminate()` 丢弃平台级联返回的**每个**成员（不只是参数）的私聊义务；`say()` 收到 410 立刻丢；其余靠 `GET /v1/tree` 名册在 settle 时复核。名册读失败、或返回的不是名册（`{"nodes":[]}`、无 id、不含自己）时**一条不剪**；**债比名册快照年轻**（`since >= at`，即对端可能是在快照之后才创建的）也**不剪**——这两条是第五轮补的，之前会误删真债。`test/obligation.test.ts` 守着。**第六轮再补两条**：`712db53` 在 `ready` 之前用一份**新读的**名册剪一次（startup 绕过 `since >= at`，因为历史读在这份名册之前），所以“启动后第一次 settle 之前”这段窗口关了；`6ce2789` 读失败保留上一份好快照、超时真的 `abort` 请求、失败退避 5 s。**仍漏**：启动剪完之后，如果死对端的消息还躺在 poll 队列里，第一次 poll 会把它投进来、重新标成欠回复（要等下一次 settle 再剪）；迟到的消息同理。第 4 级第一次 run 时观察到 `owed:["dm:…"]` 与 3 次 nudge |
 | 子成员消失后群会话从人类索引消失 | 平台按概念稿 §3.3 是正确的（群只在有子成员时存在）；但删完后 `GET /v1/conversations` 看不到那个群，只能按已知 `g:<parent>` 读历史。已知限制，未改 |
 | 子成员 `gone` 的遥测文案显示 `id（id）` | 小瑕疵，未修：`terminate()` 时 telemetry 没有该成员的名字，回退到 id。不影响状态判断 |
-| pane 关闭与子成员自己的 `sys.terminated` 退出竞争 | **部分修，仍开（真机 FAIL 一次）**。`7ae1adc`：`close()` 每 200 ms 读 `herdr pane list`，等 pane 的 agent 消失（没有 `agent` 或 `agent_status=unknown`）再 `pane close`，上限 `PANE_AGENT_EXIT_TIMEOUT_MS = 5000`。§3.7 四次真机：空闲 608 ms、删除时在一轮 turn 里 4626 ms、`sleep 6` 工具 3825 ms 都 PASS（pi 先退出，回滚有 resume 行）；`sleep 40` 那次 **FAIL**——5031 ms 到上限，close 时 `pane list` 仍报 `agent=pi working`，pi 在 close 后 9 ms 消失，herdr 记 `signal=Hangup`。**只是把竞态从 0 ms 推到 5 s，没有消除**；`pg_terminate` 仍返回 `pane_close_failed: []`，调用者看不出子成员被切断。**不覆盖**：herdr 不可达（`pane list` 失败时不等待，直接关）；pane 映射只在内存里（适配器重启就丢，见本表 `pg_terminate` 关 pane 那一行）；5 s 内跑不完的普通工具/长 turn（#2 的余量只有 374 ms） |
+| pane 关闭与子成员自己的 `sys.terminated` 退出竞争 | **已修，但不是“已关”。** 根因不在 close 的等待（`7ae1adc`）而在 `discardAndShutdown()`：它只丢 journal / 停循环 / `shutdown()`，从不 abort 正在跑的那一轮，而 pi 的 shutdown 会等工具，于是父进程的 5 s 上限先到。`25b8c1b` 让 `sys.terminated` 先按 `pg.abort` 同一条 `ABORT_IDLE_TIMEOUT_MS = 3000` 切断（同一 `cutTurn()`，没有第二个数字），再丢 journal、停循环、shutdown；abort 期间不投递。`Herdr.close()` 现在返回 `{forced}`，到点 agent 仍在就报 `forced: true`，`pg_terminate` 列进 `pane_close_forced`，不再伪装成 `pane_close_failed: []`。真机（§3.8）：idle 406 ms / midturn 404 ms / `bash sleep 40` **204 ms**，均 PASS，且 close 前 pi 已退出、`pane list` 已看不到 agent；上一轮 FAIL 的 5031 ms 不再重现。**仍不覆盖**：① 一个忽略 abort signal 的工具——`abort()` 是协作式的，3 s 后放弃，pane 仍只能在 5 s 硬上限被切，只是现在**会报** `pane_close_forced`；② `herdr pane list` 读失败——`close()` 观察不到活 agent，报 `forced: false`，这是“未知”不是干净退出；③ pane 映射仍在内存里（父适配器重启就丢，孙子 pane 本进程没有映射，见本表 `pg_terminate` 关 pane 那一行）；④ 祖先删除路径（settle/poll 复核）遇到强制关只打 warn，没有面向调用者的答案 |
 | 名册读的三条旧洞（第五轮留档：失败无退避、`ROSTER_TIMEOUT_MS` 只是 race 不是取消、启动/`tick()` 不剪） | **已修（`712db53` + `6ce2789`）**：失败或答案不可信时保留上一份好快照、5 s 后重试；超时用 `withAbort()` 真的 `abort` 请求；启动在 `ready` 前剪一次。**仍漏**：退避固定 5 s，不随失败次数增长；半截响应只能靠“名册必须含自己”整次作废 |
 | 真机探针会继承用户的全局 pi 扩展 | 第一次第 4 级 run 踩过：root 通过 `pi-intercom` 把消息转进用户主会话，`pi-straw-boss` 还重排了用户 tab。`probe/README.md` 第 4 级与 §2.3 已要求 `-ne` + 只加载 `-e` 适配器；这是探针纪律，不是产品代码 |
 | 消息与 inbox 都没有清理策略 | 已知，无上限增长。规模上来再定 |
@@ -509,7 +576,7 @@ shutdown 时正在跑的一轮（#4 等工具跑完才退）。**print/json 模�
 
 ## 8. 怎么重跑一切
 
-**先确认你手里是哪一版。** 现在这一对是**平台 `0.2.0` + 适配器 `0.2.1`**：平台有未签名 annotated 标签 `v0.2.0`（`1d68dd4`），适配器有未签名 annotated 标签 `v0.2.1`（打在发版提交上，`git rev-parse v0.2.1^{}`）。这是本仓库第一次**单侧发版**：只有适配器动了，所以只有它进 patch 位，平台保持 `0.2.0`。发版提交之后如果还有文档/元数据提交，`git describe --tags` 会带后缀（平台现在就是 `v0.2.0-1-g210ed07`）——**后缀不是新版本**，标签仍钉在发版提交上；适配器的标签打在当时的 HEAD 上，`git describe --tags` 就是 `v0.2.1`。
+**先确认你手里是哪一版。** 现在这一对是**平台 `0.2.0` + 适配器 `0.3.0`**：平台有未签名 annotated 标签 `v0.2.0`（`1d68dd4`），适配器有未签名 annotated 标签 `v0.3.0`（钉在发版提交上，`git rev-parse v0.3.0^{}`）。这是本仓库第二次**单侧发版**：只有适配器动了，所以只有它进号（minor，契约变），平台保持 `0.2.0`。发版提交之后如果还有文档/元数据提交，`git describe --tags` 会带后缀（平台现在就是 `v0.2.0-1-g210ed07`）——**后缀不是新版本**，标签仍钉在发版提交上；适配器的标签打在当时的 HEAD 上，`git describe --tags` 就是 `v0.3.0`。
 
 **号住在哪。** 平台只有一处：`package.json`；`src/version.ts` 直接 import 它，`/v1/health` 与每个响应的 `server_version` 都是这个数，没有第二个常量。适配器三处必须一致：`src/version.ts` 的 `ADAPTER_VERSION`、`package.json`、`package-lock.json`（`test/version.test.ts` 会比对 `package.json` 与 lockfile 的两处）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。两边的 lockfile 现在都跟上了各自的 `package.json`（平台在 `210ed07` 重新生成，并加了锁文件漂移测试）。
 
@@ -519,12 +586,12 @@ shutdown 时正在跑的一轮（#4 等工具跑完才退）。**print/json 模�
 # 1) 动的那个仓库改 package.json；适配器还要同步 src/version.ts，并 npm install --package-lock-only 让 lock 跟上
 # 2) 该仓库 CHANGELOG.md 写一条，并写明按 0.x 口径这次是 patch 还是 minor
 # 3) 提交，然后打一个未签名标签（annotated，不要 -s）；两边都动就两边各打同一个 v<号>
-git tag --no-sign -a v0.3.0 -m "v0.3.0: adapter 0.3.0 + platform 0.3.0, one release of the pair"
+git tag --no-sign -a v0.3.0 -m "v0.3.0: adapter 0.3.0, platform 0.2.0"
 git cat-file -p v0.3.0 | grep -c gpgsig     # 期望 0
 ```
 
-单侧发版就是 `v0.2.1`：平台不动，适配器 `0.2.0 → 0.2.1`，
-`git tag --no-sign -a v0.2.1 -m "v0.2.1: adapter 0.2.1, platform 0.2.0"`。
+单侧发版就是 `v0.3.0`：平台不动，适配器 `0.2.1 → 0.3.0`（`Herdr.close()` 的返回值与 `pg_terminate`
+的字段变了，是 minor 不是 patch）；上一轮那次单侧发版是 `v0.2.1`（`0.2.0 → 0.2.1`，patch）。
 
 口径（`CHANGELOG.md` 里也写着）：0.x 阶段按本项目自己的定义，不按 semver 默认——patch（`0.x.N+1`）只修 bug，端点、字段、工具名都不变；minor（`0.X+1.0`）是契约变化：加/删字段、端点、工具，改已记录的行为，数据迁移，新增接口成员。两边都动时两个仓库一起走到同一个号；只动一侧时另一侧保持原号。标签记录的是这一对。
 
@@ -552,7 +619,7 @@ npm run typecheck && npm test          # 57 tests，约 1.8 秒
 
 # 适配器（会自己拉起一个平台子进程）
 cd ~/Documents/pigroups-adapter
-npm run typecheck && npm test          # 84 tests，约 7.6 秒
+npm run typecheck && npm test          # 88 tests，约 8 秒
 PIGROUPS_PLATFORM_DIR=~/Documents/PiGroups   # 默认是 ../PiGroups
 
 # 手动起一个平台
@@ -566,7 +633,7 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 9. 接手的第一件事
 
-1. 跑一遍上面两个 `npm test`，确认 57 / 84 全绿（`v0.2.1` 这一对的数）
+1. 跑一遍上面两个 `npm test`，确认 57 / 88 全绿（`v0.3.0` 这一对的数）
 2. 读 `pigroups-adapter/docs/设计说明.md` §2.1（`PiSurface`）和 §2.2（`Herdr`）——那是真机验证的靶子
 3. 重跑 `probe/run.sh`（对照组应 PASS）与 `PROBE_IGNORE_SIGNAL=1 probe/run.sh`（硬变体应 FAIL 在 P2.5/P2.7，这是 pi 的已知边界）
 4. 补第 3 级剩下的 print/json 模式；`pg.abort` 的 turn_end 与 `ctx.shutdown()` 自调用都已验，不要再动
@@ -578,15 +645,15 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 10. 交接清单
 
-- [x] 两个仓库 `git status` 干净；**这一对是平台 `0.2.0`（`v0.2.0`，`1d68dd4`）+ 适配器 `0.2.1`（`v0.2.1`，`git rev-parse v0.2.1^{}`）**，都是未签名 annotated 标签（详见 §8）。单侧发版：只有适配器进了 patch 位
+- [x] 两个仓库 `git status` 干净；**这一对是平台 `0.2.0`（`v0.2.0`，`1d68dd4`）+ 适配器 `0.3.0`（`v0.3.0`，`git rev-parse v0.3.0^{}`）**，都是未签名 annotated 标签（详见 §8）。单侧发版：只有适配器进了 minor 位
 - [x] `PiGroups`: 57/57，typecheck 干净（2026-11-01 重测，约 1.8 s）
-- [x] `pigroups-adapter`: 84/84，typecheck 干净（2026-11-01 发版前重测，约 7.6 s）
+- [x] `pigroups-adapter`: 88/88，typecheck 干净（2026-11-01 发版前重测，约 8 s）
 - [x] `grep -c 'pi-coding-agent' pigroups-adapter/src/loop.ts` = 0（实测 0）
 - [x] herdr 版本记下（本机 0.9.5，`herdr --version` 2026-11-01 复核），三个旗标形状与 §3.4 一致
 - [x] 第 1 级探针通过（2026-11-01，`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮）
 - [ ] 第 2 级探针**部分通过**（对照组 2 ms 切断；`PROBE_IGNORE_SIGNAL=1` 的硬变体 P2.5/P2.7 失败：pi 不杀忽略 signal 的工具；`bash sleep 60` 未验）
-- [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；§3.7 又验了 `ctx.shutdown()` 自调用、session 落盘、shutdown 正在跑的一轮；print/json 模式仍未验）
-- [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**只能记部分通过**：只跑了 1 个子成员，且两条判据事后在 `de48904` 里改过（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话，不在记录那次 run 的 `3919467` 里，见 §3.6）。`pg_report` 工具缺失是产品缺口（§7），不是这一级的判据；重启/级联未验。关 pane 的等待另在 §3.7 复验：3 PASS / 1 FAIL）
+- [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；§3.7 又验了 `ctx.shutdown()` 自调用、session 落盘、shutdown 正在跑的一轮；§3.8 验了 abort → shutdown 这一串；print/json 模式仍未验）
+- [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**只能记部分通过**：只跑了 1 个子成员，且两条判据事后在 `de48904` 里改过（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话，不在记录那次 run 的 `3919467` 里，见 §3.6）。`pg_report` 工具缺失是产品缺口（§7），不是这一级的判据；重启/级联未验。关 pane 的等待另在 §3.7 复验 3 PASS / 1 FAIL，FAIL 那次已由 E 修掉并在 §3.8 复跑 3/3 PASS）
 
 ---
 
@@ -655,3 +722,59 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 **真机（`1a4c0fe`）**：四次 `paneclose-*` run + 分析器 + 说明，只动 `probe/`，没有 `src/` / `test/` 变更，所以不涉及变异证明。数字与 FAIL 的原始行在 §3.7。
 
 **没有做的**：§7 的行按实际覆盖范围收窄，没有把没修好的写成修好——A 那一行仍然开着（5 s 硬上限）；`pg_report`、pane 映射的生命周期、print/json 模式也都没动。
+
+---
+
+## 14. 第七轮：E–F 与先切断再收尾的真机复跑（2026-11-01）
+
+这一轮动了两处**契约**（不是修 bug）：`Herdr.close()` 的返回值与 `pg_terminate` 的返回字段。所以它是
+minor，适配器 `0.2.1 → 0.3.0`，平台保持 `0.2.0`，标签 `v0.3.0`。两条行为修复各配一条“撤掉 src 就红”
+的测试；适配器 84 → 88，`typecheck` 干净，全绿后发版。
+
+**E — 终止前先切断正在跑的那一轮（`25b8c1b`）**
+
+根因：`discardAndShutdown()` 在 `sys.terminated` 上丢 journal、停循环、`surface.shutdown(reason)`，
+**从不 abort 正在跑的那一轮**；pi 的 shutdown 等工具而不是切断它，于是子成员卡在 `bash sleep 40`
+里，父适配器 5 s 到点把 pane 从活 agent 底下关掉（§3.7）。
+
+现在终止路径先设 `aborting`，走与 `pg.abort` 同一个 `cutTurn()`（同一个
+`ABORT_IDLE_TIMEOUT_MS = 3000`，没有第二个数字），再丢 journal、清队列、停循环、shutdown；
+`aborting` 一直保持到 shutdown 结束，所以中途的 settle 不能插进来投递。abort 是“切断”不是“暂停”：
+不补提示，被切的那一轮留在 transcript 里，与 §3.2 的 `pg.abort` 一致。
+
+测试：`sys.terminated cuts the running turn before discarding the journal and shutting down`、
+`sys.terminated reaches shutdown at the abort bound when the surface abort never returns`。
+变异证明：把 `discardAndShutdown()` 恢复成“先丢 journal、直接 stop/shutdown”→ `test/control.test.ts`
+里 3 条 `sys.terminated` 用例 1 pass / 2 fail；`cuts...` 红在
+`timed out after 5000ms waiting for: the termination to cut the running turn`，`reaches shutdown...`
+红在 `the termination asks for the cut / 0 !== 1`；恢复后 3/3 绿。
+
+**F — 强制关 pane 不再伪装成干净关闭（`25b8c1b`）**
+
+`Herdr.close(pane)` 从 `Promise<void>` 变成 `Promise<{ forced: boolean }>`：等待到点时 agent 仍在
+`pane list` 里就是 `true`。`pane_not_found` 仍是成功，返回值同样带这次等待的 `forced`。
+`AdapterLoop.terminate()` 返回 `{terminated, pane_close_failed, pane_close_forced}`，
+`pg_terminate` 原样序列化三个字段，`pane_close_forced` 每项是 `{member, pane}`；祖先删除路径上的
+settle/poll 复核遇到强制关闭打一条 warn。
+
+测试：`close() reports a forced close when the agent is still running at the bound`、
+`pg_terminate reports a pane close that was forced past a still-running agent`；原有的 clean `close()`
+用例现在也断言 `forced: false`。变异证明：让 `HerdrCli` 永远返回 `forced: false`、`loop.closePane()`
+忽略 `forced` → `test/herdr.test.ts` + `test/tools.test.ts` 11 条里 9 pass / 2 fail；
+`close() reports...` 红在 `a live agent at the bound must not look like a clean close / actual: false,
+expected: true`，`pg_terminate reports...` 红在 `actual: [], expected: [{ member: …, pane: 'pane-1' }]`；
+恢复后 11/11 绿。
+
+**文档**：`docs/设计说明.md` §2.2 写清 `close()` 的新返回值与 `forced` 的三种 `false` 来源；§3.2
+写 `sys.terminated` 的“先切断再收尾”；§5.3 写 `pg_terminate` 的三字段答案、三条 pane 死亡路径中
+第三条的 `pane_close_forced`，以及仍然存在的两个缺口。
+
+**真机（`d2ba2be`）**：三个 case（idle / midturn / `bash sleep 40`）3/3 PASS，证据在
+`probe/logs/terminate-20261101T132033/`。上一轮 FAIL 的 `bash sleep 40`：工具在 DELETE 后 3 ms
+被切断（`Command aborted`），pi 118 ms 退出，`pane list` 167 ms 看不到 agent，204 ms 才 close，
+`pg_terminate` 报 `pane_close_forced: []`（正确——close 等到了正常退出）。只动 `probe/`，无
+`src/` / `test/` 变更，数字见 §3.8。
+
+**没有做的**：`abort()` 仍是协作式的——忽略 signal 的工具拖过 3 s 时 pane 仍会在 5 s 被强制关，
+现在至少会报出来；`pane list` 读失败仍是“未知”，报 `forced: false`；pane 映射仍只在内存里；
+祖先删除路径上的强制关闭只有 warn，没有工具答案。

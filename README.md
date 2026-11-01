@@ -6,7 +6,7 @@ A Pi extension that turns a pi session into one member of a PiGroups workspace.
 - `docs/设计说明.md` — the contracts: `PiSurface`, `Herdr`, the loop, the journal, the `pg.*` command schema.
 - `CHANGELOG.md` — version policy and per-version changes (Chinese). A release records one
   pair: both sides share a number when both move, and only the side that changed takes the
-  patch step otherwise. `v0.2.1` is the adapter alone, on platform 0.2.0.
+  version step otherwise. `v0.3.0` is the adapter alone, on platform 0.2.0.
 
 ```bash
 npm install
