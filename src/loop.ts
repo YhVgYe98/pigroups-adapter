@@ -104,6 +104,11 @@ const REPORT_TIMEOUT_MS = 2000;
  */
 const STOP_TIMEOUT_MS = 3000;
 
+/** A roster read is a settle-time cost, not a poll-time one (§4.1). */
+const ROSTER_TTL_MS = 30_000;
+/** A slow roster must delay a settle's delivery no further than this. */
+const ROSTER_TIMEOUT_MS = 2000;
+
 /** Hand one macrotask back to the event loop, so timers and sockets can run. */
 function yieldOnce(): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -165,6 +170,8 @@ export class AdapterLoop {
   private flushInFlight: Promise<FlushOutcome> | undefined;
   /** Every `surface.deliver` the surface has not answered yet, so `stop()` can wait (§2.3). */
   private readonly deliveries = new Set<Promise<unknown>>();
+  /** The live roster (§4.4), cached: an obligation check must not cost a request per settle. */
+  private roster: { at: number; ids: Set<string> } | undefined;
   /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
   private aborting = false;
   /** Ends an in-flight abort wait when `stop()` runs (§3.2). */
@@ -347,11 +354,28 @@ export class AdapterLoop {
 
   /** The only send path: keeps the owed table honest (§2.3). */
   async say(to: string, text: string, mentions?: string[]): Promise<{ conv: string; seq: number }> {
-    const sent = await this.pg.sendMessage({ to, body: text, mentions });
+    let sent: { to: string; seq: number };
+    try {
+      sent = await this.pg.sendMessage({ to, body: text, mentions });
+    } catch (err) {
+      // A peer that just died answers 410, and the debt it created is unpayable from
+      // that moment. Forgetting it here is the difference between "cannot reply yet"
+      // and "is being told forever to reply to nobody".
+      if (err instanceof PgGone && !to.startsWith('g:')) this.forgetDm(to);
+      throw err;
+    }
     this.obligations.clear(sent.to);
     this.blockedReported.delete(sent.to);
     this.evaluateAttention(this.now());
     return { conv: sent.to, seq: sent.seq };
+  }
+
+  /** Drop every trace of a private conversation with a member that no longer exists. */
+  private forgetDm(member: string): void {
+    if (this.selfId === undefined) return;
+    const conv = dmConv(this.selfId, member);
+    this.obligations.clear(conv);
+    this.blockedReported.delete(conv);
   }
 
   async spawnMember(opts: { name?: string; brief: string; cwd?: string }): Promise<{ id: string; name: string }> {
@@ -414,6 +438,11 @@ export class AdapterLoop {
   async terminate(member: string): Promise<string[]> {
     const known = this.telemetry.snapshot().find((entry) => entry.child === member);
     const { terminated } = await this.pg.deleteMember(member);
+    // The member is gone as of this line, so its private debts are unpayable. Prune
+    // them now rather than at the next roster read: nobody should be nudged once more
+    // for a member this call just deleted.
+    this.forgetDm(member);
+    this.roster?.ids.delete(member);
     const now = this.now();
     for (const id of terminated) {
       this.telemetry.apply(
@@ -838,6 +867,9 @@ export class AdapterLoop {
    */
   private async onSettled(): Promise<void> {
     if (this.stopped) return;
+    // Before `tick()`: a debt whose peer no longer exists must not reach the reminder
+    // or the nudge. Cached, so this is free in the common case.
+    await this.pruneUnanswerableDms();
     this.tick();
     // Only "nothing was pending" leaves this settle's single delivery to a nudge
     // (§2.3). After a delivery the surface is busy; after a busy surface — including
@@ -861,6 +893,49 @@ export class AdapterLoop {
    *
    * Only called when the settle delivered nothing (§2.3).
    */
+  /**
+   * §4.1: a one-to-one conversation owes a reply only while its peer can receive one.
+   * A terminated member answers 410 `member_gone` to every send, so the debt can never
+   * be paid — and nothing in the platform withdraws the marker. Left alone it re-nudges
+   * for the life of the surviving member: found on a real run, where a child was deleted
+   * and its parent kept being told to answer a conversation with nobody on the other end.
+   *
+   * The roster (`GET /v1/tree`) lists exactly the living members. Failing to read it
+   * keeps every debt: a wrong prune loses a real obligation, a late prune loses nothing.
+   */
+  private async pruneUnanswerableDms(): Promise<void> {
+    const dms = this.obligations.entries().filter((entry) => isDmConv(entry.conv));
+    if (dms.length === 0) return;
+    const alive = await this.aliveIds();
+    if (!alive) return;
+
+    let changed = false;
+    for (const entry of dms) {
+      const peer = dmPeer(entry.conv, this.selfId);
+      if (peer === undefined || alive.has(peer)) continue;
+      this.obligations.clear(entry.conv);
+      // The `blocked` episode also ends here: the parent was told this member cannot
+      // answer, and that stopped being true the moment the conversation did.
+      this.blockedReported.delete(entry.conv);
+      changed = true;
+    }
+    if (changed) this.evaluateAttention(this.now());
+  }
+
+  private async aliveIds(): Promise<Set<string> | null> {
+    const now = this.now();
+    if (this.roster && now - this.roster.at < ROSTER_TTL_MS) return this.roster.ids;
+    try {
+      const tree = await withTimeout(this.pg.tree(), ROSTER_TIMEOUT_MS);
+      const ids = new Set(tree.nodes.map((node) => node.id));
+      this.roster = { at: now, ids };
+      return ids;
+    } catch {
+      this.roster = undefined;
+      return null;
+    }
+  }
+
   private async nudgeOwed(): Promise<void> {
     // §3.2: an abort is cutting the turn, so starting a nudge now would be the very
     // turn `surface.abort` then waits for. `onSettled` already refuses when the abort
@@ -1095,6 +1170,23 @@ function dmConv(a: string, b: string): string {
 /** A one-to-one conversation (§4.1): every message in it is addressed to the peer. */
 function isDmConv(conv: string): boolean {
   return conv.startsWith('dm:');
+}
+
+/**
+ * The other party of a `dm:` conversation id, or `undefined` when it is not one.
+ *
+ * Do not split at the first `_`: member ids carry one (`m_635f7e`), so the separator
+ * between the two ids is not the first underscore in the string. Matching the known
+ * half against each end is exact and needs no knowledge of the id format.
+ */
+function dmPeer(conv: string, selfId: string | undefined): string | undefined {
+  if (selfId === undefined || !isDmConv(conv)) return undefined;
+  const body = conv.slice(3);
+  const prefix = `${selfId}_`;
+  if (body.startsWith(prefix)) return body.slice(prefix.length);
+  const suffix = `_${selfId}`;
+  if (body.endsWith(suffix)) return body.slice(0, body.length - suffix.length);
+  return undefined;
 }
 
 /**

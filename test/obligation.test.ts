@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { send, waitFor } from './support.ts';
+import { removeMember, send, waitFor } from './support.ts';
 import { payloads, scenario } from './scenario.ts';
 
 test('an owed reply is nudged when the turn settles; after replying it is not', async (t) => {
@@ -398,4 +398,48 @@ test('an abort during the blocked report stops the nudge to the live conversatio
     0,
     'the live conversation must not be nudged while the abort is cutting the turn',
   );
+});
+
+test('a debt to a member that was deleted is dropped, not nudged forever', async (t) => {
+  const s = await scenario({ siblings: 1 });
+  t.after(() => s.close());
+  const sibling = s.siblings[0];
+
+  // A sibling writes to me privately: a one-to-one debt I can only pay by answering.
+  await send(s.platform, sibling.token, s.me.id, 'ping');
+  await s.cycle();
+  await s.settle();
+  await s.timer(0);
+  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'a living peer is owed an answer');
+
+  // The parent deletes it. From now on every reply would answer 410 `member_gone`, so
+  // the debt can never be paid — and nothing in the platform withdraws the marker.
+  await removeMember(s.platform, s.parent!.token, sibling.id);
+  // The roster is cached for 30 s; let it go stale so the adapter has to look again.
+  await s.timer(31_000);
+
+  const before = s.surface.textsOfKind('nudge').length;
+  await s.settle();
+  await s.timer(0);
+  assert.equal(
+    s.surface.textsOfKind('nudge').length,
+    before,
+    'a deleted peer must not be nudged again — the member cannot answer it',
+  );
+  assert.deepEqual(s.loop.state().owed, [], 'the marker is gone, not merely skipped');
+});
+
+test('a deleted peer does not reach the reminder that a settle would deliver', async (t) => {
+  const s = await scenario({ siblings: 1 });
+  t.after(() => s.close());
+  const sibling = s.siblings[0];
+
+  await send(s.platform, sibling.token, s.me.id, 'ping');
+  await s.cycle();
+  await removeMember(s.platform, s.parent!.token, sibling.id);
+  await s.timer(31_000);
+
+  await s.settle();
+  const reminders = s.surface.deliveries.filter((d) => d.text.includes('未回复'));
+  assert.equal(reminders.length, 0, `no reminder may carry a conversation with nobody in it: ${JSON.stringify(s.surface.texts)}`);
 });

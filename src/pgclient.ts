@@ -216,6 +216,11 @@ export class PgClient {
     });
   }
 
+  /** §4.4 the roster: only living members, which is what an obligation needs (§4.1). */
+  async tree(): Promise<{ nodes: { id: string }[] }> {
+    return this.request<{ nodes: { id: string }[] }>('GET', '/v1/tree');
+  }
+
   async conversations(): Promise<{ items: Conversation[] }> {
     return this.request<{ items: Conversation[] }>('GET', '/v1/conversations');
   }
