@@ -1,0 +1,123 @@
+[probe] output dir : /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-control
+[probe] workspace  : wE
+[probe] provider   : deepseek
+[probe] model      : deepseek-flash
+[probe] abort mode : probe_sleep returns from its own signal listener (control)
+[probe] abort bound: 3000 ms (adapter ABORT_IDLE_TIMEOUT_MS = 3000)
+[probe] tab        : wE:tR (wE:pT, not focused)
+[probe] pi started in the pane; waiting for the seed run
+[probe] PASS  P1.0 the seed run reached agent_settled
+[probe] PASS  P1.1 ctx.isIdle() is already true inside the agent_settled handler (A1)
+[probe] PASS  P1.2 sendMessage(..., {triggerTurn:true}) returned from the settle handler
+[probe] PASS  P1.3 a second agent_start appeared
+[probe] PASS  P1.4 turn_start #2 is after delivered (line 10 > 8)
+[probe] PASS  P1.5 the new run was started by the custom message (before_agent_start messageType=custom)
+[probe] PASS  P1.6 turn #2 started 0 ms after sendMessage returned (bounded by 1000 ms)
+[probe] PASS  P2.0 the P1 turn settled
+[probe] PASS  P2.1 the probe_sleep request was delivered
+[probe] PASS  P2.2 the model called probe_sleep and the tool started
+[probe] tool is running; touching the abort trigger in 1.5s
+[probe] PASS  P2.3 the tool saw the external abort trigger
+[probe] PASS  P2.4 ctx.abort() returned in 1 ms without waiting for the turn (bound 1000 ms)
+[probe] PASS  P2.3b tool_enter < abort_seen < abort_called (lines 20 < 21 < 23)
+[probe] PASS  P2.5 ctx.isIdle() turned true 2 ms after the abort call (bound 3000 ms; tool ignores signal: 0)
+[probe] PASS  P2.6 tool_execution_end for probe_sleep was emitted (observed isError=false)
+[probe] PASS  P2.7 agent_settled reports aborted=true 2 ms after ctx.abort() (bound 3000 ms)
+[probe] WARN  no agent_before_settle for the aborted run -- pi skips that boundary once a run is aborted; the adapter now closes the turn from agent_settled.aborted (abecc76), not from this event
+[probe] note  last pi_turn_end: {"ms":4390,"pid":29363,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+[probe] PASS  P2.9 sendMessage from an aborted agent_settled handler was accepted (delivered stage=p3)
+[probe] PASS  P2.10 a new run started after the aborted-settle delivery
+[probe] PASS  P2.10b turn_start #4 is after delivered(p3) (line 31 > 29)
+[probe] PASS  P2.11 the post-abort run settled; P3 starts from idle
+[probe] sending SIGTERM to pi (pid 29363)
+[probe] PASS  P3.1 session_shutdown was dispatched (reason=quit)
+[probe] PASS  P3.2 session_shutdown ran its 3000 ms async body to completion (waited_ms=3000)
+[probe] PASS  P3.3 the process exited with code 0 after 3130 ms
+[probe] PASS  P3.4 SIGTERM to exit took 3130 ms (bound 6000 ms)
+[probe] PASS  P3.2b the process exited 54 ms after the handler completed (exit_at >= shutdown_done_at)
+[probe] PASS  P3.5 the pi process is gone
+[probe] PASS  P3.6 session_shutdown was dispatched exactly once
+[probe] 
+[probe] --- pi output in the pane (tail) ---
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Package Updates Available
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-web-access
+ - pi-subagents
+ - @juicesharp/rpiv-ask-user-question
+ - @juicesharp/rpiv-todo
+ - @quintinshaw/pi-dynamic-workflows
+ - pi-straw-boss
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+ probe_sleep seconds=60
+ probe_sleep finished (aborted) after 1712 ms
+
+
+ Error: This operation was aborted
+
+
+ [probe]
+
+ Reply with the single word pong and nothing else. This delivery follows an aborted run.
+
+
+ Thinking...
+
+ pong
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Documents/pigroups-adapter/probe/logs/run-20261101T1920-control (master)
+↑1.1k ↓61 R2.4k CH79.7% $0.000 0.1%/1.0M (auto)                                                             (deepseek) deepseek-flash • max
+[probe] pi exited with code 0
+
+~/Documents/pigroups-adapter/probe/logs/run-20261101T1920-control master !2 ?3 ................................... 8s node system 19:20:53
+>[probe] 
+[probe] --- probe log: /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-control/probe.log ---
+{"ms":30,"pid":29363,"step":"start","reason":"startup","mode":"tui","hasUI":true,"isIdle":true,"hasPendingMessages":false,"pane":"wE:pT","node":"v26.12.1","ignoreSignal":false,"shutdownSettleMs":3000,"argv":["-ne","-e","/home/yang/Documents/pigroups-adapter/probe/probe.ts","--no-session","--no-builtin-tools","--no-mcp","--no-skills","--no-prompt-templates","--no-context-files","--provider","deepseek","--model","deepseek-flash","Reply with exactly: ready"]}
+{"ms":39,"pid":29363,"step":"before_agent_start","messageType":"user","customType":null,"content":"Reply with exactly: ready"}
+{"ms":40,"pid":29363,"step":"turn_start","run":1,"delivery_stage":null,"since_delivery_ms":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":505,"pid":29363,"step":"assistant_end","stopReason":"stop","text":"ready"}
+{"ms":505,"pid":29363,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":506,"pid":29363,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":506,"pid":29363,"step":"settled_1","settled":1,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":506,"pid":29363,"step":"delivered","stage":"p1","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":506,"pid":29363,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"This is an automated probe. Reply with the single word pong and nothing else."}
+{"ms":506,"pid":29363,"step":"turn_start","run":2,"delivery_stage":"p1","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":1220,"pid":29363,"step":"assistant_end","stopReason":"stop","text":"pong"}
+{"ms":1220,"pid":29363,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":1220,"pid":29363,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":1221,"pid":29363,"step":"settled_2","settled":2,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":1221,"pid":29363,"step":"delivered","stage":"p2","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":1221,"pid":29363,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"Call the tool probe_sleep exactly once with seconds=60. Do not answer with text before the tool call."}
+{"ms":1221,"pid":29363,"step":"turn_start","run":3,"delivery_stage":"p2","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":1937,"pid":29363,"step":"assistant_end","stopReason":"toolUse","text":""}
+{"ms":1937,"pid":29363,"step":"tool_start","toolName":"probe_sleep","toolCallId":"call_00_ET_hGR1erdnp1A3XzsSdb3x8935","args":"{\"seconds\":60}"}
+{"ms":1938,"pid":29363,"step":"tool_enter","tool":"probe_sleep","toolCallId":"call_00_ET_hGR1erdnp1A3XzsSdb3x8935","seconds":60,"signalPresent":true,"ignoreSignal":false,"isIdle":false}
+{"ms":3650,"pid":29363,"step":"abort_seen","toolCallId":"call_00_ET_hGR1erdnp1A3XzsSdb3x8935","waited_ms":1712,"isIdle":false}
+{"ms":3650,"pid":29363,"step":"tool_return","tool":"probe_sleep","toolCallId":"call_00_ET_hGR1erdnp1A3XzsSdb3x8935","why":"aborted","ran_ms":1712,"isIdle":false}
+{"ms":3651,"pid":29363,"step":"abort_called","toolCallId":"call_00_ET_hGR1erdnp1A3XzsSdb3x8935","abort_sync_ms":1,"abortError":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":3651,"pid":29363,"step":"tool_end","toolName":"probe_sleep","toolCallId":"call_00_ET_hGR1erdnp1A3XzsSdb3x8935","isError":false,"durationMs":1713}
+{"ms":3651,"pid":29363,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"toolUse","errorMessage":null}
+{"ms":3652,"pid":29363,"step":"assistant_end","stopReason":"error","text":""}
+{"ms":3653,"pid":29363,"step":"pi_turn_end","turnIndex":1,"outcome":"error","role":"assistant","stopReason":"error","errorMessage":"This operation was aborted"}
+{"ms":3653,"pid":29363,"step":"settled_3","settled":3,"aborted":true,"isIdle":true,"hasPendingMessages":false}
+{"ms":3653,"pid":29363,"step":"delivered","stage":"p3","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":3653,"pid":29363,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"Reply with the single word pong and nothing else. This delivery follows an aborted run."}
+{"ms":3653,"pid":29363,"step":"turn_start","run":4,"delivery_stage":"p3","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":4390,"pid":29363,"step":"assistant_end","stopReason":"stop","text":"pong"}
+{"ms":4390,"pid":29363,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":4390,"pid":29363,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":4390,"pid":29363,"step":"settled_4","settled":4,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":4407,"pid":29363,"step":"idle","wait_ms":757,"toolReturned":true}
+{"ms":4614,"pid":29363,"step":"shutdown_start","shutdown":1,"reason":"quit","targetSessionFile":null,"mode":"tui","isIdle":true}
+{"ms":7614,"pid":29363,"step":"shutdown_done","shutdown":1,"at":1793532053832,"waited_ms":3000}
+{"ms":7668,"pid":29363,"step":"process_exit","code":0,"at":1793532053886,"shutdown_done_at":1793532053832,"after_shutdown_done_ms":54,"shutdown_settle_ms":3000}
+[probe] 
+[probe] RESULT: PASS (log kept in /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-control)

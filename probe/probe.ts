@@ -17,13 +17,22 @@
  * Output: one JSON object per line, appended to $PROBE_LOG. Steps:
  *   start, before_agent_start, turn_start, before_settle, settled_N,
  *   delivered, tool_start, tool_end, tool_enter, abort_seen, abort_called,
- *   idle | idle_timeout, turn_end, assistant_end, shutdown_start, shutdown_done.
+ *   idle | idle_timeout, pi_turn_end, assistant_end, shutdown_start,
+ *   shutdown_done, process_exit. (`pi_turn_end` is pi's own event; the adapter's
+ *   PiEvent.turn_end is a different thing.)
  *
  * Environment:
  *   PROBE_LOG             required; append-only JSONL output path. Unset => no-op.
  *   PROBE_DIR             directory holding the external `abort` trigger file.
  *                         Unset => P2 is skipped (logged as p2_skipped).
- *   PROBE_ABORT_WAIT_MS   bound for the idle wait after abort (default 20000).
+ *   PROBE_ABORT_WAIT_MS   bound for the idle wait after abort (default 3000, the
+ *                         adapter's own ABORT_IDLE_TIMEOUT_MS).
+ *   PROBE_IGNORE_SIGNAL=1 make probe_sleep ignore the AbortSignal it is handed, so
+ *                         P2 tests a tool that does not cooperate. The default (0)
+ *                         keeps the cooperating control: it returns from its own
+ *                         signal listener.
+ *   PROBE_SHUTDOWN_SETTLE_MS  async work inside session_shutdown (default 3000);
+ *                         long enough that "exit 0 after 357 ms" cannot fake an await.
  *   PROBE_ECHO=1          mirror every line to stderr.
  *   PROBE_SEED_PROMPT     unused here; the seed prompt is a cli argument.
  */
@@ -41,12 +50,13 @@ const IDLE_POLL_MS = 25;
 const DEFAULT_ABORT_WAIT_MS = 20_000;
 /** The probe tool never sleeps longer than this, whatever the model asks for. */
 const MAX_TOOL_SECONDS = 60;
-/** Async work inside the session_shutdown handler; proves the handler is awaited. */
-const SHUTDOWN_SETTLE_MS = 250;
+/** Default async work inside the session_shutdown handler; see PROBE_SHUTDOWN_SETTLE_MS. */
+const DEFAULT_SHUTDOWN_SETTLE_MS = 3000;
 
 const P1_PROMPT = 'This is an automated probe. Reply with the single word pong and nothing else.';
 const P2_PROMPT =
   'Call the tool probe_sleep exactly once with seconds=60. Do not answer with text before the tool call.';
+const P3_PROMPT = 'Reply with the single word pong and nothing else. This delivery follows an aborted run.';
 
 const PREVIEW_CHARS = 160;
 
@@ -101,6 +111,8 @@ export default function probeExtension(pi: ExtensionAPI): void {
   const probeDir = (process.env.PROBE_DIR ?? '').trim();
   const abortFile = probeDir ? join(probeDir, 'abort') : '';
   const abortWaitMs = readInt('PROBE_ABORT_WAIT_MS', DEFAULT_ABORT_WAIT_MS);
+  const ignoreSignal = process.env.PROBE_IGNORE_SIGNAL === '1';
+  const shutdownSettleMs = readInt('PROBE_SHUTDOWN_SETTLE_MS', DEFAULT_SHUTDOWN_SETTLE_MS);
   const echo = process.env.PROBE_ECHO === '1';
   const startedAt = Date.now();
 
@@ -120,6 +132,23 @@ export default function probeExtension(pi: ExtensionAPI): void {
   let shutdowns = 0;
   let lastDeliveryAt = 0;
   let lastDeliveryStage = '';
+  let abortedDeliverySent = false;
+  let shutdownDoneAt = 0;
+
+  // The exit listener is registered before any run starts. `process.on('exit')` is the
+  // only place that can timestamp an exit that happens *after* the shutdown handler
+  // finished; without it, "exit 0 within 357 ms" cannot distinguish "the handler was
+  // awaited" from "a timer kept the process alive anyway".
+  process.on('exit', (code) => {
+    record({
+      step: 'process_exit',
+      code,
+      at: Date.now(),
+      shutdown_done_at: shutdownDoneAt || null,
+      after_shutdown_done_ms: shutdownDoneAt ? Date.now() - shutdownDoneAt : null,
+      shutdown_settle_ms: shutdownSettleMs,
+    });
+  });
 
   // ---------------------------------------------------------------- P1 / P3 events
 
@@ -133,6 +162,8 @@ export default function probeExtension(pi: ExtensionAPI): void {
       hasPendingMessages: attempt(() => ctx.hasPendingMessages()),
       pane: process.env.HERDR_PANE_ID ?? null,
       node: process.version,
+      ignoreSignal,
+      shutdownSettleMs,
       argv: process.argv.slice(2),
     });
   });
@@ -222,13 +253,36 @@ export default function probeExtension(pi: ExtensionAPI): void {
         idle_in_handler: isIdle,
         sendMessage_sync_ms: Date.now() - before,
       });
+      return;
+    }
+
+    // A run killed by an abort skips agent_before_settle, so the adapter closes the
+    // turn from this same agent_settled event and then flushes. Delivering here proves
+    // sendMessage starts a run from the aborted-settle path too, not only from the
+    // normal settle P1 covers; run.sh asserts the new agent_start.
+    if (event.aborted && !abortedDeliverySent) {
+      abortedDeliverySent = true;
+      const before = Date.now();
+      pi.sendMessage(
+        { customType: 'probe', content: P3_PROMPT, display: true, details: { stage: 'p3' } },
+        { triggerTurn: true },
+      );
+      lastDeliveryAt = Date.now();
+      lastDeliveryStage = 'p3';
+      record({
+        step: 'delivered',
+        stage: 'p3',
+        idle_in_handler: isIdle,
+        sendMessage_sync_ms: Date.now() - before,
+      });
     }
   });
 
   pi.on('turn_end', (event) => {
     const message = event.message as { role?: string; stopReason?: string; errorMessage?: string };
     record({
-      step: 'turn_end',
+      // pi's own event, distinct from the adapter's PiEvent.turn_end.
+      step: 'pi_turn_end',
       turnIndex: event.turnIndex,
       outcome: event.outcome,
       role: message.role ?? null,
@@ -285,6 +339,7 @@ export default function probeExtension(pi: ExtensionAPI): void {
         toolCallId,
         seconds,
         signalPresent: signal !== undefined,
+        ignoreSignal,
         isIdle: attempt(() => ctx.isIdle()),
       });
 
@@ -346,12 +401,15 @@ export default function probeExtension(pi: ExtensionAPI): void {
           });
         };
 
-        if (signal) {
+        if (signal && !ignoreSignal) {
           if (signal.aborted) {
             finish('aborted');
           } else {
             signal.addEventListener('abort', () => finish('aborted'), { once: true });
           }
+        }
+        if (signal && ignoreSignal) {
+          record({ step: 'tool_signal_ignored', tool: 'probe_sleep', toolCallId });
         }
 
         sleepTimer = setTimeout(() => finish('timeout'), seconds * 1000);
@@ -416,12 +474,14 @@ export default function probeExtension(pi: ExtensionAPI): void {
       isIdle: attempt(() => ctx.isIdle()),
     });
     const at = Date.now();
-    // Deliberately not unref'ed: if pi does not await the handler, this line
-    // never appears, which is exactly the failure P3 is looking for.
+    // Deliberately not unref'ed, and deliberately seconds long: if pi does not await
+    // the handler, the process exits before this timer fires and neither this line nor
+    // process_exit's after_shutdown_done_ms appears.
     await new Promise<void>((resolve) => {
-      setTimeout(resolve, SHUTDOWN_SETTLE_MS);
+      setTimeout(resolve, shutdownSettleMs);
     });
-    record({ step: 'shutdown_done', shutdown: shutdowns, waited_ms: Date.now() - at });
+    shutdownDoneAt = Date.now();
+    record({ step: 'shutdown_done', shutdown: shutdowns, at: shutdownDoneAt, waited_ms: shutdownDoneAt - at });
     if (probeDir) {
       try {
         writeFileSync(join(probeDir, `shutdown_done_${shutdowns}`), `${Date.now()}\n`);

@@ -4,7 +4,7 @@
 #
 # Required env: PROBE_DIR, PROBE_EXT
 # Optional env: PROBE_LOG, PROBE_PROVIDER, PROBE_MODEL, PROBE_SEED_PROMPT,
-#               PROBE_ABORT_WAIT_MS
+#               PROBE_ABORT_WAIT_MS, PROBE_IGNORE_SIGNAL, PROBE_SHUTDOWN_SETTLE_MS
 #
 # The pi process writes its own pid to $PROBE_DIR/pi.pid and its exit code to
 # $PROBE_DIR/exit_code, so the runner can drive P2 (abort file) and P3 (SIGTERM)

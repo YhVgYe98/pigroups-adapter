@@ -1,0 +1,40 @@
+{"ms":31,"pid":29815,"step":"start","reason":"startup","mode":"tui","hasUI":true,"isIdle":true,"hasPendingMessages":false,"pane":"wE:pV","node":"v26.12.1","ignoreSignal":true,"shutdownSettleMs":3000,"argv":["-ne","-e","/home/yang/Documents/pigroups-adapter/probe/probe.ts","--no-session","--no-builtin-tools","--no-mcp","--no-skills","--no-prompt-templates","--no-context-files","--provider","deepseek","--model","deepseek-flash","Reply with exactly: ready"]}
+{"ms":40,"pid":29815,"step":"before_agent_start","messageType":"user","customType":null,"content":"Reply with exactly: ready"}
+{"ms":40,"pid":29815,"step":"turn_start","run":1,"delivery_stage":null,"since_delivery_ms":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":539,"pid":29815,"step":"assistant_end","stopReason":"stop","text":"ready"}
+{"ms":539,"pid":29815,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":540,"pid":29815,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":540,"pid":29815,"step":"settled_1","settled":1,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":540,"pid":29815,"step":"delivered","stage":"p1","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":540,"pid":29815,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"This is an automated probe. Reply with the single word pong and nothing else."}
+{"ms":541,"pid":29815,"step":"turn_start","run":2,"delivery_stage":"p1","since_delivery_ms":1,"isIdle":false,"hasPendingMessages":false}
+{"ms":1119,"pid":29815,"step":"assistant_end","stopReason":"stop","text":"pong"}
+{"ms":1119,"pid":29815,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":1120,"pid":29815,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":1120,"pid":29815,"step":"settled_2","settled":2,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":1120,"pid":29815,"step":"delivered","stage":"p2","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":1120,"pid":29815,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"Call the tool probe_sleep exactly once with seconds=60. Do not answer with text before the tool call."}
+{"ms":1120,"pid":29815,"step":"turn_start","run":3,"delivery_stage":"p2","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":2149,"pid":29815,"step":"assistant_end","stopReason":"toolUse","text":""}
+{"ms":2149,"pid":29815,"step":"tool_start","toolName":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","args":"{\"seconds\":60}"}
+{"ms":2150,"pid":29815,"step":"tool_enter","tool":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","seconds":60,"signalPresent":true,"ignoreSignal":true,"isIdle":false}
+{"ms":2150,"pid":29815,"step":"tool_signal_ignored","tool":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687"}
+{"ms":3856,"pid":29815,"step":"abort_seen","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","waited_ms":1706,"isIdle":false}
+{"ms":3857,"pid":29815,"step":"abort_called","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","abort_sync_ms":0,"abortError":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":6866,"pid":29815,"step":"idle_timeout","wait_ms":3009,"limit_ms":3000,"isIdle":false,"toolReturned":false}
+{"ms":62151,"pid":29815,"step":"tool_return","tool":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","why":"timeout","ran_ms":60001,"isIdle":false}
+{"ms":62151,"pid":29815,"step":"tool_end","toolName":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","isError":false,"durationMs":60001}
+{"ms":62152,"pid":29815,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"toolUse","errorMessage":null}
+{"ms":62153,"pid":29815,"step":"assistant_end","stopReason":"error","text":""}
+{"ms":62153,"pid":29815,"step":"pi_turn_end","turnIndex":1,"outcome":"error","role":"assistant","stopReason":"error","errorMessage":"This operation was aborted"}
+{"ms":62153,"pid":29815,"step":"settled_3","settled":3,"aborted":true,"isIdle":true,"hasPendingMessages":false}
+{"ms":62153,"pid":29815,"step":"delivered","stage":"p3","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":62154,"pid":29815,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"Reply with the single word pong and nothing else. This delivery follows an aborted run."}
+{"ms":62154,"pid":29815,"step":"turn_start","run":4,"delivery_stage":"p3","since_delivery_ms":1,"isIdle":false,"hasPendingMessages":false}
+{"ms":62970,"pid":29815,"step":"assistant_end","stopReason":"stop","text":"pong"}
+{"ms":62970,"pid":29815,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":62971,"pid":29815,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":62971,"pid":29815,"step":"settled_4","settled":4,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":63112,"pid":29815,"step":"shutdown_start","shutdown":1,"reason":"quit","targetSessionFile":null,"mode":"tui","isIdle":true}
+{"ms":66114,"pid":29815,"step":"shutdown_done","shutdown":1,"at":1793532122471,"waited_ms":3002}
+{"ms":66219,"pid":29815,"step":"process_exit","code":0,"at":1793532122576,"shutdown_done_at":1793532122471,"after_shutdown_done_ms":105,"shutdown_settle_ms":3000}

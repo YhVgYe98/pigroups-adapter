@@ -1,0 +1,124 @@
+[probe] output dir : /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-ignore-signal
+[probe] workspace  : wE
+[probe] provider   : deepseek
+[probe] model      : deepseek-flash
+[probe] abort mode : probe_sleep ignores the signal (hard variant)
+[probe] abort bound: 3000 ms (adapter ABORT_IDLE_TIMEOUT_MS = 3000)
+[probe] tab        : wE:tS (wE:pV, not focused)
+[probe] pi started in the pane; waiting for the seed run
+[probe] PASS  P1.0 the seed run reached agent_settled
+[probe] PASS  P1.1 ctx.isIdle() is already true inside the agent_settled handler (A1)
+[probe] PASS  P1.2 sendMessage(..., {triggerTurn:true}) returned from the settle handler
+[probe] PASS  P1.3 a second agent_start appeared
+[probe] PASS  P1.4 turn_start #2 is after delivered (line 10 > 8)
+[probe] PASS  P1.5 the new run was started by the custom message (before_agent_start messageType=custom)
+[probe] PASS  P1.6 turn #2 started 1 ms after sendMessage returned (bounded by 1000 ms)
+[probe] PASS  P2.0 the P1 turn settled
+[probe] PASS  P2.1 the probe_sleep request was delivered
+[probe] PASS  P2.2 the model called probe_sleep and the tool started
+[probe] tool is running; touching the abort trigger in 1.5s
+[probe] PASS  P2.3 the tool saw the external abort trigger
+[probe] PASS  P2.4 ctx.abort() returned in 0 ms without waiting for the turn (bound 1000 ms)
+[probe] PASS  P2.3b tool_enter < abort_seen < abort_called (lines 20 < 22 < 23)
+[probe] FAIL  P2.5 idle_timeout: the turn never settled within 3000 ms after ctx.abort() (B2 false for this tool, pg.abort would be a lie)
+[probe] PASS  P2.6 tool_execution_end for probe_sleep was emitted (observed isError=false)
+[probe] FAIL  P2.7 the aborted settle came 58296 ms after ctx.abort(), beyond the 3000 ms the adapter waits; pi did not end the run, the tool did
+[probe] WARN  no agent_before_settle for the aborted run -- pi skips that boundary once a run is aborted; the adapter now closes the turn from agent_settled.aborted (abecc76), not from this event
+[probe] note  last pi_turn_end: {"ms":62153,"pid":29815,"step":"pi_turn_end","turnIndex":1,"outcome":"error","role":"assistant","stopReason":"error","errorMessage":"This operation was aborted"}
+[probe] PASS  P2.9 sendMessage from an aborted agent_settled handler was accepted (delivered stage=p3)
+[probe] PASS  P2.10 a new run started after the aborted-settle delivery
+[probe] PASS  P2.10b turn_start #4 is after delivered(p3) (line 33 > 31)
+[probe] PASS  P2.11 the post-abort run settled; P3 starts from idle
+[probe] sending SIGTERM to pi (pid 29815)
+[probe] PASS  P3.1 session_shutdown was dispatched (reason=quit)
+[probe] PASS  P3.2 session_shutdown ran its 3000 ms async body to completion (waited_ms=3002)
+[probe] PASS  P3.3 the process exited with code 0 after 3131 ms
+[probe] PASS  P3.4 SIGTERM to exit took 3131 ms (bound 6000 ms)
+[probe] PASS  P3.2b the process exited 105 ms after the handler completed (exit_at >= shutdown_done_at)
+[probe] PASS  P3.5 the pi process is gone
+[probe] PASS  P3.6 session_shutdown was dispatched exactly once
+[probe] 
+[probe] --- pi output in the pane (tail) ---
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-web-access
+ - pi-subagents
+ - @juicesharp/rpiv-ask-user-question
+ - @juicesharp/rpiv-todo
+ - @quintinshaw/pi-dynamic-workflows
+ - pi-straw-boss
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+ [probe]
+
+ Call the tool probe_sleep exactly once with seconds=60. Do not answer with text before the tool call.
+
+
+
+ probe_sleep seconds=60
+ probe_sleep finished (timeout) after 60001 ms
+
+
+ Error: This operation was aborted
+
+
+ [probe]
+
+ Reply with the single word pong and nothing else. This delivery follows an aborted run.
+
+
+ pong
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Documents/pigroups-adapter/probe/logs/run-20261101T1920-ignore-signal (master)
+↑1.1k ↓48 R2.4k CH79.4% $0.000 0.1%/1.0M (auto)                                                             (deepseek) deepseek-flash • max
+[probe] pi exited with code 0
+
+~/Documents/pigroups-adapter/probe/logs/run-20261101T1920-ignore-signal master !2 ?3 .......................... 1m 6s node system 19:22:02
+>[probe] 
+[probe] --- probe log: /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-ignore-signal/probe.log ---
+{"ms":31,"pid":29815,"step":"start","reason":"startup","mode":"tui","hasUI":true,"isIdle":true,"hasPendingMessages":false,"pane":"wE:pV","node":"v26.12.1","ignoreSignal":true,"shutdownSettleMs":3000,"argv":["-ne","-e","/home/yang/Documents/pigroups-adapter/probe/probe.ts","--no-session","--no-builtin-tools","--no-mcp","--no-skills","--no-prompt-templates","--no-context-files","--provider","deepseek","--model","deepseek-flash","Reply with exactly: ready"]}
+{"ms":40,"pid":29815,"step":"before_agent_start","messageType":"user","customType":null,"content":"Reply with exactly: ready"}
+{"ms":40,"pid":29815,"step":"turn_start","run":1,"delivery_stage":null,"since_delivery_ms":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":539,"pid":29815,"step":"assistant_end","stopReason":"stop","text":"ready"}
+{"ms":539,"pid":29815,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":540,"pid":29815,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":540,"pid":29815,"step":"settled_1","settled":1,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":540,"pid":29815,"step":"delivered","stage":"p1","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":540,"pid":29815,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"This is an automated probe. Reply with the single word pong and nothing else."}
+{"ms":541,"pid":29815,"step":"turn_start","run":2,"delivery_stage":"p1","since_delivery_ms":1,"isIdle":false,"hasPendingMessages":false}
+{"ms":1119,"pid":29815,"step":"assistant_end","stopReason":"stop","text":"pong"}
+{"ms":1119,"pid":29815,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":1120,"pid":29815,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":1120,"pid":29815,"step":"settled_2","settled":2,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":1120,"pid":29815,"step":"delivered","stage":"p2","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":1120,"pid":29815,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"Call the tool probe_sleep exactly once with seconds=60. Do not answer with text before the tool call."}
+{"ms":1120,"pid":29815,"step":"turn_start","run":3,"delivery_stage":"p2","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":2149,"pid":29815,"step":"assistant_end","stopReason":"toolUse","text":""}
+{"ms":2149,"pid":29815,"step":"tool_start","toolName":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","args":"{\"seconds\":60}"}
+{"ms":2150,"pid":29815,"step":"tool_enter","tool":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","seconds":60,"signalPresent":true,"ignoreSignal":true,"isIdle":false}
+{"ms":2150,"pid":29815,"step":"tool_signal_ignored","tool":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687"}
+{"ms":3856,"pid":29815,"step":"abort_seen","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","waited_ms":1706,"isIdle":false}
+{"ms":3857,"pid":29815,"step":"abort_called","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","abort_sync_ms":0,"abortError":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":6866,"pid":29815,"step":"idle_timeout","wait_ms":3009,"limit_ms":3000,"isIdle":false,"toolReturned":false}
+{"ms":62151,"pid":29815,"step":"tool_return","tool":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","why":"timeout","ran_ms":60001,"isIdle":false}
+{"ms":62151,"pid":29815,"step":"tool_end","toolName":"probe_sleep","toolCallId":"call_00_ET_5I4LVAMevebtGVwhhDCa5687","isError":false,"durationMs":60001}
+{"ms":62152,"pid":29815,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"toolUse","errorMessage":null}
+{"ms":62153,"pid":29815,"step":"assistant_end","stopReason":"error","text":""}
+{"ms":62153,"pid":29815,"step":"pi_turn_end","turnIndex":1,"outcome":"error","role":"assistant","stopReason":"error","errorMessage":"This operation was aborted"}
+{"ms":62153,"pid":29815,"step":"settled_3","settled":3,"aborted":true,"isIdle":true,"hasPendingMessages":false}
+{"ms":62153,"pid":29815,"step":"delivered","stage":"p3","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":62154,"pid":29815,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"Reply with the single word pong and nothing else. This delivery follows an aborted run."}
+{"ms":62154,"pid":29815,"step":"turn_start","run":4,"delivery_stage":"p3","since_delivery_ms":1,"isIdle":false,"hasPendingMessages":false}
+{"ms":62970,"pid":29815,"step":"assistant_end","stopReason":"stop","text":"pong"}
+{"ms":62970,"pid":29815,"step":"pi_turn_end","turnIndex":0,"outcome":"completed","role":"assistant","stopReason":"stop","errorMessage":null}
+{"ms":62971,"pid":29815,"step":"before_settle","outcome":"completed","canContinue":false}
+{"ms":62971,"pid":29815,"step":"settled_4","settled":4,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":63112,"pid":29815,"step":"shutdown_start","shutdown":1,"reason":"quit","targetSessionFile":null,"mode":"tui","isIdle":true}
+{"ms":66114,"pid":29815,"step":"shutdown_done","shutdown":1,"at":1793532122471,"waited_ms":3002}
+{"ms":66219,"pid":29815,"step":"process_exit","code":0,"at":1793532122576,"shutdown_done_at":1793532122471,"after_shutdown_done_ms":105,"shutdown_settle_ms":3000}
+[probe] 
+[probe] RESULT: FAIL (see the FAIL lines above; the log is kept in /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-ignore-signal)

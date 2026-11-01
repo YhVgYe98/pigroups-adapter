@@ -2,7 +2,10 @@
 # Real-machine probe for the PiGroups adapter's three pi assumptions.
 #
 #   P1  sendMessage(..., {triggerTurn:true}) from an agent_settled handler starts a run
-#   P2  ctx.abort() cuts a turn that is inside a running tool; isIdle() follows
+#   P2  ctx.abort() cuts a turn that is inside a running tool; isIdle() follows.
+#       The default tool cooperates (it returns from its own abort listener); set
+#       PROBE_IGNORE_SIGNAL=1 for the hard variant, where the tool ignores the
+#       signal and only pi can end the run.
 #   P3  session_shutdown handlers run and are awaited before the process exits
 #
 # What it does:
@@ -14,7 +17,8 @@
 #
 # Usage:   probe/run.sh            (or: PROBE_OUT_DIR=/tmp/p1 probe/run.sh)
 # Env:     PROBE_OUT_DIR, PROBE_PROVIDER, PROBE_MODEL, PROBE_SEED_PROMPT,
-#          PROBE_ABORT_WAIT_MS, PROBE_ABORT_DELAY,
+#          PROBE_ABORT_WAIT_MS (default 3000, the adapter's ABORT_IDLE_TIMEOUT_MS),
+#          PROBE_IGNORE_SIGNAL, PROBE_ABORT_DELAY, PROBE_SHUTDOWN_SETTLE_MS,
 #          PROBE_SEED_TIMEOUT, PROBE_P1_TIMEOUT, PROBE_P2_TIMEOUT,
 #          PROBE_ABORT_TIMEOUT, PROBE_SHUTDOWN_TIMEOUT
 #
@@ -42,13 +46,24 @@ PID_FILE="$OUT_DIR/pi.pid"
 EXIT_FILE="$OUT_DIR/exit_code"
 rm -f "$PROBE_LOG" "$ABORT_FILE" "$PID_FILE" "$EXIT_FILE" "$OUT_DIR"/shutdown_done_* 2>/dev/null || true
 
-ABORT_WAIT_MS="${PROBE_ABORT_WAIT_MS:-20000}"
+# The adapter gives up its own abort wait at ABORT_IDLE_TIMEOUT_MS = 3000; a probe
+# that accepted 20 s would pass a turn the adapter had already abandoned.
+ABORT_WAIT_MS="${PROBE_ABORT_WAIT_MS:-3000}"
+IGNORE_SIGNAL="${PROBE_IGNORE_SIGNAL:-0}"
+SHUTDOWN_SETTLE_MS="${PROBE_SHUTDOWN_SETTLE_MS:-3000}"
 ABORT_DELAY="${PROBE_ABORT_DELAY:-1.5}"
 SEED_TIMEOUT="${PROBE_SEED_TIMEOUT:-120}"
 P1_TIMEOUT="${PROBE_P1_TIMEOUT:-120}"
 P2_TIMEOUT="${PROBE_P2_TIMEOUT:-120}"
-ABORT_TIMEOUT="${PROBE_ABORT_TIMEOUT:-45}"
+ABORT_TIMEOUT="${PROBE_ABORT_TIMEOUT:-$(( ABORT_WAIT_MS / 1000 + 5 ))}"
 SHUTDOWN_TIMEOUT="${PROBE_SHUTDOWN_TIMEOUT:-20}"
+# Failure-path bounds. A cooperating tool closes at once; PROBE_IGNORE_SIGNAL=1 needs
+# up to the tool's own 60 s timer, so the defaults are sized for that. A synthetic
+# negative-control run shrinks them.
+TRIGGER_TIMEOUT="${PROBE_TRIGGER_TIMEOUT:-15}"
+RESULT_TIMEOUT="${PROBE_RESULT_TIMEOUT:-90}"
+RUN4_TIMEOUT="${PROBE_RUN4_TIMEOUT:-30}"
+SETTLE4_TIMEOUT="${PROBE_SETTLE4_TIMEOUT:-60}"
 
 PROVIDER="${PROBE_PROVIDER:-${PI_PROVIDER:-}}"
 MODEL="${PROBE_MODEL:-${PI_MODEL:-}}"
@@ -153,6 +168,8 @@ ENV_ARGS=(
   --env "PROBE_EXT=$PROBE_TS"
   --env "PROBE_SEED_PROMPT=$SEED_PROMPT"
   --env "PROBE_ABORT_WAIT_MS=$ABORT_WAIT_MS"
+  --env "PROBE_IGNORE_SIGNAL=$IGNORE_SIGNAL"
+  --env "PROBE_SHUTDOWN_SETTLE_MS=$SHUTDOWN_SETTLE_MS"
   --env "PROBE_PROVIDER=$PROVIDER"
   --env "PROBE_MODEL=$MODEL"
 )
@@ -169,6 +186,12 @@ say "output dir : $OUT_DIR"
 say "workspace  : $WORKSPACE"
 say "provider   : ${PROVIDER:-<pi default>}"
 say "model      : ${MODEL:-<pi default>}"
+if [[ "$IGNORE_SIGNAL" == "1" ]]; then
+  say "abort mode : probe_sleep ignores the signal (hard variant)"
+else
+  say "abort mode : probe_sleep returns from its own signal listener (control)"
+fi
+say "abort bound: ${ABORT_WAIT_MS} ms (adapter ABORT_IDLE_TIMEOUT_MS = 3000)"
 
 CREATE_JSON="$(herdr tab create --workspace "$WORKSPACE" --cwd "$OUT_DIR" \
   --label "pigroups-probe" "${ENV_ARGS[@]}" --no-focus)"
@@ -230,12 +253,12 @@ else
 fi
 
 DELTA="$(num_field turn_start since_delivery_ms 2)"
-if [[ -n "$DELTA" ]]; then
-  if [[ "$DELTA" -le 1000 ]]; then
-    pass "P1.6 turn #2 started ${DELTA} ms after sendMessage returned (bounded by 1000 ms)"
-  else
-    warn "turn #2 started ${DELTA} ms after sendMessage returned (> 1000 ms)"
-  fi
+if [[ -z "$DELTA" ]]; then
+  fail "P1.6 turn #2 did not log since_delivery_ms; the delivery-to-start latency is unknown"
+elif [[ "$DELTA" -le 1000 ]]; then
+  pass "P1.6 turn #2 started ${DELTA} ms after sendMessage returned (bounded by 1000 ms)"
+else
+  warn "turn #2 started ${DELTA} ms after sendMessage returned (> 1000 ms)"
 fi
 
 # ---------------------------------------------------------------- P2
@@ -264,7 +287,7 @@ if has_line tool_start '"toolName":"probe_sleep"'; then
   : > "$ABORT_FILE"
 fi
 
-if wait_line abort_seen "" 15; then
+if wait_line abort_seen "" "$TRIGGER_TIMEOUT"; then
   pass "P2.3 the tool saw the external abort trigger"
 else
   fail "P2.3 the tool did not see $ABORT_FILE"
@@ -272,56 +295,126 @@ fi
 
 if wait_line abort_called "" 5; then
   ABORT_SYNC="$(num_field abort_called abort_sync_ms)"
-  pass "P2.4 ctx.abort() returned synchronously (${ABORT_SYNC:-?} ms)"
+  if [[ -n "$ABORT_SYNC" && "$ABORT_SYNC" -le 1000 ]]; then
+    pass "P2.4 ctx.abort() returned in ${ABORT_SYNC} ms without waiting for the turn (bound 1000 ms)"
+  else
+    fail "P2.4 abort_called logged but abort_sync_ms is '${ABORT_SYNC:-missing}' (> 1000 ms or absent)"
+  fi
 else
   fail "P2.4 abort_called was never logged"
 fi
 
+TOOL_ENTER_LINE="$(line_no tool_enter '"tool":"probe_sleep"')"
+ABORT_SEEN_LINE="$(line_no abort_seen "")"
+ABORT_CALLED_LINE="$(line_no abort_called "")"
+if [[ -n "$TOOL_ENTER_LINE" && -n "$ABORT_SEEN_LINE" && -n "$ABORT_CALLED_LINE" \
+      && "$TOOL_ENTER_LINE" -lt "$ABORT_SEEN_LINE" && "$ABORT_SEEN_LINE" -lt "$ABORT_CALLED_LINE" ]]; then
+  pass "P2.3b tool_enter < abort_seen < abort_called (lines $TOOL_ENTER_LINE < $ABORT_SEEN_LINE < $ABORT_CALLED_LINE)"
+else
+  fail "P2.3b the abort did not arrive after the tool started (tool_enter=$TOOL_ENTER_LINE abort_seen=$ABORT_SEEN_LINE abort_called=$ABORT_CALLED_LINE)"
+fi
+
 if wait_line idle "" "$ABORT_TIMEOUT"; then
   IDLE_MS="$(num_field idle wait_ms)"
+  # The poller can miss the idle window between settled_3 and the probe's own p3
+  # delivery (both happen in one tick). The settle handler reads isIdle() directly,
+  # so when it is in the log it is the earlier and more precise observation.
+  if has_line settled_3 '"aborted":true'; then
+    SETTLED_MS_AT="$(num_field settled_3 ms)"
+    ABORT_MS_AT="$(num_field abort_called ms)"
+    if [[ -n "$SETTLED_MS_AT" && -n "$ABORT_MS_AT" ]]; then
+      SETTLE_DELAY=$(( SETTLED_MS_AT - ABORT_MS_AT ))
+      if [[ "$SETTLE_DELAY" -lt "$IDLE_MS" ]]; then IDLE_MS="$SETTLE_DELAY"; fi
+    fi
+  fi
   if [[ -n "$IDLE_MS" && "$IDLE_MS" -le "$ABORT_WAIT_MS" ]]; then
-    pass "P2.5 ctx.isIdle() turned true ${IDLE_MS} ms after the abort call (bound ${ABORT_WAIT_MS} ms)"
+    pass "P2.5 ctx.isIdle() turned true ${IDLE_MS} ms after the abort call (bound ${ABORT_WAIT_MS} ms; tool ignores signal: $IGNORE_SIGNAL)"
   else
     fail "P2.5 idle after ${IDLE_MS:-?} ms, beyond the ${ABORT_WAIT_MS} ms bound (B2)"
   fi
 else
   if has_line idle_timeout; then
-    fail "P2.5 idle_timeout: the turn never settled after ctx.abort() (B2 false, pg.abort would be a lie)"
+    fail "P2.5 idle_timeout: the turn never settled within ${ABORT_WAIT_MS} ms after ctx.abort() (B2 false for this tool, pg.abort would be a lie)"
   else
     fail "P2.5 neither idle nor idle_timeout was logged"
   fi
 fi
 
-TOOL_END_TEXT="$(awk 'index($0, "\"step\":\"tool_end\"") && index($0, "\"toolName\":\"probe_sleep\"") { print; exit }' "$PROBE_LOG" 2>/dev/null || true)"
-if [[ -n "$TOOL_END_TEXT" ]]; then
+# P2.6 is pi's bookkeeping, not the cut speed: a cooperating tool ends at the abort,
+# a tool that ignores the signal ends on its own timer (60 s at most in this probe).
+if wait_line tool_end '"toolName":"probe_sleep"' "$RESULT_TIMEOUT"; then
+  TOOL_END_TEXT="$(awk 'index($0, "\"step\":\"tool_end\"") && index($0, "\"toolName\":\"probe_sleep\"") { print; exit }' "$PROBE_LOG" 2>/dev/null || true)"
+  # The check is that the end event exists at all; isError is reported as observed,
+  # not as a claim about pi replacing the tool's result.
   if [[ "$TOOL_END_TEXT" == *'"isError":true'* ]]; then
-    pass "P2.6 tool_execution_end for probe_sleep was emitted (isError=true: pi replaced the result after the abort)"
+    pass "P2.6 tool_execution_end for probe_sleep was emitted (observed isError=true)"
   else
-    pass "P2.6 tool_execution_end for probe_sleep was emitted (isError=false)"
+    pass "P2.6 tool_execution_end for probe_sleep was emitted (observed isError=false)"
   fi
 else
-  fail "P2.6 probe_sleep never emitted tool_execution_end"
+  fail "P2.6 probe_sleep never emitted tool_execution_end within ${RESULT_TIMEOUT} s of the abort"
 fi
 
-if has_line settled_3 '"aborted":true'; then
-  pass "P2.7 agent_settled reports aborted=true for the aborted run"
+# P2.7 is about *when* the aborted settle arrives: the adapter gives up at
+# ABORT_IDLE_TIMEOUT_MS and then says nothing, so a settle much later does not make
+# pg.abort honest.
+ABORT_AT_MS="$(num_field abort_called ms)"
+if wait_line settled_3 '"aborted":true' "$RESULT_TIMEOUT"; then
+  SETTLED_AT_MS="$(num_field settled_3 ms)"
+  if [[ -n "$ABORT_AT_MS" && -n "$SETTLED_AT_MS" ]]; then
+    SETTLE_DELAY=$(( SETTLED_AT_MS - ABORT_AT_MS ))
+    if [[ "$SETTLE_DELAY" -le "$ABORT_WAIT_MS" ]]; then
+      pass "P2.7 agent_settled reports aborted=true ${SETTLE_DELAY} ms after ctx.abort() (bound ${ABORT_WAIT_MS} ms)"
+    else
+      fail "P2.7 the aborted settle came ${SETTLE_DELAY} ms after ctx.abort(), beyond the ${ABORT_WAIT_MS} ms the adapter waits; pi did not end the run, the tool did"
+    fi
+  else
+    fail "P2.7 aborted settle found but the abort/settle timestamps are missing (abort=${ABORT_AT_MS:-?} settled=${SETTLED_AT_MS:-?})"
+  fi
 else
-  fail "P2.7 no agent_settled with aborted=true after the abort"
+  fail "P2.7 no agent_settled with aborted=true within ${RESULT_TIMEOUT} s of the abort"
 fi
 
 if has_line tool_start '"toolName":"probe_sleep"'; then
   if has_line before_settle '"outcome":"aborted"'; then
-    pass "P2.8 agent_before_settle outcome=aborted (the adapter's own turn_end source)"
+    pass "P2.8 agent_before_settle outcome=aborted was emitted"
   else
-    warn "no agent_before_settle for the aborted run -- pi skips that boundary once a run is aborted," \
-         "so the adapter's turn_end source emits nothing for pg.abort (see the last turn_end line below)"
+    warn "no agent_before_settle for the aborted run -- pi skips that boundary once a run is aborted;" \
+         "the adapter now closes the turn from agent_settled.aborted (abecc76), not from this event"
   fi
-  LAST_TURN_END="$(awk 'index($0, "\"step\":\"turn_end\"") { line = $0 } END { print line }' "$PROBE_LOG" 2>/dev/null || true)"
-  if [[ -n "$LAST_TURN_END" ]]; then
-    say "note  last turn_end: $LAST_TURN_END"
+  LAST_PI_TURN_END="$(awk 'index($0, "\"step\":\"pi_turn_end\"") { line = $0 } END { print line }' "$PROBE_LOG" 2>/dev/null || true)"
+  if [[ -n "$LAST_PI_TURN_END" ]]; then
+    say "note  last pi_turn_end: $LAST_PI_TURN_END"
   fi
 else
   say "note  P2.8 not evaluated: probe_sleep never ran, so there was no aborted run to inspect"
+fi
+
+# P2.9 / P2.10: the adapter flushes after an aborted settle, so sendMessage must start
+# a run from that path too. P1 only proves the normal-settle path. The delivery happens
+# inside the settle handler, so a settled_3 with aborted=true implies delivered(p3).
+if has_line settled_3 '"aborted":true' && wait_line delivered '"stage":"p3"' 5; then
+  pass "P2.9 sendMessage from an aborted agent_settled handler was accepted (delivered stage=p3)"
+else
+  fail "P2.9 no delivered(p3) after an aborted settle; the adapter's flush after pg.abort would deliver into nothing"
+fi
+
+if wait_line turn_start '"run":4' "$RUN4_TIMEOUT"; then
+  pass "P2.10 a new run started after the aborted-settle delivery"
+  DELIVERED_P3_LINE="$(line_no delivered '"stage":"p3"')"
+  TURN4_LINE="$(line_no turn_start '"run":4')"
+  if [[ -n "$DELIVERED_P3_LINE" && -n "$TURN4_LINE" && "$TURN4_LINE" -gt "$DELIVERED_P3_LINE" ]]; then
+    pass "P2.10b turn_start #4 is after delivered(p3) (line $TURN4_LINE > $DELIVERED_P3_LINE)"
+  else
+    fail "P2.10b turn_start #4 is not after delivered(p3) (delivered=$DELIVERED_P3_LINE turn4=$TURN4_LINE)"
+  fi
+  if wait_line settled_4 "" "$SETTLE4_TIMEOUT"; then
+    pass "P2.11 the post-abort run settled; P3 starts from idle"
+  else
+    fail "P2.11 the post-abort run did not settle within ${SETTLE4_TIMEOUT} s; P3 will run during a turn"
+  fi
+else
+  fail "P2.10 no run 4 within ${RUN4_TIMEOUT} s after the aborted-settle delivery"
 fi
 
 # ---------------------------------------------------------------- P3
@@ -342,7 +435,11 @@ else
 
   if wait_line shutdown_done "" "$SHUTDOWN_TIMEOUT"; then
     WAITED="$(num_field shutdown_done waited_ms)"
-    pass "P3.2 the async part of the handler completed before exit (${WAITED:-?} ms)"
+    if [[ -n "$WAITED" && "$WAITED" -ge $(( SHUTDOWN_SETTLE_MS - 500 )) ]]; then
+      pass "P3.2 session_shutdown ran its ${SHUTDOWN_SETTLE_MS} ms async body to completion (waited_ms=${WAITED})"
+    else
+      fail "P3.2 shutdown_done logged waited_ms=${WAITED:-?}, less than the ${SHUTDOWN_SETTLE_MS} ms body; the timer did not run"
+    fi
   else
     fail "P3.2 shutdown_done never appeared: the handler's promise was not awaited"
   fi
@@ -371,6 +468,20 @@ else
     fail "P3.3 no exit_code file: the process has not exited"
   fi
 
+  if has_line process_exit ""; then
+    EXIT_AFTER_DONE="$(num_field process_exit after_shutdown_done_ms)"
+    EXIT_AT_MS="$(num_field process_exit at)"
+    DONE_AT_MS="$(num_field shutdown_done at)"
+    if [[ -n "$EXIT_AFTER_DONE" && "$EXIT_AFTER_DONE" -ge 0 \
+          && -n "$EXIT_AT_MS" && -n "$DONE_AT_MS" && "$EXIT_AT_MS" -ge "$DONE_AT_MS" ]]; then
+      pass "P3.2b the process exited ${EXIT_AFTER_DONE} ms after the handler completed (exit_at >= shutdown_done_at)"
+    else
+      fail "P3.2b process_exit is not after shutdown_done (after=${EXIT_AFTER_DONE:-missing} exit_at=${EXIT_AT_MS:-?} done_at=${DONE_AT_MS:-?})"
+    fi
+  else
+    fail "P3.2b no process_exit line: the exit path was not observed by the probe"
+  fi
+
   if kill -0 "$PID" 2>/dev/null; then
     fail "P3.5 the pi process is still alive"
   else
@@ -379,10 +490,12 @@ else
 fi
 
 SHUTDOWNS="$(awk 'index($0, "\"step\":\"shutdown_start\"") { c++ } END { print c + 0 }' "$PROBE_LOG" 2>/dev/null || echo 0)"
-if [[ "$SHUTDOWNS" -le 1 ]]; then
-  pass "P3.6 session_shutdown was dispatched once (the handler ran $SHUTDOWNS time(s))"
+if [[ "$SHUTDOWNS" -eq 1 ]]; then
+  pass "P3.6 session_shutdown was dispatched exactly once"
+elif [[ "$SHUTDOWNS" -eq 0 ]]; then
+  fail "P3.6 session_shutdown was never dispatched"
 else
-  warn "session_shutdown was dispatched $SHUTDOWNS times in one session"
+  fail "P3.6 session_shutdown was dispatched $SHUTDOWNS times in one session"
 fi
 
 # ---------------------------------------------------------------- report

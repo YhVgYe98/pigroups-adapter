@@ -8,7 +8,7 @@
 | 编号 | 假设 | 若不成立的后果 |
 |---|---|---|
 | **P1** | 在 `agent_settled` 处理器里调用 `pi.sendMessage(..., { triggerTurn: true })` 真的会启动一个新 run；调用时 `ctx.isIdle()` 已经是 `true` | 投递被判为成功、实际被吞掉：watermark 前进、消息永久丢失，成员再也唤不醒 |
-| **P2** | `ctx.abort()` 能切断一个正在跑工具的 turn；`ctx.isIdle()` 在有界时间内变 `true` | `pg.abort` 撒谎：控制项被当成已处理，成员楔死在工具里 |
+| **P2** | `ctx.abort()` 能切断一个正在跑工具的 turn；`ctx.isIdle()` 在有界时间内变 `true`。**分两种工具**：配合的（从自己的 abort 监听器返回）和忽略 signal 的（`PROBE_IGNORE_SIGNAL=1`） | `pg.abort` 撒谎：控制项被当成已处理，成员楔死在工具里。忽略 signal 的变体就是在量这个边界 |
 | **P3** | `session_shutdown` 处理器会运行，其 `await` 在进程退出前完成，退出码为 0 | 退出前的 `pg.report{blocked,'exiting'}` 发不出去，平台只看到进程消失 |
 
 ## 前置条件
@@ -32,6 +32,7 @@
 3. 在 pane 里执行 `probe/pane.sh`，即
    `pi -ne -e probe/probe.ts --no-session --no-builtin-tools --no-mcp -ns -np -nc ...`；
 4. 等 P1；看到 `probe_sleep` 真的开始跑之后 `sleep ${PROBE_ABORT_DELAY}` 再 `touch $PROBE_DIR/abort` 驱动 P2；
+   `PROBE_IGNORE_SIGNAL=1` 时工具不理会 abort signal，用来量"pi 会不会替你切断"；
 5. P2 结束后 `kill -TERM` 给 pi，验证 P3 与退出码；
 6. 打印 pane 尾部输出 + 完整 JSONL 日志 + PASS/FAIL 汇总；
 7. `trap` 兜底：杀掉残留 pi、`herdr tab close` 关掉自己的 tab（正常路径也会走这里）。
@@ -83,18 +84,20 @@ kill -TERM "$(cat "$PROBE_DIR/pi.pid")"
 | `start` | `session_start` | `mode`（tui/print/json/rpc）、`isIdle`、`hasUI`、`argv` |
 | `before_agent_start` | pi 事件 | `messageType`（`user` / `custom`）、`customType` |
 | `turn_start` | pi 的 `agent_start` 事件（adapter 把它映射成 turn_start） | `run`、`delivery_stage`、`since_delivery_ms` |
-| `before_settle` | `agent_before_settle`（adapter 的 turn_end 来源） | `outcome` |
+| `before_settle` | `agent_before_settle`（正常 turn_end 的来源；被 abort 的 run 不经过它） | `outcome` |
 | `settled_1` / `settled_N` | `agent_settled` | `aborted`、`isIdle`（**在处理器内同步读取**） |
-| `delivered` | 从 settle 处理器里 `sendMessage` 之后 | `stage`（p1/p2）、`sendMessage_sync_ms` |
+| `delivered` | 从 settle 处理器里 `sendMessage` 之后 | `stage`（p1/p2/p3）、`sendMessage_sync_ms`、`idle_in_handler` |
 | `tool_start` / `tool_end` | `tool_execution_start` / `_end` | `toolName`、`isError`、`durationMs` |
-| `tool_enter` / `tool_return` | `probe_sleep` 内部 | `why`（aborted/timeout）、`ran_ms` |
+| `tool_enter` / `tool_return` | `probe_sleep` 内部 | `why`（aborted/timeout）、`ran_ms`、`ignoreSignal` |
+| `tool_signal_ignored` | `PROBE_IGNORE_SIGNAL=1` 且工具拿到了 signal | `toolCallId` |
 | `abort_seen` | 工具轮询到 `$PROBE_DIR/abort` | `waited_ms` |
 | `abort_called` | 调完 `ctx.abort()` 之后 | `abort_sync_ms`、`abortError` |
 | `idle` | `ctx.isIdle()` 变 true | `wait_ms`（相对 abort 调用） |
 | `idle_timeout` | 超过 `PROBE_ABORT_WAIT_MS` 仍未 idle | `wait_ms`、`limit_ms` |
-| `turn_end` | pi 的 `turn_end` 事件 | `outcome`、`stopReason`、`errorMessage` |
+| `pi_turn_end` | pi 的 `turn_end` 事件（与 adapter 的 `PiEvent.turn_end` 不是一回事） | `outcome`、`stopReason`、`errorMessage` |
 | `assistant_end` | assistant 消息结束 | `stopReason`、`text`（截断） |
-| `shutdown_start` / `shutdown_done` | `session_shutdown` 处理器首/尾 | `reason`、`waited_ms` |
+| `shutdown_start` / `shutdown_done` | `session_shutdown` 处理器首/尾 | `reason`、`waited_ms`、`at` |
+| `process_exit` | `process.on('exit')`，**只在进程真的退出时写** | `code`、`at`、`shutdown_done_at`、`after_shutdown_done_ms` |
 
 ## 判据
 
@@ -104,37 +107,61 @@ kill -TERM "$(cat "$PROBE_DIR/pi.pid")"
 |---|---|---|
 | P1.0–P1.2 | 种子 run settle；处理器内 `isIdle=true`；`delivered` 已记录 | settle 里读到的仍是 busy → adapter 的 `isBusy()` 闸门把投递推迟 5 s 或永久挂起 |
 | P1.3–P1.5 | 出现第二个 `agent_start`，且它**在** `delivered` 之后，`before_agent_start.messageType=custom` | 新 run 没起来，或这次 run 是被别的输入起的（A3 假通过陷阱） |
-| P1.6 | `since_delivery_ms ≤ 1000` | 起 turn 明显延迟（只警告，不判失败） |
+| P1.6 | `since_delivery_ms` 存在且 ≤ 1000 | 缺失（不再静默跳过）或起 turn 明显延迟 |
 | P2.2 | `probe_sleep` 真的开始执行 | 模型没调工具，P2 无法判定 |
-| P2.3–P2.4 | 工具看到外部 abort 文件；`ctx.abort()` 同步返回 | 中止请求进不去 |
-| P2.5 | `ctx.isIdle()` 在 `PROBE_ABORT_WAIT_MS`（默认 20 s）内变 true | 工具退出后会话仍不 idle → `pg.abort` 无法兑现 |
-| P2.6–P2.7 | `tool_execution_end` 存在；`agent_settled.aborted=true` | abort 没有真正结束这条 run |
-| P2.8 | `agent_before_settle` 报 `outcome=aborted` | **见下面“实测发现”**：pi 在 abort 时不发这个边界，只给警告 |
-| P3.1–P3.2 | `session_shutdown` 被派发；异步处理器跑完（`shutdown_done`） | 处理器没跑，或它的 promise 没被 await |
+| P2.3–P2.4 | 工具看到外部 abort 文件；`abort_sync_ms ≤ 1000` | 中止请求进不去，或 `ctx.abort()` 自己阻塞 |
+| P2.3b | `tool_enter` 行号 < `abort_seen` < `abort_called` | abort 发生在工具开始之前，日志不能证明切的是这个 turn |
+| P2.5 | `ctx.isIdle()` 在 `PROBE_ABORT_WAIT_MS`（默认 3000，等于 `ABORT_IDLE_TIMEOUT_MS`）内变 true | 工具退出后会话仍不 idle → `pg.abort` 无法兑现 |
+| P2.6 | `tool_execution_end` 在 `PROBE_RESULT_TIMEOUT`（默认 90 s，够工具自己 60 s 超时）内出现 | pi 没有结束工具的执行记录 |
+| P2.7 | `agent_settled.aborted=true` 在 `PROBE_ABORT_WAIT_MS` 内出现 | abort 没有真正结束这条 run；晚到的 settle 不能让 `pg.abort` 变诚实 |
+| P2.8 | `agent_before_settle` 报 `outcome=aborted` | **见下面“实测发现”**：pi 在 abort 时不发这个边界，只给 WARN；adapter 已改从 `agent_settled.aborted` 收尾 |
+| P2.9–P2.11 | abort 后的 settle 里 `sendMessage` 被接受，随后出现 `turn_start` #4、#4 的 `delivered` 在它之前、且该轮会 settle | adapter 在 `pg.abort` 之后 flush 的路径没有把成员唤醒 |
+| P3.1–P3.2 | `session_shutdown` 被派发；`SHUTDOWN_SETTLE_MS`（默认 3000）的异步体真的跑完（`waited_ms` 不小于 2500） | 处理器没跑，或它的 promise 没被 await（250 ms 的 timer 无法区分这两种） |
+| P3.2b | `process_exit` 存在，且 `after_shutdown_done_ms ≥ 0`、`exit_at ≥ shutdown_done_at` | 进程在处理器完成前就退出了 |
 | P3.3–P3.5 | 退出码 0；SIGTERM→退出 ≤ 6 s；进程消失 | 退出被拖死或进程残留 |
-| P3.6 | `session_shutdown` 只派发一次 | 双派发（teardown + dispose）会把 `'exiting'` 报告发两遍 |
+| P3.6 | `session_shutdown` **恰好**派发一次 | 0 次＝没派发，2 次以上＝双派发（teardown + dispose）会把 `'exiting'` 报告发两遍 |
 
-## 本机实测（pi 1.4.0 / herdr 0.9.5 / node v26.12.1 / deepseek-flash / mode=tui）
+## 本机实测（2026-11-01 19:20，pi 1.4.0 / herdr 0.9.5 / node v26.12.1 / deepseek-flash / mode=tui）
 
-用 `probe/run.sh` 连跑多次（含一次故意用错模型验证失败路径），结果一致：
+三次运行都留在 `probe/logs/`，每次一个目录：`probe.jsonl`（扩展写的 JSONL，扩展运行时叫 `probe.log`）、
+`runner.txt`（`run.sh` 的全部 stdout/stderr）、`exit_code`（pi 的退出码）、
+`run_exit_code`（`run.sh` 自己的退出码）。
 
-- **P1 成立**：`agent_settled` 处理器里 `ctx.isIdle()` 已经是 `true`；`sendMessage` 同步返回
-  `0 ms`；`before_agent_start` 以 `messageType=custom, customType=probe` 出现，`agent_start`
-  在 0–1 ms 后到达。也就是说投递确实起了新 run，且 run 在 settle 派发结束后才启动。
-- **P2 成立**：`probe_sleep` 开始 1.6 s 后写入 abort 文件，工具在 100 ms 轮询内看到，
-  `ctx.abort()` 同步返回（0 ms），工具的 abort signal 在同一次事件循环里触发并让工具返回；
-  `ctx.isIdle()` 在 **25 ms** 后为 `true`，`agent_settled.aborted=true`。
-- **P3 成立**：`SIGTERM` → `session_shutdown(reason=quit)` → 处理器 `await` 249 ms →
-  进程 `exit 0`，总耗时 357 ms；`session_shutdown` 只派发一次。
-- **实测发现（与 adapter 现有假设不符）**：被 abort 的 run **不会**产生
+| 运行 | 目录 | `run_exit_code` | 结果 |
+|---|---|---|---|
+| 对照组（工具从自己的 signal 监听器返回） | `run-20261101T1920-control` | 0 | PASS，27 项全过 |
+| 硬变体（`PROBE_IGNORE_SIGNAL=1`，工具忽略 signal） | `run-20261101T1920-ignore-signal` | 1 | FAIL：P2.5、P2.7 |
+| 负对照（故意用不存在的模型） | `run-20261101T1920-negative-control` | 1 | FAIL，证明 runner 会报失败并留下产物 |
+
+- **P1 成立（两组都通过）**：`agent_settled` 处理器里 `ctx.isIdle()` 已经是 `true`；
+  `sendMessage` 同步返回 `0 ms`；`before_agent_start` 以
+  `messageType=custom, customType=probe` 出现，`turn_start` 在 0–1 ms 后到达。
+  也就是说投递确实起了新 run，且 run 在 settle 派发结束后才启动。
+- **P2 只对“配合的工具”成立，第 2 级因此是部分通过。** 对照组：abort 后
+  `settled_3.aborted=true`，处理器里 `isIdle` 已是 `true`（相对 abort 2 ms）；
+  硬变体：`tool_enter ignoreSignal:true`，abort 后 3009 ms 记录 `idle_timeout`，
+  工具自己睡满 60 s 才 `tool_return why=timeout`，`settled_3 aborted:true` 出现在
+  abort 之后 **58 296 ms**。也就是说 **pi 把 `AbortSignal` 交给工具，但不会替你杀掉一个
+  不理会它的工具**——adapter 的 `abort()` 在 3 s 处放弃时，那一轮还在工具里。
+  这正是 `src/surface.ts` 的放弃分支现在要打 warn 的原因。
+- **P3 成立，而且是判别性的**：`session_shutdown` 的异步体是 3000 ms；
+  `shutdown_done.waited_ms=3000`；`process_exit` 在 `shutdown_done` 之后 104 ms 才写，
+  `after_shutdown_done_ms ≥ 0`，`exit 0`，SIGTERM→退出 3130 ms，只派发一次。
+  250 ms 的旧探针做不到这个区分：一个没被 await 的 `setTimeout` 也能让进程活到 357 ms。
+- **abort 后的 settle 仍能起一轮**：`settled_3(aborted)` 里 `sendMessage` 被接受，
+  日志出现 `delivered stage=p3` → `turn_start run=4` → `settled_4`。这补上了 P1
+  只覆盖“正常 settle”的空缺；硬变体也通过了 P2.9–P2.11（工具超时、run 真正 abort 之后）。
+- **实测发现（与 adapter 旧假设不符）**：被 abort 的 run **不会**产生
   `agent_before_settle`（pi 在 `_agentRunAbortRequested` 为真时跳过该边界），
   取而代之的是一条 `stopReason: "error"` 的 assistant 消息
-  （`errorMessage: "This operation was aborted"`）和 `turn_end` `outcome=error`。
-  adapter 把 `agent_before_settle` 当作 turn_end 的唯一来源，因此 **`pg.abort` 之后
-  收不到任何 turn_end**：`turnStartedAt` 不会清零、`errorNote` 也不会被设置。
-  这条由 `run.sh` 的 `P2.8` 以 WARN 形式打印，不改探针的 PASS/FAIL。
+  （`errorMessage: "This operation was aborted"`）和 `pi_turn_end` `outcome=error`。
+  adapter 已改从 `agent_settled.aborted` 补发 `turn_end`（`abecc76`，`fff2418` 加了
+  幂等门），所以 `P2.8` 的缺失只打 WARN：它描述的是 pi 的边界，不再是 adapter 的洞。
 
-## 已完成的一次运行（2026-11-01 18:51）
+## 已完成的一次运行（2026-11-01 18:51，历史记录）
+
+> 这一节保留当时的日志原文。它的 P3 只有 251 ms，**不能证明处理器被 await**；
+> 判别性的版本见上一节的 19:20 运行。它的 P2 也只测了配合的工具。
 
 不是“应该能过”，是一次真实运行的记录。环境：pi 1.4.0、herdr 0.9.5、node v26.12.1、
 `deepseek / deepseek-flash`、`mode=tui`。
@@ -189,22 +216,28 @@ signal 监听器，promise 在 `abort()` 返回前就 resolve 了。这条 run �
 |---|---|---|
 | `PROBE_LOG` | 必填 | JSONL 输出路径；未设置时扩展只打一行 stderr，然后什么都不注册 |
 | `PROBE_DIR` | 必填（P2） | 外部 abort 触发文件所在目录；未设置则 P2 跳过（日志 `p2_skipped`） |
-| `PROBE_ABORT_WAIT_MS` | `20000` | abort 之后等 `isIdle()` 的上限 |
+| `PROBE_ABORT_WAIT_MS` | `3000` | abort 之后等 `isIdle()` 的上限；等于 adapter 的 `ABORT_IDLE_TIMEOUT_MS` |
+| `PROBE_IGNORE_SIGNAL` | `0` | `1`＝`probe_sleep` 忽略 abort signal（硬变体）；`0`＝从 signal 监听器返回（对照） |
+| `PROBE_SHUTDOWN_SETTLE_MS` | `3000` | `session_shutdown` 里故意 `await` 的毫秒数；太短就无法区分 await |
 | `PROBE_ECHO` | 未设置 | `1` 时把每行日志镜像到 stderr |
-| `PROBE_OUT_DIR` | `mktemp -d` | `run.sh` 的产物目录（`probe.log`、`abort`、`pi.pid`、`exit_code`） |
 | `PROBE_PROVIDER` / `PROBE_MODEL` | 继承 `PI_PROVIDER` / `PI_MODEL` | 传给 pane 里 pi 的 `--provider` / `--model` |
 | `PROBE_SEED_PROMPT` | `Reply with exactly: ready` | 触发第一个 run 的种子提示 |
 | `PROBE_ABORT_DELAY` | `1.5` | 工具开始后多久写入 abort 文件（秒） |
 | `PROBE_SEED_TIMEOUT` / `PROBE_P1_TIMEOUT` / `PROBE_P2_TIMEOUT` | `120` | 各阶段等待模型的秒数 |
-| `PROBE_ABORT_TIMEOUT` | `45` | 等 `idle` 的秒数（大于 `PROBE_ABORT_WAIT_MS`） |
+| `PROBE_ABORT_TIMEOUT` | `ABORT_WAIT_MS/1000 + 5` | 等 `idle` 的秒数 |
+| `PROBE_TRIGGER_TIMEOUT` | `15` | 等工具看到 abort 文件的秒数 |
+| `PROBE_RESULT_TIMEOUT` | `90` | 等 `tool_end` / `aborted` settle 的秒数（要盖过工具自己的 60 s） |
+| `PROBE_RUN4_TIMEOUT` / `PROBE_SETTLE4_TIMEOUT` | `30` / `60` | 等 abort 后新 run 与其 settle 的秒数 |
 | `PROBE_SHUTDOWN_TIMEOUT` | `20` | 等 `shutdown_done` 与退出的秒数 |
+| `PROBE_OUT_DIR` | `mktemp -d` | 产物目录；`probe/logs/` 下的归档就是把它指到那里 |
 
 ## 已知限制
 
 - 只在 **interactive（tui）模式**下验证。`print` / `json` 模式下 `ctx.shutdown()` 的行为不同，
   本探针不覆盖；探针自己也不会调用 `ctx.shutdown()`，它用外部 `SIGTERM` 触发 `session_shutdown`。
-- 只验证 `ctx.abort()` 对一个**忽略 abort signal 的自定义工具**的效果；`bash` 工具是否杀子进程
-  （`sleep 60` 这类）不在本探针范围内。
+- P2 默认测的是**配合**的自定义工具；`PROBE_IGNORE_SIGNAL=1` 才是忽略 signal 的硬变体。
+  `bash` 内置工具不在默认探针里（`pane.sh` 带 `--no-builtin-tools`），所以
+  `bash sleep 60` 的杀子进程行为**未验**；已验的是自定义工具：pi 不会强杀它。
 - 采样有粒度：abort 文件每 100 ms 轮询一次，`isIdle()` 每 25 ms 采样一次，所以 `wait_ms`
   有大约 25 ms 的量化误差。
 - 探针不写会话文件（`--no-session`），不会污染 `~/.pi` 下的历史记录。

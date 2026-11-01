@@ -1,0 +1,104 @@
+[probe] output dir : /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-negative-control
+[probe] workspace  : wE
+[probe] provider   : deepseek
+[probe] model      : no-such-model-xyz
+[probe] abort mode : probe_sleep returns from its own signal listener (control)
+[probe] abort bound: 3000 ms (adapter ABORT_IDLE_TIMEOUT_MS = 3000)
+[probe] tab        : wE:tQ (wE:pS, not focused)
+[probe] pi started in the pane; waiting for the seed run
+[probe] PASS  P1.0 the seed run reached agent_settled
+[probe] PASS  P1.1 ctx.isIdle() is already true inside the agent_settled handler (A1)
+[probe] PASS  P1.2 sendMessage(..., {triggerTurn:true}) returned from the settle handler
+[probe] PASS  P1.3 a second agent_start appeared
+[probe] PASS  P1.4 turn_start #2 is after delivered (line 10 > 8)
+[probe] PASS  P1.5 the new run was started by the custom message (before_agent_start messageType=custom)
+[probe] PASS  P1.6 turn #2 started 0 ms after sendMessage returned (bounded by 1000 ms)
+[probe] PASS  P2.0 the P1 turn settled
+[probe] PASS  P2.1 the probe_sleep request was delivered
+[probe] FAIL  P2.2 probe_sleep never started (did the model call it?)
+[probe] FAIL  P2.3 the tool did not see /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-negative-control/abort
+[probe] FAIL  P2.4 abort_called was never logged
+[probe] FAIL  P2.3b the abort did not arrive after the tool started (tool_enter= abort_seen= abort_called=)
+[probe] FAIL  P2.5 neither idle nor idle_timeout was logged
+[probe] FAIL  P2.6 probe_sleep never emitted tool_execution_end within 3 s of the abort
+[probe] FAIL  P2.7 no agent_settled with aborted=true within 3 s of the abort
+[probe] note  P2.8 not evaluated: probe_sleep never ran, so there was no aborted run to inspect
+[probe] FAIL  P2.9 no delivered(p3) after an aborted settle; the adapter's flush after pg.abort would deliver into nothing
+[probe] FAIL  P2.10 no run 4 within 3 s after the aborted-settle delivery
+[probe] sending SIGTERM to pi (pid 28740)
+[probe] PASS  P3.1 session_shutdown was dispatched (reason=quit)
+[probe] PASS  P3.2 session_shutdown ran its 1000 ms async body to completion (waited_ms=1001)
+[probe] PASS  P3.3 the process exited with code 0 after 1115 ms
+[probe] PASS  P3.4 SIGTERM to exit took 1115 ms (bound 6000 ms)
+[probe] PASS  P3.2b the process exited 55 ms after the handler completed (exit_at >= shutdown_done_at)
+[probe] PASS  P3.5 the pi process is gone
+[probe] PASS  P3.6 session_shutdown was dispatched exactly once
+[probe] 
+[probe] --- pi output in the pane (tail) ---
+
+
+ [probe]
+
+ This is an automated probe. Reply with the single word pong and nothing else.
+
+
+ Error: 400: {"message":"The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed no-such-model-xyz. (request_id:
+ 77167735-406b-4b70-abad-857858407080)","type":"invalid_request_error","param":null,"code":"invalid_request_error"}
+
+
+ [probe]
+
+ Call the tool probe_sleep exactly once with seconds=60. Do not answer with text before the tool call.
+
+
+ Error: 400: {"message":"The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed no-such-model-xyz. (request_id:
+ e722904a-4fda-471d-b33a-ba3e6de2fa57)","type":"invalid_request_error","param":null,"code":"invalid_request_error"}
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Package Updates Available
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-web-access
+ - pi-subagents
+ - @juicesharp/rpiv-ask-user-question
+ - @juicesharp/rpiv-todo
+ - @quintinshaw/pi-dynamic-workflows
+ - pi-straw-boss
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Documents/pigroups-adapter/probe/logs/run-20261101T1920-negative-control (master)
+0.1%/1.0M (auto)                                                                                         (deepseek) no-such-model-xyz • max
+[probe] pi exited with code 0
+
+~/Documents/pigroups-adapter/probe/logs/run-20261101T1920-negative-control master !2 ?3 ......................... 26s node system 19:20:38
+>[probe] 
+[probe] --- probe log: /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-negative-control/probe.log ---
+{"ms":26,"pid":28740,"step":"start","reason":"startup","mode":"tui","hasUI":true,"isIdle":true,"hasPendingMessages":false,"pane":"wE:pS","node":"v26.12.1","ignoreSignal":false,"shutdownSettleMs":1000,"argv":["-ne","-e","/home/yang/Documents/pigroups-adapter/probe/probe.ts","--no-session","--no-builtin-tools","--no-mcp","--no-skills","--no-prompt-templates","--no-context-files","--provider","deepseek","--model","no-such-model-xyz","Reply with exactly: ready"]}
+{"ms":38,"pid":28740,"step":"before_agent_start","messageType":"user","customType":null,"content":"Reply with exactly: ready"}
+{"ms":39,"pid":28740,"step":"turn_start","run":1,"delivery_stage":null,"since_delivery_ms":null,"isIdle":false,"hasPendingMessages":false}
+{"ms":302,"pid":28740,"step":"assistant_end","stopReason":"error","text":""}
+{"ms":304,"pid":28740,"step":"pi_turn_end","turnIndex":0,"outcome":"error","role":"assistant","stopReason":"error","errorMessage":"400: {\"message\":\"The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed no-such-model-xyz. (request_id: 08c0c71b-612e-4ec1-88dc-c46df69351a4)\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request_error\"}"}
+{"ms":305,"pid":28740,"step":"before_settle","outcome":"error","canContinue":false}
+{"ms":305,"pid":28740,"step":"settled_1","settled":1,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":305,"pid":28740,"step":"delivered","stage":"p1","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":305,"pid":28740,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"This is an automated probe. Reply with the single word pong and nothing else."}
+{"ms":305,"pid":28740,"step":"turn_start","run":2,"delivery_stage":"p1","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":424,"pid":28740,"step":"assistant_end","stopReason":"error","text":""}
+{"ms":425,"pid":28740,"step":"pi_turn_end","turnIndex":0,"outcome":"error","role":"assistant","stopReason":"error","errorMessage":"400: {\"message\":\"The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed no-such-model-xyz. (request_id: 77167735-406b-4b70-abad-857858407080)\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request_error\"}"}
+{"ms":425,"pid":28740,"step":"before_settle","outcome":"error","canContinue":false}
+{"ms":425,"pid":28740,"step":"settled_2","settled":2,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":425,"pid":28740,"step":"delivered","stage":"p2","idle_in_handler":true,"sendMessage_sync_ms":0}
+{"ms":425,"pid":28740,"step":"before_agent_start","messageType":"custom","customType":"probe","content":"Call the tool probe_sleep exactly once with seconds=60. Do not answer with text before the tool call."}
+{"ms":425,"pid":28740,"step":"turn_start","run":3,"delivery_stage":"p2","since_delivery_ms":0,"isIdle":false,"hasPendingMessages":false}
+{"ms":530,"pid":28740,"step":"assistant_end","stopReason":"error","text":""}
+{"ms":530,"pid":28740,"step":"pi_turn_end","turnIndex":0,"outcome":"error","role":"assistant","stopReason":"error","errorMessage":"400: {\"message\":\"The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed no-such-model-xyz. (request_id: e722904a-4fda-471d-b33a-ba3e6de2fa57)\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request_error\"}"}
+{"ms":530,"pid":28740,"step":"before_settle","outcome":"error","canContinue":false}
+{"ms":530,"pid":28740,"step":"settled_3","settled":3,"aborted":false,"isIdle":true,"hasPendingMessages":false}
+{"ms":25287,"pid":28740,"step":"shutdown_start","shutdown":1,"reason":"quit","targetSessionFile":null,"mode":"tui","isIdle":true}
+{"ms":26288,"pid":28740,"step":"shutdown_done","shutdown":1,"at":1793532038093,"waited_ms":1001}
+{"ms":26343,"pid":28740,"step":"process_exit","code":0,"at":1793532038148,"shutdown_done_at":1793532038093,"after_shutdown_done_ms":55,"shutdown_settle_ms":1000}
+[probe] 
+[probe] RESULT: FAIL (see the FAIL lines above; the log is kept in /home/yang/Documents/pigroups-adapter/probe/logs/run-20261101T1920-negative-control)
