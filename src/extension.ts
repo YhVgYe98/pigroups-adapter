@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SPAWN_THINKING_LEVELS, shellQuote, spawnFlagArgs } from './command.ts';
+import { shellQuote } from './command.ts';
 import { AdapterLoop } from './loop.ts';
 import type { LoopConfig } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
@@ -30,7 +30,8 @@ export const EXTENSION_ENTRY = fileURLToPath(import.meta.url);
  * default loads this adapter on top of the operator's own environment: extensions,
  * skills, prompt templates, MCP servers and context files are inherited exactly as
  * if a person had started pi in that pane. `PIGROUPS_SPAWN_CMD` overrides the whole
- * base command; `pg_spawn`'s own parameters are appended to it, never spliced in.
+ * base command; `pg_spawn`'s caller-supplied `args` are appended to it in order,
+ * never spliced in and never interpreted here — that is pi's manual's job.
  */
 export function defaultSpawnCmd(extensionPath: string = EXTENSION_ENTRY): string {
   return ['pi', '-e', shellQuote(extensionPath)].join(' ');
@@ -91,14 +92,6 @@ function readConfig(): LoopConfig | null {
     nudgeMax: envInt('PIGROUPS_NUDGE_MAX', 3),
     spawnCmd: resolveSpawnCmd(),
   };
-}
-
-function stringArrayParam(value: unknown, name: string): string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-    throw new Error(`${name} must be an array of strings`);
-  }
-  return value as string[];
 }
 
 function envInt(name: string, fallback: number): number {
@@ -252,40 +245,25 @@ function buildTools(
     {
       name: 'pg_spawn',
       label: 'PiGroups spawn',
-      description: 'Create a child member, send it the brief as a direct message, and start it in a new herdr pane.',
+      description:
+        'Create a child member, send it the brief as a direct message, and start it in a new herdr pane. ' +
+        '`args` is a raw pi argv tail for this one child: appended to the configured spawn command in order, ' +
+        'not validated or rewritten by the adapter, so the caller decides how pi starts (including flags ' +
+        'that change its mode). Do not guess pi flags from this schema; when a flag is unknown, run `pi --help` ' +
+        'and read pi’s own manual.',
       parameters: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Optional member name.' },
           brief: { type: 'string', description: 'Task brief, sent as the first direct message.' },
           cwd: { type: 'string', description: 'Working directory for the child.' },
-          model: { type: 'string', description: 'Pi model pattern or ID (`--model`).' },
-          thinking: {
-            type: 'string',
-            enum: [...SPAWN_THINKING_LEVELS],
-            description: 'Pi thinking level (`--thinking`).',
-          },
-          tools: { type: 'string', description: 'Comma-separated tool allowlist (`--tools`).' },
-          exclude_tools: { type: 'string', description: 'Comma-separated tool denylist (`--exclude-tools`).' },
-          extensions: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Extra extension paths (`--extension`), each in addition to this adapter.',
-          },
-          skills: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Skill files or directories (`--skill`), one flag per entry.',
-          },
-          prompt_templates: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Prompt template files or directories (`--prompt-template`), one flag per entry.',
-          },
           args: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Raw pi argv appended last, verbatim; the escape hatch for later pi flags.',
+            description:
+              'Raw pi argv appended after the base command, in order, one array element per argv word ' +
+              '(e.g. ["--model", "vendor/model"]). Not sanitised: a caller can pass `-p` or `--` and change ' +
+              'how the child starts. `pi --help` lists the flags.',
           },
         },
         required: ['brief'],
@@ -296,16 +274,7 @@ function buildTools(
           name: typeof params.name === 'string' ? params.name : undefined,
           brief: String(params.brief),
           cwd: typeof params.cwd === 'string' ? params.cwd : undefined,
-          args: spawnFlagArgs({
-            model: typeof params.model === 'string' ? params.model : undefined,
-            thinking: typeof params.thinking === 'string' ? params.thinking : undefined,
-            tools: typeof params.tools === 'string' ? params.tools : undefined,
-            exclude_tools: typeof params.exclude_tools === 'string' ? params.exclude_tools : undefined,
-            extensions: stringArrayParam(params.extensions, 'extensions'),
-            skills: stringArrayParam(params.skills, 'skills'),
-            prompt_templates: stringArrayParam(params.prompt_templates, 'prompt_templates'),
-            args: stringArrayParam(params.args, 'args'),
-          }),
+          args: Array.isArray(params.args) ? params.args.map(String) : undefined,
         });
         return text(JSON.stringify(spawned));
       },

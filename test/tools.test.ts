@@ -103,6 +103,7 @@ test('pg_spawn creates a member, DMs the brief, and starts one pane with the chi
   assert.equal(s.herdr.spawns.length, 1, 'one pane per spawned member');
   const spawn = s.herdr.spawns[0];
   assert.equal(spawn.cwd, '/tmp/ws');
+  assert.equal(spawn.args, undefined, 'no args leaves the configured base command alone');
 
   const childToken = spawn.env.PIGROUPS_TOKEN;
   assert.ok(childToken, 'the pane must be started with the child token in the env');
@@ -115,14 +116,14 @@ test('pg_spawn creates a member, DMs the brief, and starts one pane with the chi
   assert.equal(brief.items[0].sender_id, s.me.id, 'the brief comes from the spawning member');
 });
 
-// §2.2: pg_spawn's pi flags reach the pane as extra argv, appended to the configured
+// §2.2: pg_spawn's raw args reach the pane as extra argv, appended to the configured
 // base command rather than replacing or string-splicing it.
-test('spawnMember carries the extra pi argv to the pane', async (t) => {
+test('spawnMember carries the raw pi argv to the pane', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
 
   const args = ['--model', 'vendor/model', '--extension', '/tmp/extra extension.ts', '--future', 'raw'];
-  await s.loop.spawnMember({ name: 'flags', brief: 'implement W', args });
+  await s.loop.spawnMember({ name: 'argv', brief: 'implement W', args });
 
   assert.equal(s.herdr.spawns.length, 1);
   assert.deepEqual(s.herdr.spawns[0].args, args, 'the loop passes the argv tail through unchanged');

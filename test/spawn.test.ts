@@ -1,13 +1,13 @@
 // §2.2: a spawned member is a normal pi session, not a stripped worker. The default
-// loads this adapter on top of the operator's environment; pg_spawn's optional flags
-// are argv appended to that base command, never string-spliced into it.
+// loads this adapter on top of the operator's environment. pg_spawn does not mirror
+// pi's flags: the caller's raw argv is appended to that base command, in order.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SPAWN_THINKING_LEVELS, shellQuote, spawnFlagArgs, splitCommand } from '../src/command.ts';
+import { shellQuote, splitCommand } from '../src/command.ts';
 import pigroupsExtension, { EXTENSION_ENTRY, defaultSpawnCmd, resolveSpawnCmd } from '../src/extension.ts';
 import type { PiLike, PiToolDefinition } from '../src/surface.ts';
 
@@ -38,92 +38,53 @@ test('the derived path survives a path containing spaces', () => {
   assert.deepEqual(splitCommand(command), ['pi', '-e', spaced], 'herdr must receive the spaced path as one argument');
 });
 
-test('pg_spawn flags map one-to-one onto pi argv, arrays repeat their flag, and args stays last', () => {
-  assert.deepEqual(
-    spawnFlagArgs({
-      model: 'vendor/model:high',
-      thinking: 'high',
-      tools: 'read,bash,*',
-      exclude_tools: 'write,edit',
-      extensions: ['/extra/one.ts', '/extra/two.ts'],
-      skills: ['/skills/a', '/skills/b'],
-      prompt_templates: ['/prompts/a.md', '/prompts/b.md'],
-      args: ['--future-flag', 'value with spaces'],
-    }),
-    [
-      '--model',
-      'vendor/model:high',
-      '--thinking',
-      'high',
-      '--tools',
-      'read,bash,*',
-      '--exclude-tools',
-      'write,edit',
-      '--extension',
-      '/extra/one.ts',
-      '--extension',
-      '/extra/two.ts',
-      '--skill',
-      '/skills/a',
-      '--skill',
-      '/skills/b',
-      '--prompt-template',
-      '/prompts/a.md',
-      '--prompt-template',
-      '/prompts/b.md',
-      '--future-flag',
-      'value with spaces',
-    ],
-    'scalar flags are one pair, array flags repeat, and the raw args tail is untouched at the end',
-  );
+test('the caller’s args are appended after the base command in order, and nothing else is injected', () => {
+  const base = splitCommand(defaultSpawnCmd());
+  const args = ['--model', 'vendor/model', '-p', 'do the thing', '--', '--not-a-flag'];
+  const argv = [...base, ...args];
+
+  assert.deepEqual([...base], base, 'omitting args leaves the configured base command alone');
+  assert.deepEqual(argv.slice(0, base.length), base, 'the base command comes first, unchanged');
+  assert.deepEqual(argv.slice(base.length), args, 'each caller word keeps its position and value');
 });
 
-test('no spawn flags adds nothing, and the same flags always produce the same argv', () => {
-  assert.deepEqual(spawnFlagArgs(), [], 'omitting every parameter leaves the configured base command alone');
-
-  const flags = {
-    model: 'vendor/model',
-    thinking: 'low',
-    extensions: ['/extra/ext.ts'],
-    args: ['--verbose'],
-  };
-  assert.deepEqual(spawnFlagArgs(flags), spawnFlagArgs(flags), 'the argv is a function of the parameters only');
-});
-
-test('a path with spaces, a dollar sign and parentheses cannot escape its argv element', () => {
+test('a path with spaces, a dollar sign, a quote and a semicolon still survives as one argv word', () => {
   const nasty = '/tmp/pi groups/$(touch pwned)/ext (beta).ts';
-  const base = splitCommand(defaultSpawnCmd(nasty));
-  const extra = spawnFlagArgs({ extensions: [nasty], args: ['--future', nasty] });
-  const argv = [...base, ...extra];
+  const hostile = "it's quoted; touch pwned";
+  const args = ['--extension', nasty, '--note', hostile];
+  const argv = [...splitCommand(defaultSpawnCmd(nasty)), ...args];
 
   // Herdr's send-text fallback quotes every argv element with the same helper.
   const commandLine = argv.map(shellQuote).join(' ');
   assert.deepEqual(splitCommand(commandLine), argv, 'the shell reads back exactly the argv herdr was given');
   assert.ok(commandLine.includes(`'${nasty}'`), 'the metacharacter path is inside one single-quoted word');
-  assert.equal(extra[1], nasty, 'flag values stay raw argv elements; quoting is only for the shell string');
+  assert.ok(commandLine.includes(`'it'\\''s quoted; touch pwned'`), 'a quote and a semicolon stay inside one word');
 });
 
-test('the pg_spawn tool schema exposes the closed pi-flag set and rejects unknown parameters', () => {
-  const parameters = spawnToolParameters();
+test('the pg_spawn schema is exactly name, brief, cwd and args, and points the model at pi --help', () => {
+  const spawn = spawnTool();
+  const parameters = spawn.parameters as any;
 
   assert.equal(parameters.additionalProperties, false, 'an unknown parameter name must be rejected by the schema');
-  assert.deepEqual(
-    Object.keys(parameters.properties).sort(),
-    ['args', 'brief', 'cwd', 'exclude_tools', 'extensions', 'model', 'name', 'prompt_templates', 'skills', 'thinking', 'tools'],
-  );
+  assert.deepEqual(Object.keys(parameters.properties).sort(), ['args', 'brief', 'cwd', 'name']);
   assert.deepEqual(parameters.required, ['brief']);
-  assert.deepEqual(parameters.properties.thinking.enum, [...SPAWN_THINKING_LEVELS]);
-  for (const name of ['extensions', 'skills', 'prompt_templates', 'args']) {
-    assert.equal(parameters.properties[name].type, 'array', `${name} carries repeated flags`);
-    assert.equal(parameters.properties[name].items.type, 'string', `${name} elements are argv strings`);
-  }
-  for (const name of ['model', 'tools', 'exclude_tools']) {
-    assert.equal(parameters.properties[name].type, 'string');
-  }
+  assert.equal(parameters.properties.args.type, 'array', 'args carries one argv word per element');
+  assert.equal(parameters.properties.args.items.type, 'string');
+  assert.match(String(spawn.description), /args/, 'the description must say what args are');
+  assert.match(String(spawn.description), /pi --help/, 'the model must be told that pi’s own manual is the reference');
+});
+
+test('the command module exposes quoting only, not a pi-flag mirror', async () => {
+  const command = await import('../src/command.ts');
+  assert.deepEqual(
+    Object.keys(command).sort(),
+    ['shellQuote', 'splitCommand'],
+    'pi has far more flags than any mirror would keep up with; args is the only passthrough',
+  );
 });
 
 /** The tool definitions the extension registers; no session_start, so nothing talks to a platform. */
-function spawnToolParameters(): any {
+function spawnTool(): PiToolDefinition {
   const savedUrl = process.env.PIGROUPS_URL;
   const savedToken = process.env.PIGROUPS_TOKEN;
   process.env.PIGROUPS_URL = 'http://127.0.0.1:1';
@@ -144,7 +105,7 @@ function spawnToolParameters(): any {
     pigroupsExtension(pi);
     const spawn = tools.get('pg_spawn');
     assert.ok(spawn, 'the extension must register pg_spawn');
-    return spawn.parameters;
+    return spawn;
   } finally {
     if (savedUrl === undefined) delete process.env.PIGROUPS_URL;
     else process.env.PIGROUPS_URL = savedUrl;

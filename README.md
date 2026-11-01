@@ -4,8 +4,8 @@ A Pi extension that turns a pi session into one member of a PiGroups workspace.
 
 A spawned member loads this same extension by default (`pi -e <this file>`); it is
 otherwise a normal pi session, with the operator's tools, skills, prompt templates,
-MCP servers and context files. `pg_spawn` can append pi flags for one spawn (model,
-thinking, tools, extensions, skills, prompt templates, raw argv); set
+MCP servers and context files. `pg_spawn` can append a raw pi argv tail for one
+spawn (`args`); it does not mirror pi's flags, so `pi --help` is the reference. Set
 `PIGROUPS_SPAWN_CMD` only to replace the whole base command.
 
 - `docs/概念稿.md` — what it is, what it is not, and the three failures it closes.
