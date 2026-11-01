@@ -15,6 +15,7 @@ import { HerdrCli } from './herdr.ts';
 import { PgClient } from './pgclient.ts';
 import { PiSurfaceAdapter } from './surface.ts';
 import type { PiLike, PiToolDefinition } from './surface.ts';
+import { ADAPTER_VERSION } from './version.ts';
 
 const EXIT_REPORT_TIMEOUT_MS = 2000;
 const INSPECT_TIMEOUT_MS = 10_000;
@@ -35,6 +36,8 @@ export default function pigroupsExtension(pi: PiLike): void {
   pi.on('session_start', (_event, ctx) => {
     surface.attachContext(ctx);
     if (loop) return;
+    // The one startup line: which adapter this member is running, and against what.
+    console.log(`[pigroups] adapter ${ADAPTER_VERSION} starting against ${config.url}`);
     loop = new AdapterLoop({ pg, surface, herdr, config, now: () => Date.now() });
     loop.start();
   });
@@ -263,7 +266,9 @@ function buildTools(
       execute: async () => {
         const who = await pg.whoami();
         const loop = getLoop();
-        return text(JSON.stringify({ who, adapter: loop?.state() ?? null }, null, 2));
+        // `adapter_version` is this adapter; `who.server.version` is the platform. Both
+        // are in the answer so a person can tell which pair a member is running (§5.3).
+        return text(JSON.stringify({ adapter_version: ADAPTER_VERSION, who, adapter: loop?.state() ?? null }, null, 2));
       },
     },
   ];
