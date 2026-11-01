@@ -27,7 +27,7 @@ export interface Herdr {
     /** Extra pi argv appended to the configured spawn command (already split into words). */
     args?: string[];
   }): Promise<{ pane: string }>;
-  /** Wait until the agent in that pane is ready/idle. */
+  /** Wait until the agent in that pane has started (idle, done, or blocked in herdr terms). */
   waitReady(pane: string, timeoutMs: number): Promise<void>;
   /** Read the raw text of that pane (diagnostics and reporting only). */
   read(pane: string, lines: number): Promise<string>;
@@ -102,8 +102,31 @@ export class HerdrCli implements Herdr {
   }
 
   async waitReady(pane: string, timeoutMs: number): Promise<void> {
-    // The CLI flag is `--until` (herdr's API: AgentWaitParams.until).
-    await this.run(['agent', 'wait', pane, '--until', 'idle', '--timeout', String(timeoutMs)]);
+    // The CLI flag is `--until` (herdr's API: AgentWaitParams.until) and it may be
+    // repeated. Do not wait for one label: the brief is sent before the pane starts, so
+    // a healthy child has usually already finished (or is in) its first turn, and herdr
+    // reports a finished turn as `done`, not `idle`. Waiting only for `idle` times out
+    // on that child (probe/logs/spawn-args-20261101T142926/ready-probe/).
+    //
+    // These are the states herdr itself matches when no `--until` is given: `idle` and
+    // `done` both mean "started and not working", and `blocked` means a live agent is
+    // waiting for input or permission. Blocked is still up, so treating it as not-ready
+    // would repeat the same false failure under another label. `working` stays out: it
+    // is a started agent in the middle of a turn, and spawn readiness is not a promise
+    // that the child is quiet.
+    await this.run([
+      'agent',
+      'wait',
+      pane,
+      '--until',
+      'idle',
+      '--until',
+      'done',
+      '--until',
+      'blocked',
+      '--timeout',
+      String(timeoutMs),
+    ]);
   }
 
   async read(pane: string, lines: number): Promise<string> {

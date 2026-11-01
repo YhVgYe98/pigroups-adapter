@@ -20,6 +20,61 @@ async function fakeHerdr(dir: string, stderr: string, code: number): Promise<str
   return path;
 }
 
+test('waitReady() asks herdr for every started state, not just idle', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    // herdr reports a child that has finished a turn as `done`, never as `idle`; a wait
+    // for `idle` alone therefore exits 1 with this envelope after the timeout. The fake
+    // refuses that shape exactly like the real binary: it only succeeds when the argv
+    // asks for `done` too. Every argument is logged on its own line so the test can
+    // assert the whole argv, including repeated `--until` flags and the timeout.
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+for arg in "$@"; do printf '%s\n' "$arg" >> "$DIR/wait-argv"; done
+saw_done=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --until)
+      shift
+      [ "$1" = done ] && saw_done=1
+      ;;
+  esac
+  shift
+done
+if [ "$saw_done" -eq 0 ]; then
+  printf '%s\n' '{"error":{"code":"timeout","message":"timed out waiting for agent status"},"id":"cli:agent:wait"}' >&2
+  exit 1
+fi
+printf '%s\n' '{"id":"cli:agent:wait","result":{"agent_status":"done"}}'
+`,
+    );
+    await chmod(command, 0o755);
+
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    await herdr.waitReady('wE:pX', 8000);
+
+    const argv = (await readFile(join(dir, 'wait-argv'), 'utf8')).trimEnd().split('\n');
+    assert.deepEqual(argv, [
+      'agent',
+      'wait',
+      'wE:pX',
+      '--until',
+      'idle',
+      '--until',
+      'done',
+      '--until',
+      'blocked',
+      '--timeout',
+      '8000',
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('close() treats pane_not_found as a closed pane', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
   try {

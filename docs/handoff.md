@@ -573,7 +573,7 @@ close 等到了正常退出，所以按 F 的语义 `pane_close_forced` 为空�
 | pane 关闭与子成员自己的 `sys.terminated` 退出竞争 | **已修，但不是“已关”。** 根因不在 close 的等待（`7ae1adc`）而在 `discardAndShutdown()`：它只丢 journal / 停循环 / `shutdown()`，从不 abort 正在跑的那一轮，而 pi 的 shutdown 会等工具，于是父进程的 5 s 上限先到。`25b8c1b` 让 `sys.terminated` 先按 `pg.abort` 同一条 `ABORT_IDLE_TIMEOUT_MS = 3000` 切断（同一 `cutTurn()`，没有第二个数字），再丢 journal、停循环、shutdown；abort 期间不投递。`Herdr.close()` 现在返回 `{forced}`，到点 agent 仍在就报 `forced: true`，`pg_terminate` 列进 `pane_close_forced`，不再伪装成 `pane_close_failed: []`。真机（§3.8）：idle 406 ms / midturn 404 ms / `bash sleep 40` **204 ms**，均 PASS，且 close 前 pi 已退出、`pane list` 已看不到 agent；上一轮 FAIL 的 5031 ms 不再重现。**仍不覆盖**：① 一个忽略 abort signal 的工具——`abort()` 是协作式的，3 s 后放弃，pane 仍只能在 5 s 硬上限被切，只是现在**会报** `pane_close_forced`；② `herdr pane list` 读失败——`close()` 观察不到活 agent，报 `forced: false`，这是“未知”不是干净退出；③ pane 映射仍在内存里（父适配器重启就丢，孙子 pane 本进程没有映射，见本表 `pg_terminate` 关 pane 那一行）；④ 祖先删除路径（settle/poll 复核）遇到强制关只打 warn，没有面向调用者的答案 |
 | 名册读的三条旧洞（第五轮留档：失败无退避、`ROSTER_TIMEOUT_MS` 只是 race 不是取消、启动/`tick()` 不剪） | **已修（`712db53` + `6ce2789`）**：失败或答案不可信时保留上一份好快照、5 s 后重试；超时用 `withAbort()` 真的 `abort` 请求；启动在 `ready` 前剪一次。**仍漏**：退避固定 5 s，不随失败次数增长；半截响应只能靠“名册必须含自己”整次作废 |
 | `pg_spawn` 的 `args` 不消毒 | **有意的取舍**。调用方可以传 `-p`、`--` 等改变子进程启动方式的旗标，适配器不拦也不改写——透穿就是契约（§2.3）。代价是上层模型传错旗标时子成员可能起不来或进入非交互模式；错误由子进程自己的输出暴露，适配器不做预检，也不维护会过期的旗标表（`pi --help` 才是手册） |
-| `pg_spawn` 的 readiness 等待等不到 `done` | **真机已复现，未修**。`HerdrCli.waitReady()` 只发 `herdr agent wait --until idle`，而 pi 跑完第一轮后 herdr 记的是 `agent_status:"done"`——子成员一切正常，`pg_spawn` 也会走满 `SPAWN_READY_MS` 并把 `timed out waiting for agent status` 当错误返回给调用方（§15，`probe/logs/spawn-args-20261101T142926/ready-probe/`）。herdr 支持重复 `--until`：`--until idle --until done` 立即返回。修它是行为改动 + 一条测试，留给下一轮 |
+| `pg_spawn` 的 readiness 等待等不到 `done` | **已修**。`HerdrCli.waitReady()` 现在发 `herdr agent wait <pane> --until idle --until done --until blocked --timeout <ms>`，这三个正是 herdr 不给 `--until` 时的默认匹配集合；只等 `idle` 时，brief 已投、子成员跑完一轮后 herdr 记的是 `agent_status:"done"`，健康子成员会走满 `SPAWN_READY_MS` 并把 `timed out waiting for agent status` 当错误返回给调用方（§15，真机复现 `probe/logs/spawn-args-20261101T142926/ready-probe/`）。`blocked` 也算启动成功：它是活着的 agent 在等输入/许可，不是没起来；`working` 仍不匹配，spawn 不等一轮跑完。超时与错误文本不变。测试 `waitReady() asks herdr for every started state, not just idle`：假 herdr 与真 binary 一样拒绝只有 `idle` 的形式，并断言完整 argv。撤掉 `src/herdr.ts` 的改动 → 该条红在 `timed out waiting for agent status`；恢复 → 104/104 |
 | 手动起的根继承用户的全局 pi 扩展 | **不再是产品问题**：0.4.0 起子成员和手动起的根一样，都是正常 pi，不剥离扩展（§2.3）。第一次第 4 级 run 里 `pi-intercom` 把消息转进主会话、`pi-straw-boss` 重排 tab，是探针环境噪声，操作者已禁用那个扩展；不要为它重新加 `-ne`。探针若仍要隔离，按探针纪律显式加 `-ne`，产品默认不这么做 |
 | 消息与 inbox 都没有清理策略 | 已知，无上限增长。规模上来再定 |
 | 催办三级的阈值（5 分钟窗口 / 3 次上限 / 30 分钟持续） | 全是拍的数字。第 4 级看到了“3 次后 blocked”真的发生，但没有负载样本校准 |
@@ -696,7 +696,7 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 - [x] 第 1 级探针通过（2026-11-01，`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮）
 - [ ] 第 2 级探针**部分通过**（对照组 2 ms 切断；`PROBE_IGNORE_SIGNAL=1` 的硬变体 P2.5/P2.7 失败：pi 不杀忽略 signal 的工具；`bash sleep 60` 未验）
 - [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；§3.7 又验了 `ctx.shutdown()` 自调用、session 落盘、shutdown 正在跑的一轮；§3.8 验了 abort → shutdown 这一串；print/json 模式仍未验）
-- [x] 真机验证 0.4.0 的 spawn 默认（第十轮，§15）：根不设 `PIGROUPS_SPAWN_CMD`，只给 name+brief 的子成员能跑 `read`、能 `pg_say` 并被人读到；`args:["--tools","read"]` 的子成员工具只剩 `read`。证据 `probe/logs/spawn-args-20261101T142926/`（主）与 `…142109/`（佐证）。**同时抓到既有 bug**：`pg_spawn` 对健康的子成员报 `timed out waiting for agent status`（§7、§15），未修
+- [x] 真机验证 0.4.0 的 spawn 默认（第十轮，§15）：根不设 `PIGROUPS_SPAWN_CMD`，只给 name+brief 的子成员能跑 `read`、能 `pg_say` 并被人读到；`args:["--tools","read"]` 的子成员工具只剩 `read`。证据 `probe/logs/spawn-args-20261101T142926/`（主）与 `…142109/`（佐证）。**同时抓到既有 bug**：`pg_spawn` 对健康的子成员报 `timed out waiting for agent status`（§7、§15）；当时未修，后续轮已修
 - [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**只能记部分通过**：只跑了 1 个子成员，且两条判据事后在 `de48904` 里改过（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话，不在记录那次 run 的 `3919467` 里，见 §3.6）。`pg_report` 工具缺失是产品缺口（§7），不是这一级的判据；重启/级联未验。关 pane 的等待另在 §3.7 复验 3 PASS / 1 FAIL，FAIL 那次已由 E 修掉并在 §3.8 复跑 3/3 PASS）
 
 ---
@@ -854,12 +854,18 @@ shell 会回显，所以子 pi 退出后 `herdr pane read <pane> --source recent
 `[Skills]` 两种都列全，**不能**当 `-ne` 的证据。本轮子成员没有调用 `intercom`，也没有消息
 漏进用户主会话；这只证明"这一轮没漏"。
 
-**新抓到的既有 bug（未修，见 §7 与报告 §5.1）**：两次 `pg_spawn` 都返回
+**新抓到的既有 bug（第十轮未修，后续轮已修，见 §7 与报告 §5.1）**：两次 `pg_spawn` 都返回
 `isError=true`、正文 `timed out waiting for agent status`，各白等 120 s，而子成员当场就在
 正常工作。根因是 `HerdrCli.waitReady()` 只发 `--until idle`；pi 跑完一轮后 herdr 记的是
 `agent_status:"done"`，`--until idle` 匹配不到。`ready-probe/` 三次复现：未跑过任何一轮时
 `--until idle` 立即返回；`done` 状态下 `--until idle` 8 s 超时、`--until done` 与
-`--until idle --until done` 立即返回。修法短，但是行为改动 + 一条测试，留给下一轮。
+`--until idle --until done` 立即返回。
+
+**后续修复没有动接口**：`waitReady()` 重复 `--until idle --until done --until blocked`（与
+herdr 默认匹配集合一致；`blocked` 是活着的 agent 在等输入/许可，不是启动失败），保留
+`--timeout` 与原错误文本。测试 `waitReady() asks herdr for every started state, not just idle`
+的假 herdr 像真 binary 一样拒绝单状态形式，并断言完整 argv。本轮没有重跑真机 spawn；argv
+形状对照的是 `herdr agent wait --help`，行为由假 herdr 守住。
 
 **另一个值得记的边界**：`--tools` 是允许清单，会把适配器自己的 `pg_*` 工具一起挡掉。case 2
 的子成员因此无法 `pg_say` 回复 `pg_spawn` 发的那条 brief 私聊，欠账提醒每 ~2 s 注入一次
