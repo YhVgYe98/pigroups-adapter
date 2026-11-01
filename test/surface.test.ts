@@ -188,5 +188,7 @@ test('deliver sends a custom message that asks pi to start a turn', () => {
   assert.equal(sent.length, 1, 'one delivery is one message');
   assert.equal(sent[0].message.customType, 'pigroups', 'the custom type is what the loop filters on');
   assert.equal(sent[0].message.content, 'hello');
+  assert.equal(sent[0].message.display, true, 'the member is meant to see the delivered text');
+  assert.deepEqual(sent[0].message.details, { kind: 'message' }, 'the kind travels with the message');
   assert.equal(sent[0].options?.triggerTurn, true, 'without triggerTurn the member is never woken');
 });

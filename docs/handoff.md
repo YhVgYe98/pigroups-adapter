@@ -296,7 +296,8 @@ pi -ne -e <abs>/probe/probe.ts --no-session --no-builtin-tools --no-mcp \
 
 | 风险 | 状态 |
 |---|---|
-| ~~`pg.abort` 之后没有 turn_end~~ | **已修（`abecc76`）**：`agent_settled.aborted === true` 时补发 `turn_end{error}`，`test/surface.test.ts` 守着。但**`surface.ts` 的 pi 事件映射整体此前零测试**，是这次才发现的盲区——以后改这个文件，先看那个测试文件 |
+| ~~`pg.abort` 之后没有 turn_end~~ | **已修（`abecc76`）**：`agent_settled.aborted === true` 时补发 `turn_end{error}`（`fff2418` 起只在没有 `before_settle` 关过这一轮时补，避免一轮两个 `turn_end`），`test/surface.test.ts` 守着。但**`surface.ts` 的 pi 事件映射整体此前零测试**，是这次才发现的盲区——以后改这个文件，先看那个测试文件 |
+| `deliver()` 只确认"pi 收下了"，不确认"run 起来了" | 丢失窗口：`pi.sendMessage` 是 void，pi 吞掉启动失败，而水位与 journal 在 `deliver()` resolve 后立刻推进（`docs/设计说明.md §3.4`）。消息会被记成已注入但那一轮没起来。要收紧只能给 `PiSurface` 加"下一次 `agent_start`"的确认，属于接口设计决定，未做 |
 | `ctx.shutdown()` 自调用、print/json 模式下的退出 | 未验证。只验了外部 `SIGTERM` 的 tui 路径（exit 0、处理器被 await、只派发一次）；print 模式据源码是 143（未实测） |
 | `herdr agent start` 在真实 pane 里的行为 | 命令行形状已核，**行为未验**；探针是在 pane 里直接跑 `bash pane.sh` 起 pi，没走 `agent start` |
 | 消息与 inbox 都没有清理策略 | 已知，无上限增长。规模上来再定 |

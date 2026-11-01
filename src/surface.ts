@@ -18,7 +18,11 @@ export type PiEvent =
   | { type: 'tool_end'; name: string; ok: boolean };
 
 export interface PiSurface {
-  /** Hand a block of text to the agent as one turn. Returns when committed, not when done. */
+  /**
+   * Hand a block of text to the agent as one turn. Resolves once pi has accepted the
+   * message, not when a run has started: `pi.sendMessage` is void and swallows start
+   * errors, so a run that fails to start is invisible from here (设计说明 §2.1).
+   */
   deliver(text: string, kind: DeliverKind): Promise<void>;
   /**
    * Cut the running turn and wait until idle. Returns at once when already idle.
@@ -103,6 +107,13 @@ const IDLE_POLL_MS = 50;
  */
 export const ABORT_IDLE_TIMEOUT_MS = 3000;
 
+export interface PiSurfaceOptions {
+  /** Bound on the idle wait in `abort()`; tests shrink it so the give-up path is reachable. */
+  abortIdleTimeoutMs?: number;
+  /** How often `abort()` samples `ctx.isIdle()`. */
+  idlePollMs?: number;
+}
+
 /**
  * The real `PiSurface`. It is the whole of the pi-specific glue:
  * `pi.sendMessage(..., {triggerTurn:true})` to deliver, the session abort to cut
@@ -112,12 +123,16 @@ export class PiSurfaceAdapter implements PiSurface {
   private readonly pi: PiLike;
   private readonly settleListeners = new Set<() => void>();
   private readonly eventListeners = new Set<(event: PiEvent) => void>();
+  private readonly abortIdleTimeoutMs: number;
+  private readonly idlePollMs: number;
   private context: PiContext | undefined;
   /** Whether `agent_start` opened a turn that `agent_before_settle` has not closed. */
   private turnOpen = false;
 
-  constructor(pi: PiLike) {
+  constructor(pi: PiLike, opts: PiSurfaceOptions = {}) {
     this.pi = pi;
+    this.abortIdleTimeoutMs = opts.abortIdleTimeoutMs ?? ABORT_IDLE_TIMEOUT_MS;
+    this.idlePollMs = opts.idlePollMs ?? IDLE_POLL_MS;
 
     // pi event → PiEvent (设计说明 §2.1). `agent_before_settle` carries the run
     // outcome and is the normal turn_end source; `agent_settled` closes the turn when
@@ -165,6 +180,8 @@ export class PiSurfaceAdapter implements PiSurface {
   }
 
   async deliver(text: string, kind: DeliverKind): Promise<void> {
+    // Fire-and-forget by pi's contract: `sendMessage` returns void and pi swallows a
+    // start failure. The loop may not treat this return as "a run is now going".
     this.pi.sendMessage(
       { customType: PIGROUPS_CUSTOM_TYPE, content: text, display: true, details: { kind } },
       { triggerTurn: true },
@@ -178,10 +195,19 @@ export class PiSurfaceAdapter implements PiSurface {
     // Polling `isIdle` is the only way pi reports "that turn is over". Giving up is
     // not an error: the abort is requested, the turn is still running, and the
     // settle that eventually arrives delivers whatever is held.
-    const deadlineAt = Date.now() + ABORT_IDLE_TIMEOUT_MS;
+    const deadlineAt = Date.now() + this.abortIdleTimeoutMs;
     while (!ctx.isIdle()) {
-      if (signal?.aborted || Date.now() >= deadlineAt) return;
-      await sleep(IDLE_POLL_MS);
+      if (signal?.aborted) return;
+      if (Date.now() >= deadlineAt) {
+        // Giving up is allowed (§3.2) but must not be silent: staying busy past the
+        // bound is exactly the failure `pg.abort` exists to prevent, and a silent
+        // return makes it look like the cut succeeded.
+        console.warn(
+          `[pigroups] abort() gave up after ${this.abortIdleTimeoutMs} ms: the turn is still running; the abort request stands`,
+        );
+        return;
+      }
+      await sleep(this.idlePollMs);
     }
   }
 
