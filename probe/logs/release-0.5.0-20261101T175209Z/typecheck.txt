@@ -1,0 +1,2 @@
+npm notice run pigroups-adapter-pi@0.5.0+platform.0.2.0 typecheck
+npm notice run tsc --noEmit

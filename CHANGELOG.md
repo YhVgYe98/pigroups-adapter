@@ -44,16 +44,17 @@
 - **不再等空闲。** `deliver` 走 `pi.sendMessage(…, {triggerTurn:true, deliverAs:'steer'})`。
   `isBusy()` 闸门和"一次 settle 只投一次"整条删掉；settle 不再是投递触发器，它只做名册/pane
   复核、跑一次 `tick()`、标记催办。
-- **例外只有两个**：启动简报不等窗口；abort 之后立刻关窗把排队的东西投出去，并把下一批也标成
-  "立即投"——否则"先 abort 再 say"里那条 say 要白等一个窗口。
+- **例外只有三个，都还在同一条队列里**：启动简报不等窗口；abort 之后立刻关窗把排队的东西投出去，
+  并把下一批也标成"立即投"——否则"先 abort 再 say"里那条 say 要白等一个窗口；`poll` 401 的
+  "token 失效"提示必须在 `stop()` 之前投出去（停下之后一律拒投，见下）。
 - **条数只是尺寸阀门。** 一个窗口最多 10 条，剩下的重新开窗、等下一个窗口；条数永远不会触发投递。
 - **催办只在安静的窗口投。** settle 只标 `nudgeDue`；队列里有真实消息时，消息就是唤醒。
 - **实测边界写进代码注释，不粉饰**：`sendMessage` 返回 = 排队，不是被看到；一条 steer 排在一个
   长工具后面，要等工具返回（+1 ms 才落盘）。所以投递延迟 = 窗口剩余 + 当前工具剩余。
 - **abort 丢失的兜底。** 已经交给 pi、但还排在长工具后面的 steer，遇到 abort 会整份 session 文件里
-  一次都不出现。现在每次成功投递留一份内存副本；`turn_end(aborted:true)` 时放回队首并立刻重投
-  （绕过水位——水位已推进），干净结束才丢。重复注入由正文里的 `[会话#序号]` 兜住；崩溃丢副本
-  最多少一次重投。
+  一次都不出现。现在每次成功投递留一份内存副本（**只留最近的一批**，一个槽位）；`turn_end(aborted:true)`
+  时放回队首并立刻重投（绕过水位——水位已推进），干净结束才丢，provider error 结束保留（没证明
+  落盘就不丢）。重复注入由正文里的 `[会话#序号]` 兜住；崩溃丢副本最多少一次重投。
 
 ### 工具面
 
@@ -78,11 +79,12 @@
 
 ### 测试与变异证明
 
-- **103 → 122 条**，`npm run typecheck` 干净，`npm test` 122/122。新增 19 条：
+- **103 → 123 条**，`npm run typecheck` 干净，`npm test` 123/123。新增 19 条：
   `delivery` +4（窗口合并、忙碌时 steer、abort 重投、provider error 保留副本）、`control` +3
   （abort 关窗、abort 后 say、steer 不再 abort）、`telemetry` +3（last 块、截断、父侧汇总）、
   `surface` +1（`message_end`）、`members` +3、`schedule` +3、`toolsurface` +1（十个工具、没有
-  `pg_steer`）。
+  `pg_steer`）。发版前再补 1 条（到 123）：`poll` 401 的提示必须先于 `stop()` 投出去——0.5.0 的
+  `stopped` 闸门让旧写法永远发不出去，而且是静默的。
   改写的是行为真的变了的那些：投递不再等空闲、settle 不再投递、催办按窗口、遥测的 gone 仍等窗口、
   journal 重放也走窗口。
 - **变异证明（只回退 src，保留测试，全部当场红过）：**
@@ -103,6 +105,8 @@
   11. `pg_schedule` 的下界改成 0 → 边界用例红；让 due 的 wake 带 `windowless` → `a due wake …
       waits for the delivery window` 红。
   12. 三个版本号改一个 → `version` 红；删掉 `pi.skills` → `package` 红。
+  13. 把 401 的处理改回"先 `stop()` 再入队" → `a 401 from poll hands the model the token line before
+      the loop stops` 红在 `timed out after 5000ms waiting for: the token line to reach the model`。
 
 ### 已知边界（不是这一版能修的）
 
@@ -110,6 +114,9 @@
   都按窗口走（启动简报除外）。这是"一条队列"的直接代价，不是遗漏。
 - **确认边界没有收紧。** `deliver` 返回仍只表示 pi 收下了（D2）；这一版只是把"abort 会丢"这一种
   实测到的丢失补上了。
+- **副本只有一个槽位。** 同一轮里两个窗口各投了一批、然后 abort，只有最后一批会被重投。触发条件
+  是"一轮还没结束、第二个窗口又关了"。修法是把槽位换成未确认批次表，需要一条新测试；这一版没做，
+  记在 `docs/handoff.md` §7。
 - **`dm:` 不是发送地址。** 注入前缀里的 `dm:<a>_<b>` 只能用于 `pg_read` 认会话；说话要发给对方
   的成员 id。skill 里写清了，工具 schema 没有改（平台契约就是这样）。
 

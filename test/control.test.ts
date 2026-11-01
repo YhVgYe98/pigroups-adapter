@@ -2,11 +2,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdir } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { command, poll, removeMember, send, waitFor, within } from './support.ts';
-import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, scenario } from './scenario.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, scenario } from './scenario.ts';
 
 test('pg.abort cuts, then closes the window and delivers the steer queued behind it at once', async (t) => {
   const s = await scenario();
@@ -264,4 +264,32 @@ test('an unknown cmd and a pg.* payload with v:2 are injected, not dropped', asy
     (item) => item.kind === 'control' && (item as { cmd: string }).cmd === 'pg.inspect_result',
   );
   assert.equal(answers.length, 0, 'a v:2 pg.inspect is not understood: it must not be answered as if it were v:1');
+});
+
+// §9: "`poll` 401 | 停循环，注入一条'token 失效'给 agent，等人工". The line has to leave *before*
+// the loop stops: a stopped loop refuses every delivery (`deliverPending` answers `stopped`), so
+// a notice queued after `stop()` would die in the queue — the member would go silent without its
+// model ever learning why. `src/loop.ts` queued it after `stop()` until this test existed.
+test('a 401 from poll hands the model the token line before the loop stops', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  // A second loop on the same platform, holding a token the platform rejects.
+  const rejected = await createLoop(s.platform, s.me, { token: 'not-a-token' });
+  t.after(() => rm(rejected.adapterDir, { recursive: true, force: true }));
+
+  rejected.loop.start(); // `whoami` answers 401, which reaches `handlePollError`
+  await waitFor(() => rejected.surface.deliveries.length === 1, 'the token line to reach the model');
+
+  const [line] = rejected.surface.deliveries;
+  assert.equal(line.kind, 'message');
+  assert.match(line.text, /token/, 'the one line says the token is invalid');
+
+  // The loop is stopped by then, and nothing may start a turn behind it.
+  await within(rejected.loop.stop(), 'the loop to stop after a 401');
+  const mark = rejected.surface.mark();
+  rejected.clock.advance(WINDOW);
+  rejected.loop.tick();
+  assert.equal(await rejected.loop.flush(), false, 'a stopped loop delivers nothing');
+  assert.equal(rejected.surface.since(mark).length, 0);
 });

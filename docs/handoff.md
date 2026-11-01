@@ -1,11 +1,11 @@
 # 交接文档
 
-> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12。**第六轮同日：修 A–D（§13），并把 A 放到真机上复跑四轮——子成员能在 5 s 内退出时成立，卡在长工具里时 `pane close` 仍会切掉活着的 agent（§3.7）。适配器单独发 `v0.2.1`，平台仍是 `0.2.0`（§8）。**第七轮同日：修 E–F（§14），把“先切断正在跑的那一轮，再收尾”写进 `sys.terminated`，并让强制关 pane 不再伪装成干净关闭；上一轮唯一失败的 `bash sleep 40` 真机复跑现在 3/3 PASS，5 s 硬上限不再是常态路径，但仍是兜底（§3.8）。适配器单独发 `v0.3.0`，平台仍是 `0.2.0`（§8）。**第八轮同日：spawn 默认改成自加载本扩展（`pi -ne -e <自身绝对路径>`），启动时对平台 major.minor 只 warn 不拒绝，适配器成为带 `pi` manifest 的包；版本 `0.4.0+platform.0.2.0`（metadata 只记录测试对象，不参与判定）。适配器单独发 `v0.4.0`，平台仍是 `0.2.0`（§8）。**第九轮同日：把 spawn 默认纠回正常 pi（`pi -e <自身绝对路径>`，去掉 `-ne`）。`pg_spawn` 先试过镜像 model/thinking/tools/exclude_tools/extensions/skills/prompt_templates，随后按老板的意见整组删掉，只留原始 `args` 透穿——不知道旗标就读 `pi --help`；适配器 103/103，版本仍是 `0.4.0+platform.0.2.0`。**第十轮同日：`args` 透传在真机上验过——只给 name+brief 的子成员是正常 pi（`pi -e <本扩展>`，无 `-ne`），`args:["--tools","read"]` 真的到 pi（内置工具只剩 `read`，它自己说跑不了 bash），两个 case 都 PASS；附带复现了 `waitReady()` 只等 `idle`、对 `done` 永远超时的既有 bug（§15）。**第十一轮同日：发版。** 版本仍是 `0.4.0+platform.0.2.0`（三处一致），`npm pack` 出 16 个文件，解包副本的 20 条相对 import 全部解析、入口能 import、pi 的 verbose banner 列出解包路径、`--mode json` 的 stderr 打出启动行（退出 0）；标签 `v0.4.0+platform.0.2.0` 打在携带证据的提交上（§8）。**）
+> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12。**第六轮同日：修 A–D（§13），并把 A 放到真机上复跑四轮——子成员能在 5 s 内退出时成立，卡在长工具里时 `pane close` 仍会切掉活着的 agent（§3.7）。适配器单独发 `v0.2.1`，平台仍是 `0.2.0`（§8）。**第七轮同日：修 E–F（§14），把“先切断正在跑的那一轮，再收尾”写进 `sys.terminated`，并让强制关 pane 不再伪装成干净关闭；上一轮唯一失败的 `bash sleep 40` 真机复跑现在 3/3 PASS，5 s 硬上限不再是常态路径，但仍是兜底（§3.8）。适配器单独发 `v0.3.0`，平台仍是 `0.2.0`（§8）。**第八轮同日：spawn 默认改成自加载本扩展（`pi -ne -e <自身绝对路径>`），启动时对平台 major.minor 只 warn 不拒绝，适配器成为带 `pi` manifest 的包；版本 `0.4.0+platform.0.2.0`（metadata 只记录测试对象，不参与判定）。适配器单独发 `v0.4.0`，平台仍是 `0.2.0`（§8）。**第九轮同日：把 spawn 默认纠回正常 pi（`pi -e <自身绝对路径>`，去掉 `-ne`）。`pg_spawn` 先试过镜像 model/thinking/tools/exclude_tools/extensions/skills/prompt_templates，随后按老板的意见整组删掉，只留原始 `args` 透穿——不知道旗标就读 `pi --help`；适配器 103/103，版本仍是 `0.4.0+platform.0.2.0`。**第十轮同日：`args` 透传在真机上验过——只给 name+brief 的子成员是正常 pi（`pi -e <本扩展>`，无 `-ne`），`args:["--tools","read"]` 真的到 pi（内置工具只剩 `read`，它自己说跑不了 bash），两个 case 都 PASS；附带复现了 `waitReady()` 只等 `idle`、对 `done` 永远超时的既有 bug（§15）。**第十一轮同日：发版。** 版本仍是 `0.4.0+platform.0.2.0`（三处一致），`npm pack` 出 16 个文件，解包副本的 20 条相对 import 全部解析、入口能 import、pi 的 verbose banner 列出解包路径、`--mode json` 的 stderr 打出启动行（退出 0）；标签 `v0.4.0+platform.0.2.0` 打在携带证据的提交上（§8）。**第十二轮（2026-11-02）：按概念稿 v3 换掉投递核心（§16）——一条队列 + 翻滚窗口 + `deliverAs:'steer'`，`isBusy()` 闸门与“一次 settle 只投一次”整条删掉；工具面删 `pg_steer`、加 `pg_members`/`pg_schedule`；遥测与 inspect 带 last 块；两个 skill 进包。真机 A–D 全 PASS（长工具中投递、abort 后重投、名册/预约、skill 被发现），证据 `probe/logs/v3-20261101T173805Z/`；发版证据 `probe/logs/release-0.5.0-20261101T175209Z/`。适配器 `0.5.0+platform.0.2.0`，平台仍是 `0.2.0`（§8）。**）
 >
 > 两个人（或一个人隔几天回来）之间交接用。
 > 面向：接手「把 PiGroups 在 herdr + pi 上真机跑起来」这件事的人。
 >
-> **本文档描述的是 `v0.4.0+platform.0.2.0` 这一对**：平台 `0.2.0`（未签名 annotated 标签 `v0.2.0`，`1d68dd4`）+ 适配器 `0.4.0+platform.0.2.0`（未签名 annotated 标签 **`v0.4.0+platform.0.2.0`**，钉在携带发版证据的提交上，`git rev-parse 'v0.4.0+platform.0.2.0^{}'`）。当天早些时候还有一个 `v0.4.0`，指向被否掉的那一版（默认带 `-ne`、`pg_spawn` 镜像旗标）；它不移动、不删除，对外认带 metadata 的这个。这是本仓库第三次**单侧发版**：只有适配器动了，所以只有它进号（minor 位，spawn 默认是操作者可见的行为变化），平台保持 `0.2.0`（§8）。metadata 只记录这一版验证过的平台，不参与判定。号住在哪、怎么发下一版、以及本轮实测到的问题，见 §8。
+> **本文档描述的是 `v0.5.0+platform.0.2.0` 这一对**：平台 `0.2.0`（未签名 annotated 标签 `v0.2.0`，`1d68dd4`）+ 适配器 `0.5.0+platform.0.2.0`（未签名 annotated 标签 **`v0.5.0+platform.0.2.0`**，钉在携带发版证据的提交上，`git rev-parse 'v0.5.0+platform.0.2.0^{}'`）。上一对是 `v0.4.0+platform.0.2.0`；更早的 `v0.4.0` 指向被否掉的那一版（默认带 `-ne`、`pg_spawn` 镜像旗标），两者都不移动、不删除。这是本仓库第四次**单侧发版**：只有适配器动了，所以只有它进号（minor 位：`PiSurface`/`PiEvent`/`LoopConfig` 加了成员，工具面增删，投递行为改变），平台保持 `0.2.0`（§8）。metadata 只记录这一版验证过的平台，不参与判定。号住在哪、怎么发下一版、以及本轮实测到的问题，见 §8。
 
 ---
 
@@ -17,14 +17,16 @@
 
 下一步：**先把 `pg_report` 定为“加第 10 个工具”还是保持“汇报=说话”**（它不再是第 4 级的判据，但仍是产品缺口）；补第 3 级剩下的 print/json 模式；再把第 4 级从 1 个子成员扩到 2 个并验重启/级联。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
 
+**第十二轮（2026-11-02）：投递换成“一条队列 + 翻滚窗口 + steer”。** 概念稿 v3 把“什么时候把东西交给模型”重写成一条队列加一个翻滚时间窗（`PIGROUPS_DELIVERY_WINDOW_MS`，默认 60 s）：第一个入队项开窗，`tick()`（还是那个 5 s 定时器）关窗，整批一次 `sendMessage(…, {triggerTurn:true, deliverAs:'steer'})`。投递不再等空闲，`isBusy()` 闸门与“一次 settle 只投一次”删掉，settle 只剩复核与标记。两条实测边界照实写进代码和文档：交给 pi、还排在长工具后面的 steer 要等工具返回才落盘（+1 ms）；它若在那一刻遇上 abort 会整份消失，所以投递层留内存副本、`turn_end(aborted)` 时重投。工具面删 `pg_steer`，加 `pg_members`（`last_seen_at` 明说只是最近一次鉴权）与 `pg_schedule`（5 s–24 h、最多 8 条、只在内存里）；`pg.attention` / `pg.inspect_result` 带 last 块（最后一条助手正文 + 最后一个完成的工具调用）。两个 skill（`pigroups-org`、`pigroups-message`）随包发布并被 pi 的加载器读出。证据在 `probe/logs/v3-20261101T173805Z/`（§3.3、§16）；仍未合的洞是“同一轮里两批投递遇上 abort 只重投最后一批”（§7）。
+
 **上一轮“关 pane 切掉活 agent”那条已经不再是常态**（§3.8）：根因是 `sys.terminated` 只丢 journal、停循环、`shutdown()`，从不 `abort()`，而 pi 的 shutdown 会等正在跑的工具。`25b8c1b` 让终止路径先按 `pg.abort` 的同一条 3 s 上限切断那一轮，再收尾；`bash sleep 40` 真机复跑从 5031 ms / FAIL 变成 204 ms / PASS（工具在 DELETE 后 3 ms 收到 `Command aborted`，pi 在 close 前 86 ms 已退出）。**仍未关**的是接口边界而非这条竞态：一个完全忽略 abort signal 的工具仍可能拖过 3 s，那时 `Herdr.close()` 会在 5 s 到点强制关 pane 并报 `forced: true`，`pg_terminate` 把它列进 `pane_close_forced`——可见，但不是干净关闭；`pane list` 读失败时仍是“未知”，pane 映射仍只在内存里。§7 那一行已按实际覆盖改写。
 
 ```
 平台仓库  ~/Documents/PiGroups          0.2.0  v0.2.0  57 tests   typecheck 干净  已发版 v0.2.0
-适配器    ~/Documents/pigroups-adapter  0.4.0+platform.0.2.0  v0.4.0+platform.0.2.0  103 tests  typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
+适配器    ~/Documents/pigroups-adapter  0.5.0+platform.0.2.0  v0.5.0+platform.0.2.0  123 tests  typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
 ```
 
-两个仓库按**一次发布记一对号**：两边都动就同号，只有一侧动就只动那一侧；现在这一对是平台 `0.2.0` + 适配器 `0.4.0+platform.0.2.0`。号住在哪、怎么发下一版见 §8。
+两个仓库按**一次发布记一对号**：两边都动就同号，只有一侧动就只动那一侧；现在这一对是平台 `0.2.0` + 适配器 `0.5.0+platform.0.2.0`。号住在哪、怎么发下一版见 §8。
 
 ---
 
@@ -51,26 +53,27 @@
 
 | | |
 |---|---|
-| 版本 | `0.4.0+platform.0.2.0`，标签 `v0.4.0+platform.0.2.0`（annotated、未签名；平台仍是 `0.2.0` / `v0.2.0`；旧的同日标签 `v0.4.0` 指向被否掉的那一版，见 §8）。`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`、lockfile 三处必须相等（`test/version.test.ts` 会红）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。`+platform.0.2.0` 是 build metadata，只记录测试对象，不是兼容门 |
-| 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（含 `PiSurface`、`Herdr`、循环、journal、`pg.*` 契约）。包本身是 `pi-package`：`package.json` 的 `pi.extensions` 指向 `./src/extension.ts`，`files` 只打包 `src`、`README.md`、`CHANGELOG.md`、`docs` |
-| 代码 | `src/` 约 3180 行，9 个模块（新增 `command.ts`），**无运行时依赖**（只用 `node:*` 和 `fetch`） |
-| 测试 | `test/` 约 3900 行，103 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
+| 版本 | `0.5.0+platform.0.2.0`，标签 `v0.5.0+platform.0.2.0`（annotated、未签名；平台仍是 `0.2.0` / `v0.2.0`；上一对是 `v0.4.0+platform.0.2.0`，更早的 `v0.4.0` 指向被否掉的那一版，见 §8）。`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`、lockfile 三处必须相等（`test/version.test.ts` 会红）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。`+platform.0.2.0` 是 build metadata，只记录测试对象，不是兼容门 |
+| 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（含 `PiSurface`、`Herdr`、循环、journal、`pg.*` 契约）。包本身是 `pi-package`：`package.json` 的 `pi.extensions` 指向 `./src/extension.ts`、`pi.skills` 指向 `./skills`（两个 skill：`pigroups-org`、`pigroups-message`），`files` 只打包 `src`、`skills`、`README.md`、`CHANGELOG.md`、`docs`（`npm pack` 出 18 个文件） |
+| 代码 | `src/` 约 3838 行，10 个模块，**无运行时依赖**（只用 `node:*` 和 `fetch`） |
+| 测试 | `test/` 约 4749 行，123 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
 | 提交 | `master`（数量见 `git log`） |
 
 ```
-src/extension.ts   Pi 扩展入口：注册 9 个 pg_* 工具，挂 session_start / session_shutdown
-src/surface.ts     PiSurface 接口 + 真实实现（pi 事件 → PiEvent 四态）
-src/loop.ts        循环：拉取 → 分类 → 注入 → 义务 → 遥测（不 import pi 包）
+src/extension.ts   Pi 扩展入口：注册 10 个 pg_* 工具，挂 session_start / session_shutdown
+src/surface.ts     PiSurface 接口 + 真实实现（pi 事件 → PiEvent 五态，含 message_end → lastAssistantText）
+src/loop.ts        循环：拉取 → 分类 → 投递队列 / 翻滚窗口 → 义务 → 遥测（不 import pi 包）
 src/herdr.ts       Herdr 接口 + herdr CLI 实现
 src/pgclient.ts    平台 HTTP 客户端（只碰 15 个端点）
 src/journal.ts     注入前落盘、投递后提交（按成员分）
 src/watermark.ts   注入水位（按成员分，持久化）
 src/state.ts       义务表、遥测表、合并窗口
+src/version.ts     适配器版本号（唯一来源，与 package.json / lockfile 由测试对齐）
 ```
 
 **`loop.ts` 不许 import `@earendil-works/pi-coding-agent`。** 这是整个仓库可测的唯一来源。改坏了这一条，测试就退化成"跑一遍真模型看看"。
 
-9 个工具：`pg_say` `pg_read` `pg_spawn` `pg_terminate` `pg_whoami` `pg_abort` `pg_steer` `pg_inspect` `pg_children`。
+10 个工具：`pg_say` `pg_read` `pg_spawn` `pg_terminate` `pg_whoami` `pg_abort` `pg_inspect` `pg_children` `pg_members(query?)` `pg_schedule(after_seconds, note)`。`pg_steer` 已在 0.5.0 删掉：改方向用 `pg_say`，只有 `pg_abort` 能在长工具期间改变一个成员的行为；线协议上的 `pg.steer` 仍接受，但走投递窗口、不再切断忙碌成员。
 
 ### 2.3 接线：默认零配置，`PIGROUPS_SPAWN_CMD` 只是逃生口
 
@@ -137,7 +140,7 @@ PIGROUPS_SPAWN_CMD="pi -e '$ADAPTER/src/extension.ts' --model '$MODEL'"
 
 ### 3.3 适配器侧的具体数字
 
-- 103 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
+- 123 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口、stalled 阈值与投递窗口都不用 sleep）
 - 新补的 15 条（44 → 59，之后又补 3 条到 62）：`test/surface.test.ts` 新增 3 条（幂等门；该文件共 9 条）、
   `test/surface.abort.test.ts` 10 条（abort/isBusy/shutdown/退订/preview，含 3 s 放弃分支）、
   `test/obligation.test.ts` 新增 2 条（`nudgeOwed` 的 abort 竞态）；三组都做过撤掉源码再跑红的验证
@@ -147,6 +150,7 @@ PIGROUPS_SPAWN_CMD="pi -e '$ADAPTER/src/extension.ts' --model '$MODEL'"
 - 第七轮（E–F）再补 4 条到 88：`test/control.test.ts` 2 条（`sys.terminated` 先切断再丢 journal、abort 不回时仍在 3 s 到点收尾）；`test/herdr.test.ts` 1 条（到点 agent 仍在时报 `forced: true`）+ `test/tools.test.ts` 1 条（`pg_terminate` 把强制关闭列进 `pane_close_forced`）。四条都做过“撤掉 src 就红”的验证，数字在 §14
 - 第八轮再补 8 条到 96：`test/spawn.test.ts` 3 条（默认自加载、显式 env 获胜、含空格路径不被拆开）；`test/compatibility.test.ts` 3 条（纯判定、支持平台无 warning、不支持平台恰好一条且不重复）；`test/package.test.ts` 2 条（`pi` manifest 指向真实入口、`private` 与打包文件清单）。行为用例都做过“撤掉 src 就红”的验证，数字在 `CHANGELOG.md` v0.4.0
 - 第九轮再补 7 条到 103（`b49e410`，当时还是镜像旗标的版本；`1d3e689` 把镜像删掉后仍是 103，spawn 套件 7 → 7，见 §15）：`test/spawn.test.ts` 7 条（默认 `pi -e` 不再带 `-ne`、显式 env 获胜、含空格路径、`args` 按序追加且不注入别的、含 `$`/引号/分号的路径仍是一个 argv、schema 恰好 `name/brief/cwd/args` 且指向 `pi --help`、`command.ts` 只剩切词与引用不再导出旗标镜像）；`test/tools.test.ts` 1 条（`spawnMember` 把原始 argv 传到 pane，并断言无 `args` 时不追加）；`test/herdr.test.ts` 2 条（`agent start --` 后追加 argv、`send-text` 兜底逐个引用）。变异见轮次记录
+- 第十二轮（0.5.0）再补 19 条到 122（`8d21f37`）：投递 4、control 3、telemetry 3、members 3、schedule 3、surface 1、工具面 1、另有 2 条落在既有文件；发版前又补 1 条（`poll` 401 的提示必须先于 `stop()` 投出去）到 **123**。变异扫描 12 个**全部被杀**，清单与原文见表：`probe/logs/v3-20261101T173805Z/report.md` §1（窗口恒到期、加回 `isBusy()` 闸门、去掉 `deliverAs:'steer'`、abort 不强制关窗、`turn_end(aborted)` 不复投、`relationOf` 丢 sibling、`pg_schedule` 三条边界、到点预约绕过窗口、`query` 区分大小写、不订阅 `message_end`）。同一轮跑了真机 A–D（§16），基线在跑前跑后都是 `npm test` 全绿、`typecheck` 干净
 - 变异测试 17 个，抓 12 个；存活 5 个里 3 个已被后补测试覆盖，剩 2 个（水位按成员、`flush()` 返回值）已补并有变异证明
 - 本轮另做 3 个反向变异，全被抓：撤 `turnOpen` 门 → `surface.test.ts` 9 条里 2 条红；撤 `abort()` 放弃时的 warn → `surface.abort.test.ts` 1 条红；撤 `nudgeOwed` 的两处 `aborting` 检查 → `obligation.test.ts` 2 条红。恢复后全绿
 - 此前的两轮独立评审：源码侧 3 blocking + 9 should-fix 全部修完；测试侧 11 条覆盖缺口补了 9 条（2 条判定为文档信息不足，明确跳过）
@@ -532,7 +536,10 @@ close 等到了正常退出，所以按 F 的语义 `pane_close_forced` 为空�
 | 名册对所有人可见，群聊只对父+子 | 结构与会话分离 | 概念稿 §4.4 |
 | 消息按会话编号，不暴露全局序号 | 全局号泄漏"我看不到的会话有多少流量" | 设计稿 §3.4 |
 | `poll` 取走即消费，不分离 fetch/ack | 简单；代价是 adapter 必须自己做 journal | 设计稿 §6.1 |
-| 一次 settle 只投一次，**flush 在前、nudge 只在其没投时才跑** | 反了会饿死队列（催办占满投递通道，新消息永远送不到） | 设计稿 §2.3 不变量 2 |
+| 投递只走**翻滚窗口 + steer**；settle 不再是投递触发器（0.5.0 起） | 一个窗口 = 一次打断。逐条投递会把一轮工作切成碎片；忙碌闸门又让消息等到空闲才到，而 pi 自己会 steer | 概念稿 §8.1、设计稿 §2.3 |
+| 条数上限（10）只是尺寸阀门，永远不是触发器 | “又攒了两条就投”会退化成逐条投递，窗口就白设了 | 概念稿 §8.1、设计稿 §3.5 |
+| 已投的一批留内存副本，`turn_end(aborted)` 时重投 | 实测：排在长工具后面、还没落盘的 steer 遇上 abort 会整份消失 | 概念稿 §8.3 ②、设计稿 §3.4 |
+| 催办只在**没有别的可投**的窗口里投 | 反了会饿死队列（催办占满投递通道，新消息永远送不到） | 设计稿 §4.3 |
 | 催办合并成一次投递 | 一次 settle 一次投递；醒一次就该看到全部欠账 | 设计稿 §4.3 |
 | 注入水位与 journal 都**按成员**分 | 父与子共用 `PIGROUPS_ADAPTER_DIR`，`dm:<a>_<b>` 两端同一个字符串 | 设计稿 §3.1 §3.4 |
 | `gap` 不推进水位 | 它的锚点 `before` 可能正好是下一条真消息的 seq | 设计稿 §3.4 |
@@ -558,9 +565,14 @@ close 等到了正常退出，所以按 F 的语义 `pane_close_forced` 为空�
 
 | 风险 | 状态 |
 |---|---|
+| 同一轮里两批投递遇上 abort，只有最后一批被重投 | **未修，本版已知的丢失**。`lastDelivered` 只有一个槽位（`src/loop.ts:243`），第二次成功投递把它覆盖。触发条件是“一轮还没结束、第二个投递窗口又关了”，之后才 abort。复现脚本与输出在 `probe/logs/v3-20261101T173805Z/`（`extra-multibatch-loss.ts`：`#2` 出现两次，`#1` 一次都没有）。修法是把槽位换成“未确认批次表”，配一条新测试；留给人做，别在没测试的情况下顺手改 |
+| 概念稿 v3 与实现有十处对不上 | **记录，不改稿**。`docs/概念稿.md` 是权威，但它 §2.2 的术语表还写着“一次 settle 只允许一次投递”（§8.1 已删）；§7.6 的 skill 名字是 `pigroups-member`/`pigroups-lead`，实际发的是 `pigroups-org`/`pigroups-message`；§7 的 `pg_schedule` 写“N 秒后”送达，实测会再多等最多一个窗口；`dm:` 前缀是读侧 id，`pg_say` 只收 `g:<owner>` 或裸成员 id；§8.4 的催办在空队列时会没有窗口可等（实现用 `nudgeDue` 开窗）；§8.3 ① 的“abort 之后再 say 立刻生效”需要额外的 `windowImmediate` 状态；journal 重放要不要等窗口没写（实现等）；“条数是阀门不是触发器”没说溢出怎么办（实现每批 10 条、剩下的重开窗）；`pg_members` 的 `self` 是 id 还是行没写（实现给 id）。逐条见 §16 末尾 |
+| 两个 skill 只验了“被发现”，没验“有用” | `pi` 的 `loadSkillsFromDir` 从**打出来的包**里读出两条、0 诊断（`probe/logs/release-0.5.0-20261101T175209Z/skills-load.txt`），真机 banner 也列出过（§16 D）。但没有任何一次 run 用它们跑一个多成员组织：措辞是否让模型少问一句、按“拥有的东西”命名是否真的让 `pg_members` 查得到，都还没有样本 |
+| `pg_schedule` 的“N 秒后”其实是“N 秒后 + 最多一个窗口” | 已知且写进工具描述：预约到点只是入队，之后按投递窗口走。实测 10 s 的预约在到点后 8.9 s 才送到（§16 C）。它不是定时唤醒——别拿它当 cron 用 |
+| 崩溃后 journal 重放要等一个窗口 | **实现选择，概念稿没写**。启动简报是 `windowless`，重放项不是：重启后最坏 60 s 才到模型。判据是“重放和普通消息一样”，如果“启动注入”整体都该免窗，这条要改，测试里已经能显式关窗 |
 | `deliver()` 只确认"pi 收下了"，不确认"run 起来了" | 丢失窗口仍在：`pi.sendMessage` 是 void，pi 吞掉启动失败，而水位与 journal 在 `deliver()` resolve 后立刻推进（`docs/设计说明.md §3.4`）。消息会被记成已注入但那一轮没起来。本轮只把契约写准（`PiSurface` 注释、§3.4、本节都写了"收下 ≠ 起来"），没有加 ack；要收紧只能给 `PiSurface` 加"下一次 `agent_start`"的确认，属于接口设计决定 |
 | `details.kind` 写了没人读 | `src/surface.ts` 把它塞进 `pi.sendMessage` 的 `details`，`test/surface.test.ts` 也断言了，但仓库里没有任何读取方。要么定为 UI 契约写进 `docs/设计说明.md`，要么删——产品决定，未做 |
-| 投递排队分支没有真实样本 | 留存日志里 `hasPendingMessages` 恒为 `false`：两笔投递同时排队、以及 turn 中途再投都没观测过；`hasPendingMessages` 在 `src/` 里也一次没读。一次 settle 只投一次的规则不覆盖这个场景 |
+| 投递排队分支没有真实样本（部分已补） | 0.5.0 起“一次 settle 只投一次”这条规则没了，排队行为改由投递窗口统一决定；真机 A 观测到“窗口关时那一轮还在跑长工具”这一种（§16），也就是 steer 真的排在模型的下一次调用之前。**仍没观测**的是两批都还在队列里就同时被投出去的样子；`hasPendingMessages` 在 `src/` 里仍一次没读（它本来也没被实现用过） |
 | `ctx.shutdown()` 自调用、print/json 模式下的退出 | **部分已验**。外部 `SIGTERM` 的 tui 路径已证明 await（3 s 异步体、`process_exit.after_shutdown_done_ms ≥ 0`、exit 0、只派发一次）；`ctx.shutdown()` 自调用这条路径在 §3.7 的四次 run 里走了四遍（`sys.terminated` → `discardAndShutdown()` → `surface.shutdown()`），PASS 的三次有非信号的 resume 行、会话完整、进程先于 close 退出；shutdown 时正在跑的一轮也验了（#4 等工具跑完才退）。§3.8 三次再验了 abort → shutdown 这一串：工具先被切断（+3 ms），pi 118 ms 退出，三个会话都以非信号的 resume 行结束。**仍缺**：print/json 模式（源码看是 143，未实测） |
 | 一个忽略 abort signal 的工具不会被 pi 杀掉 | **未解决，接口边界**。硬变体：abort 后 3009 ms `idle_timeout`，工具自己 60 s 后返回，aborted settle 晚到 58 296 ms。adapter 的 `abort()` 3 s 后放弃并打 warn；`pg.abort` 对这类成员无法兑现“已切断”。`bash` 内置工具未验 |
 | `herdr agent start` 在真实 pane 里的行为 | **已验证**（第 4 级）：root 与 child 都由 `agent start` 起，返回 `interactive_ready:true`，pane 显示 `agent=pi`。**未验**的是失败后的 `pane send-text` 兜底路径 |
@@ -585,11 +597,11 @@ close 等到了正常退出，所以按 F 的语义 `pane_close_forced` 为空�
 
 ## 8. 怎么重跑一切
 
-**先确认你手里是哪一版。** 现在这一对是**平台 `0.2.0` + 适配器 `0.4.0+platform.0.2.0`**：平台有未签名 annotated 标签 `v0.2.0`（`1d68dd4`），适配器有未签名 annotated 标签 `v0.4.0+platform.0.2.0`（钉在携带证据的发版提交上，`git rev-parse 'v0.4.0+platform.0.2.0^{}'`；同日的旧标签 `v0.4.0` 指向被否掉的那一版，见下面的“标签名带 metadata 的原因”）。这是本仓库第三次**单侧发版**：只有适配器动了，所以只有它进号（minor，spawn 默认改变是操作者可见的行为变化），平台保持 `0.2.0`。发版提交之后如果还有文档/元数据提交，`git describe --tags` 会带后缀（平台现在就是 `v0.2.0-1-g210ed07`）——**后缀不是新版本**，标签仍钉在发版提交上；适配器的标签打在携带证据的那次提交上，`git describe --tags` 就是 `v0.4.0+platform.0.2.0`。
+**先确认你手里是哪一版。** 现在这一对是**平台 `0.2.0` + 适配器 `0.5.0+platform.0.2.0`**：平台有未签名 annotated 标签 `v0.2.0`（`1d68dd4`），适配器有未签名 annotated 标签 `v0.5.0+platform.0.2.0`（钉在携带证据的发版提交上，`git rev-parse 'v0.5.0+platform.0.2.0^{}'`；上一对是 `v0.4.0+platform.0.2.0`，更早的 `v0.4.0` 指向被否掉的那一版，见下面的“标签名带 metadata 的原因”）。这是本仓库第四次**单侧发版**：只有适配器动了，所以只有它进号（minor：`PiSurface`/`PiEvent`/`LoopConfig` 加了成员，工具面增删，投递行为改变），平台保持 `0.2.0`。发版提交之后如果还有文档/元数据提交，`git describe --tags` 会带后缀（平台现在就是 `v0.2.0-1-g210ed07`）——**后缀不是新版本**，标签仍钉在发版提交上；适配器的标签打在携带证据的那次提交上，`git describe --tags` 就是 `v0.5.0+platform.0.2.0`。
 
 **号住在哪。** 平台只有一处：`package.json`；`src/version.ts` 直接 import 它，`/v1/health` 与每个响应的 `server_version` 都是这个数，没有第二个常量。适配器三处必须一致：`src/version.ts` 的 `ADAPTER_VERSION`、`package.json`、`package-lock.json`（`test/version.test.ts` 会比对 `package.json` 与 lockfile 的两处）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。`+platform.0.2.0` 是 build metadata，只记录发版时验证过的平台，不参与比较；平台以后变了而适配器不用改，就重发同一数字、换 metadata。两边的 lockfile 现在都跟上了各自的 `package.json`（平台在 `210ed07` 重新生成，并加了锁文件漂移测试）。
 
-**发一次版：实际走过的步骤**（2026-11-01，`v0.4.0+platform.0.2.0`）。顺序就是下面这样；第 4、5 步没通过就不要打标签：
+**发一次版：实际走过的步骤**（2026-11-02，`v0.5.0+platform.0.2.0`）。顺序就是下面这样；第 4、5 步没通过就不要打标签：
 
 ```bash
 cd ~/Documents/pigroups-adapter
@@ -599,45 +611,58 @@ cd ~/Documents/pigroups-adapter
 #    test/version.test.ts 会在三者不一致时变红
 
 # 2) 全绿才往下走
-npm run typecheck && npm test            # 2026-11-01：typecheck 干净，103/103
+npm run typecheck && npm test            # 2026-11-02：typecheck 干净，123/123
 
 # 3) 打包，别只看“命令成功”——把文件清单留着
-npm pack --pack-destination "$(mktemp -d /tmp/pigroups-release.XXXXXX)"   # 16 个文件
+OUT=probe/logs/release-0.5.0-20261101T175209Z
+TMP=$(mktemp -d /tmp/pigroups-release.XXXXXX)
+npm pack --pack-destination "$TMP"       # 18 个文件：src/ 10 个、skills/ 2 个、docs/ 3 个、根 3 个
+tar -tzf "$TMP"/pigroups-adapter-pi-0.5.0+platform.0.2.0.tgz | sort > "$OUT/tarball-contents.txt"
 
 # 4) 解包，证明打出来的那一份能加载（不是只看仓库工作树）
-tar -xzf pigroups-adapter-pi-0.4.0+platform.0.2.0.tgz -C <tmp>/extract
-node probe/logs/<本次证据目录>/load-proof.mjs <tmp>/extract/package
-#    九条检查：manifest 的 name/version、pi.extensions 指向真实文件、src 有模块、
-#    20 条相对 import 全部解析、import() 入口后 default 是扩展函数
+mkdir -p "$TMP/extract" && tar -xzf "$TMP"/pigroups-adapter-pi-0.5.0+platform.0.2.0.tgz -C "$TMP/extract"
+node "$OUT/load-proof.mjs" "$TMP/extract/package"      # 11 条检查，全 PASS
+#    name/version、pi.extensions 指向真实文件、pi.skills 指向 ./skills 且两个 SKILL.md 都在、
+#    src 有模块、20 条相对 import 全部解析、import() 入口后 default 是扩展函数
 #    再做一次“pi 真的加载它”：
 PIGROUPS_URL=http://127.0.0.1:9 PIGROUPS_TOKEN=x \
-  pi -e <tmp>/extract/package/src/extension.ts --no-session --mode json < /dev/null
-#    stderr 必须出现 [pigroups] adapter 0.4.0+platform.0.2.0 starting against …
+  pi -e "$TMP/extract/package/src/extension.ts" --no-session --mode json < /dev/null
+#    stderr 必须出现 [pigroups] adapter 0.5.0+platform.0.2.0 starting against …
 #    （那行是 extension.ts 在 init() 里打的：能打出来说明整条模块图在 pi 里 import 并执行了；
 #      `--mode json` 从 /dev/null 读不到输入就退出，不需要模型，也不需要真平台）
-#    TUI 那边也能看见：--verbose 的 [Extensions] → path 组会列出解包副本的入口
+#    再用 pi 自己的加载器读包里的 skill（不经过本仓库的代码）：
+node --input-type=module -e "import {loadSkillsFromDir} from '<pi>/dist/core/skills.js';
+  console.log(loadSkillsFromDir({dir: process.argv[1], source: 'pigroups package'}))" \
+  "$TMP/extract/package/skills"
+#    期望两条：pigroups-message、pigroups-org；diagnostics 为空
 
-# 5) 真机检查（这一步不能省）：默认命令、args 透传、子成员能跑工具并说话
-#    见 §15；两个 case 都 PASS 才继续。要起 pane/tab 就用一次性 tab，用完核对 pane/tab 集合
+# 5) 真机检查（这一步不能省）：见 §16 的 A–D（长工具中投递、abort 后重投、名册/预约、skill 被发现）
+#    以及 §15 的 spawn 默认与 args 透传。要起 pane/tab 就用一次性 tab，用完核对 pane/tab 集合
 
 # 6) 一次提交收齐 CHANGELOG、文档、证据目录，然后在那个提交上打未签名 annotated 标签
-git add CHANGELOG.md docs/handoff.md probe/logs/<本次证据目录>
+git add CHANGELOG.md docs/handoff.md docs/设计说明.md src/loop.ts src/state.ts \
+        test/control.test.ts probe/logs/v3-20261101T173805Z probe/logs/release-0.5.0-20261101T175209Z
 git commit --no-gpg-sign
-git tag --no-sign -a 'v0.4.0+platform.0.2.0' -m "…"
-git cat-file -p 'v0.4.0+platform.0.2.0' | grep -c gpgsig     # 期望 0
-git describe --tags                                          # v0.4.0+platform.0.2.0
+git tag --no-sign -a 'v0.5.0+platform.0.2.0' -m "…"
+git cat-file -p 'v0.5.0+platform.0.2.0' | grep -c gpgsig     # 期望 0
+git describe --tags                                          # v0.5.0+platform.0.2.0
 ```
 
-**标签名带 metadata 的原因。** `0.4.0` 当天先切过一版（标签 `v0.4.0`，spawn 默认带 `-ne`、`pg_spawn` 镜像七个旗标），那一版的设计当天被否掉，代码也删了。规则是“标签记录发出去的那一版”，所以旧标签不移动、不删除，最终内容用**同一个数字 + build metadata** 重切：`v0.4.0+platform.0.2.0`。下一次内容变化按 0.x 口径该进 minor（`0.5.0`），不要再在 `0.4.0` 上打第三个标签。
+**这一版的标签内容比真机 run 多一处改动。** 真机 A–D 跑在 `4e5a174` 上（`8d21f37` 的代码 + 证据）。发版前发现 `poll` 401 那句“token 失效”在 0.5.0 里发不出去：`stop()` 之后 `deliverPending` 一律答 `stopped`，而旧代码是“先 `stop()` 再入队”（0.4.0 没有这个闸门，所以是这一版引入的静默退步）。修法是把它作为 `windowless` 项**先投、再停**，配一条新测试（`test/control.test.ts`，撤掉 src 就红，见 §16 末尾）。这是一条错误路径，A–D 都没走到；核心投递/重投路径没有改动，真机结论仍然成立。判据是 `npm test` 123/123 全绿、包里的 11 条加载检查全 PASS（`probe/logs/release-0.5.0-20261101T175209Z/`）。
 
-这一次是单侧发版：平台不动，适配器 `0.3.0 → 0.4.0`（spawn 默认从裸 `pi` 变成自加载本扩展、
-子成员不再被剥离，都是操作者可见的行为变化，所以是 minor 不是 patch）；前面两次单侧发版是
+
+**标签名带 metadata 的原因。** `0.4.0` 当天先切过一版（标签 `v0.4.0`，spawn 默认带 `-ne`、`pg_spawn` 镜像七个旗标），那一版的设计当天被否掉，代码也删了。规则是“标签记录发出去的那一版”，所以旧标签不移动、不删除，最终内容用**同一个数字 + build metadata** 重切：`v0.4.0+platform.0.2.0`，再往后是 `v0.5.0+platform.0.2.0`。往后每次内容变化按 0.x 口径进号（`0.6.0` 或 `0.5.1`），不要在同一个数字上打第二个标签。
+
+这一次是单侧发版：平台不动，适配器 `0.4.0 → 0.5.0`（投递从“每次 settle 投一次、等空闲”
+变成“翻滚窗口 + steer”，`PiSurface`/`PiEvent`/`LoopConfig` 加成员，工具面删 `pg_steer`、
+加 `pg_members`/`pg_schedule`，遥测载荷加 last 块，都是契约变化，所以是 minor 不是 patch）；
+前三次单侧发版是 `v0.4.0`（`0.3.0 → 0.4.0`，spawn 默认改为自加载本扩展）、
 `v0.3.0`（`0.2.1 → 0.3.0`，`Herdr.close()` 的返回值与 `pg_terminate` 的字段变了）与
 `v0.2.1`（`0.2.0 → 0.2.1`，patch）。
 
 口径（`CHANGELOG.md` 里也写着）：0.x 阶段按本项目自己的定义，不按 semver 默认——patch（`0.x.N+1`）只修 bug，端点、字段、工具名都不变；minor（`0.X+1.0`）是契约变化：加/删字段、端点、工具，改已记录的行为，数据迁移，新增接口成员。两边都动时两个仓库一起走到同一个号；只动一侧时另一侧保持原号。标签记录的是这一对。
 
-**本轮实测到、没修的问题**：平台的变异守卫清单里“只改 `package.json` 看测试变红”这一条按字面做不到（单源，改它不会红；把 `SERVER_VERSION` 写死成 `0.1.0` 才会红，实测 1 条失败），适配器那份按字面有效（把 `ADAPTER_VERSION` 改成与 `package.json` 不同的号，实测 1 条失败）；~~平台 `CHANGELOG.md` 那句“入队与唤醒都在同一事务”~~ 已改正为“在删除事务里入队，事务提交后再唤醒”（`210ed07`）；~~平台 `package-lock.json` 还写着 0.1.0~~ 同一次提交重新生成，并加了锁文件漂移测试（`test/version.test.ts`）。
+**第十二轮实测到、没修的问题**：概念稿 v3 与实现的十处对不上（§7 第二行、§16 末尾，`docs/概念稿.md` 是权威，没改稿）；同一轮两批投递遇 abort 只重投最后一批（§7 第一行，有复现脚本）；`pg_schedule` 的到点延迟最多一个窗口（§7）。**已修**的是 `poll` 401 那句提示（见上，发版前）。**上一轮实测到、没修的问题**：平台的变异守卫清单里“只改 `package.json` 看测试变红”这一条按字面做不到（单源，改它不会红；把 `SERVER_VERSION` 写死成 `0.1.0` 才会红，实测 1 条失败），适配器那份按字面有效（把 `ADAPTER_VERSION` 改成与 `package.json` 不同的号，实测 1 条失败）；~~平台 `CHANGELOG.md` 那句“入队与唤醒都在同一事务”~~ 已改正为“在删除事务里入队，事务提交后再唤醒”（`210ed07`）；~~平台 `package-lock.json` 还写着 0.1.0~~ 同一次提交重新生成，并加了锁文件漂移测试（`test/version.test.ts`）。
 
 **以人身份读全部内容，三步，别想当然**（第 4 级真机跑时踩过）：
 
@@ -661,7 +686,7 @@ npm run typecheck && npm test          # 57 tests，约 1.8 秒
 
 # 适配器（会自己拉起一个平台子进程）
 cd ~/Documents/pigroups-adapter
-npm run typecheck && npm test          # 103 tests，约 8 秒
+npm run typecheck && npm test          # 123 tests，约 8 秒
 PIGROUPS_PLATFORM_DIR=~/Documents/PiGroups   # 默认是 ../PiGroups
 
 # 手动起一个平台
@@ -675,7 +700,7 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 9. 接手的第一件事
 
-1. 跑一遍上面两个 `npm test`，确认 57 / 103 全绿（`v0.4.0+platform.0.2.0` 这一对的数）
+1. 跑一遍上面两个 `npm test`，确认 57 / 123 全绿（`v0.5.0+platform.0.2.0` 这一对的数）
 2. 读 `pigroups-adapter/docs/设计说明.md` §2.1（`PiSurface`）和 §2.2（`Herdr`）——那是真机验证的靶子
 3. 重跑 `probe/run.sh`（对照组应 PASS）与 `PROBE_IGNORE_SIGNAL=1 probe/run.sh`（硬变体应 FAIL 在 P2.5/P2.7，这是 pi 的已知边界）
 4. 补第 3 级剩下的 print/json 模式；`pg.abort` 的 turn_end 与 `ctx.shutdown()` 自调用都已验，不要再动
@@ -688,14 +713,16 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 10. 交接清单
 
-- [x] 两个仓库 `git status` 干净；**这一对是平台 `0.2.0`（`v0.2.0`，`1d68dd4`）+ 适配器 `0.4.0+platform.0.2.0`（**`v0.4.0+platform.0.2.0`**，`git rev-parse 'v0.4.0+platform.0.2.0^{}'`）**，都是未签名 annotated 标签（详见 §8）。单侧发版：只有适配器进了 minor 位；同日的旧标签 `v0.4.0` 指向被否掉的那一版，不移动
+- [x] 两个仓库 `git status` 干净；**这一对是平台 `0.2.0`（`v0.2.0`，`1d68dd4`）+ 适配器 `0.5.0+platform.0.2.0`（**`v0.5.0+platform.0.2.0`**，`git rev-parse 'v0.5.0+platform.0.2.0^{}'`）**，都是未签名 annotated 标签（详见 §8）。单侧发版：只有适配器进了 minor 位；上一对 `v0.4.0+platform.0.2.0` 与被否掉的 `v0.4.0` 都不移动
 - [x] `PiGroups`: 57/57，typecheck 干净（2026-11-01 重测，约 1.8 s）
-- [x] `pigroups-adapter`: 103/103，typecheck 干净（2026-11-01 本轮重测，约 8 s）
+- [x] `pigroups-adapter`: 123/123，typecheck 干净（2026-11-02 本轮重测，约 8 s）
 - [x] `grep -c 'pi-coding-agent' pigroups-adapter/src/loop.ts` = 0（实测 0）
 - [x] herdr 版本记下（本机 0.9.5，`herdr --version` 2026-11-01 复核），三个旗标形状与 §3.4 一致
 - [x] 第 1 级探针通过（2026-11-01，`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮）
 - [ ] 第 2 级探针**部分通过**（对照组 2 ms 切断；`PROBE_IGNORE_SIGNAL=1` 的硬变体 P2.5/P2.7 失败：pi 不杀忽略 signal 的工具；`bash sleep 60` 未验）
 - [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；§3.7 又验了 `ctx.shutdown()` 自调用、session 落盘、shutdown 正在跑的一轮；§3.8 验了 abort → shutdown 这一串；print/json 模式仍未验）
+- [x] 真机验证 0.5.0 的投递（第十二轮，§16）：A 长工具中投递不等空闲（适配器在工具结束前 50.363 s 投递，pi 在工具返回 +1 ms 落盘）、B abort 后重投（55 ms 后重新注入并落盘；去掉重投的负对照复现 LOST）、C 名册/预约（6 行、四种关系；10 s 预约到点后 8.9 s 送达）、D 两个 skill 被 pi 发现。证据 `probe/logs/v3-20261101T173805Z/`
+- [x] 0.5.0 发版检查（第十二轮，§8）：三处版本号一致、`npm test` 123/123、`typecheck` 干净、`npm pack` 18 个文件、解包副本 11 条加载检查全 PASS、`pi --mode json` 打出 `0.5.0+platform.0.2.0` 启动行、pi 的技能加载器从包里读出两条 skill。证据 `probe/logs/release-0.5.0-20261101T175209Z/`
 - [x] 真机验证 0.4.0 的 spawn 默认（第十轮，§15）：根不设 `PIGROUPS_SPAWN_CMD`，只给 name+brief 的子成员能跑 `read`、能 `pg_say` 并被人读到；`args:["--tools","read"]` 的子成员工具只剩 `read`。证据 `probe/logs/spawn-args-20261101T142926/`（主）与 `…142109/`（佐证）。**同时抓到既有 bug**：`pg_spawn` 对健康的子成员报 `timed out waiting for agent status`（§7、§15）；当时未修，后续轮已修
 - [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**只能记部分通过**：只跑了 1 个子成员，且两条判据事后在 `de48904` 里改过（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话，不在记录那次 run 的 `3919467` 里，见 §3.6）。`pg_report` 工具缺失是产品缺口（§7），不是这一级的判据；重启/级联未验。关 pane 的等待另在 §3.7 复验 3 PASS / 1 FAIL，FAIL 那次已由 E 修掉并在 §3.8 复跑 3/3 PASS）
 
@@ -887,3 +914,72 @@ herdr 默认匹配集合一致；`blocked` 是活着的 agent 在等输入/许�
 早先的 `v0.4.0` 指向被否掉的那一版（`-ne` + 旗标镜像），不移动。起的那个 herdr tab 是先关
 pane 后自动消失的（再 `tab close` 得到 `tab_not_found`，预期），pane/tab 集合回到基线，
 没有残留 `pi -e …` 进程；两次 pi 都没建会话（`--no-session`）。发版流程写成可复跑的步骤在 §8。
+
+---
+
+## 16. 第十二轮：0.5.0 的投递窗口、名册与预约（2026-11-02）
+
+这一轮按**概念稿 v3**（§7 工具面、§8 投递）换掉投递核心，动的是接口，不只是行为；
+接口清单写在 `CHANGELOG.md` 的 v0.5.0 一节。`probe/logs/v3-20261101T173805Z/report.md`
+是这一轮的全部证据，下面是它的摘要；`probe/logs/release-0.5.0-20261101T175209Z/`
+是发版那一次的打包与加载证据。
+
+**改了什么**
+
+- **一条队列 + 翻滚窗口。** 聊天消息、未知控制项、遥测汇总、催办、预约唤醒、启动简报全进
+  `pending`。第一个 `windowed` 项开窗；`tick()`（原有的 5 s 定时器，没有第二个）在
+  `now - windowStart >= deliveryWindowMs` 时把整批**一次**投出去。条数上限 10 只是尺寸阀门：
+  超出的部分重开一个窗口等下一次，永远不会因为“又攒了 10 条”提前投。
+- **投递是 steer，不等空闲。** `deliver` 走 `pi.sendMessage(…, {triggerTurn:true,
+  deliverAs:'steer'})`；`isBusy()` 闸门与“一次 settle 只投一次”删掉。settle 只剩名册/pane
+  复核、跑一次 `tick()`、标记催办。
+- **三个例外，都在同一条队列里。** 启动简报 `windowless`；abort 之后强制关窗，并把下一批标成
+  `windowImmediate`（否则“先 abort 再 say”里的 say 要白等一个窗口）；`poll` 401 的提示在
+  `stop()` 之前以 `windowless` 项投出。
+- **abort 丢失的兜底。** 实测：已交给 pi、还排在长工具后面的 steer，遇上 abort 会整份
+  session 文件里一次都不出现。所以每次成功投递留一份内存副本；`turn_end(aborted:true)` 放回
+  队首并绕过水位重投；干净结束丢掉；provider error 保留。
+- **工具面。** 删 `pg_steer`（线协议仍收，走窗口、不再切断忙碌成员）；加 `pg_members(query?)`
+  （id/名字/父/关系/子数/`last_seen_at`，并明说后者只是最近一次鉴权）与
+  `pg_schedule(after_seconds, note)`（5 s–24 h、最多 8 条、内存里、到点入队）。
+- **last 块。** `PiSurface.lastAssistantText()` 由 pi 的 `message_end` 维护；
+  `pg.attention` 与 `pg.inspect_result` 带 `last: { text?, tool?: {name, preview, ok} }`
+  （正文截断 500 字，工具预览沿用 200）。
+- **两个 skill**：`skills/pigroups-org/SKILL.md`（怎么带组织）、
+  `skills/pigroups-message/SKILL.md`（怎么说话），`package.json` 的 `pi.skills` 指向
+  `./skills`，`files` 也加了它。
+
+**真机 A–D（`probe/logs/v3-20261101T173805Z/`，pi 1.4.0、herdr 0.9.5、deepseek-flash）**
+
+| 项 | 结果 |
+|---|---|
+| A 长工具中投递 | **PASS**。子成员在 `bash sleep 60`；适配器的注入水位在工具结束前 **50.363 s** 写下（证明它没等空闲），pi 在工具返回 **+1 ms** 落盘，模型 0.8 s 后引用。总延迟 = 9.2 s 窗口 + 50.4 s 工具 |
+| B abort 不丢队列里的消息 | **PASS（单批）**。abort 后 55 ms 重新投递并落盘；同一次运行把 `requeueLastDelivered()` 从副本里拿掉，复现 `custom=0, mentions=0` 的 **LOST**，与 `probe/logs/steer-20261101T170244Z/e2-…` 一致。所以 PASS 是重投带来的，不是 pi 的恩赐 |
+| C `pg_members` / `pg_schedule` | **PASS**。成员侧看到 `self=m_344e7f, total=6, matched=6`，四种关系齐全，`last_seen_at` 对从未鉴权的成员是 `null`；10 s 的预约在到点后 8.9 s 以 `[scheduled]` 送到（等窗口），模型随即回答 |
+| D 两个 skill | **PASS**。pi 的 `[Skills]` 列表里同时出现 `pigroups-org`、`pigroups-message` |
+| 清理 | pane 集合与基线一致（`extraPanes: []`）；平台进程退出；没有残留的探针 pi |
+
+**变异扫描**：12 个 src 变异，**0 存活**（清单在 `report.md` §1）。每个都是“只改 `src/`
+的临时副本、测试树不动”，跑完丢弃；基线与每次恢复后 `npm test` 全绿。
+
+**发版前补的一处**（不在 A–D 里）：`poll` 401 的“token 失效”提示在 0.5.0 里发不出去——
+`stop()` 之后 `deliverPending` 一律答 `stopped`，而代码是“先停再入队”。现在改为先以
+`windowless` 项投出、再 `stop()`；`test/control.test.ts` 有一条，撤掉 src 就红（超时等不到
+那条投递）。这是**本版引入的静默退步**，不是 0.4.0 的旧账。
+
+**概念稿 v3 的十处矛盾/空白**（`docs/概念稿.md` 是权威，本轮没改稿；实现做了取舍，接手时以这里为准）：
+
+1. §2.2 术语表还写“一次 settle 只允许一次投递”，§8.1 已删掉这条。
+2. §7.6 的 skill 名字是 `pigroups-member`/`pigroups-lead`，实际发的是 `pigroups-org`/`pigroups-message`（概念稿 §13.1 与派发任务书都这么写，实现跟的是后者）。
+3. §7 的 `pg_schedule` 写“N 秒后”送达；实际是“N 秒后 + 最多一个窗口（+ 当时的工具剩余）”，工具描述已照实写。
+4. §8 让成员“用注入前缀里的会话 id 说话”对私聊不成立：`dm:<a>_<b>` 是读侧 id，`pg_say` 只收 `g:<owner>` 或裸成员 id。message skill 里写了一张对照表。
+5. §8.4 的催办在**空队列**时没有窗口可等；实现用 `nudgeDue` 开一个安静窗口。
+6. §8.3 ① 的“abort 之后再 say 立刻生效”需要额外的 `windowImmediate` 状态，正文没写。
+7. journal 重放要不要等窗口没写；实现让重放走窗口（重启后最坏 60 s）。
+8. “条数是阀门、不是触发器”没说溢出怎么办；实现每批 10 条、剩下的重开窗。
+9. `pg_members` 的 `self` 没定义；实现返回调用者的 id（`members` 里还有一行 `relation:'self'`）。
+10. §7.2 还把 `pg.steer` 当适配器命令讲；工具已删，线协议仍兼容。
+
+**仍未合的口**：同一轮里两批投递遇上 abort，只重投最后一批（§7 第一行）。本轮**没有**
+修它——修法需要把单槽位换成未确认批次表，并配一条新测试；A–D 与变异扫描都在当前实现上，
+发版前不引入未经真机的行为改动。

@@ -1,0 +1,11 @@
+PASS package name — pigroups-adapter-pi
+PASS package version — 0.5.0+platform.0.2.0
+PASS pi.skills names one directory — ["./skills"]
+PASS both skills shipped with their SKILL.md — pigroups-message,pigroups-org
+PASS pi.extensions has one entry — ["./src/extension.ts"]
+PASS extension entry exists — ./src/extension.ts
+PASS src ships TypeScript modules — command.ts extension.ts herdr.ts journal.ts loop.ts pgclient.ts state.ts surface.ts version.ts watermark.ts
+PASS 20 relative imports resolve — all found
+PASS entry default export is the extension function — function
+PASS EXTENSION_ENTRY names the loaded file — /tmp/pigroups-release.1sy5b9/extract/package/src/extension.ts
+PASS default spawn command loads this extension — pi -e /tmp/pigroups-release.1sy5b9/extract/package/src/extension.ts

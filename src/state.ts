@@ -179,8 +179,9 @@ export class TelemetryTable {
    *   trace (§5.2).
    * - `remind`: deliver the rolled-up text as a `nudge`.
    *
-   * Callers must not invoke this while the member is busy: a busy member never
-   * gets a delivery, so the reminder waits for the next settle.
+   * The caller is `tick()`: the rolled-up text is queued like any other item and
+   * leaves with the next delivery window (概念稿 §8.1). A busy member is a normal
+   * recipient now — delivery is a steer — so idleness is not a gate here.
    */
   due(now: number): TelemetryDecision {
     if (this.entries.size === 0) {

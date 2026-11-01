@@ -157,7 +157,7 @@ const STOP_TIMEOUT_MS = 3000;
 
 /** A roster read is a settle/startup cost, not a poll-time one (§4.1). */
 const ROSTER_TTL_MS = 30_000;
-/** A slow roster must delay startup or a settle's delivery no further than this. */
+/** A slow roster must delay startup, or a settle reaction, no further than this. */
 const ROSTER_TIMEOUT_MS = 2000;
 /** A failed roster read is not retried on every settle; the platform may be down. */
 const ROSTER_RETRY_BACKOFF_MS = 5000;
@@ -1288,7 +1288,7 @@ export class AdapterLoop {
     }
   }
 
-  // ---- settle: delivery, nudges, telemetry (§4.3, §5.2) ------------------
+  // ---- settle: reconcile, nudges, telemetry (§4.3, §5.2) -----------------
 
   /** Subscribe once: a second `start()` must not react twice to one settle (§2.3). */
   private subscribeSettled(): void {
@@ -1683,9 +1683,19 @@ export class AdapterLoop {
       // §9: stop the loops, hand the agent one line, and wait for a human to replace
       // the token. Not the poll's own business — a loop that is not running (no token
       // at all, §7) delivers nothing.
-      await this.stop();
-      this.pending.push({ text: 'PIGROUPS token 失效：请更新 token 并重启本 session。', kind: 'message' });
+      //
+      // The line goes out *before* `stop()`: a stopped loop delivers nothing
+      // (`deliverPending` answers `stopped`), so a notice queued afterwards would sit
+      // in a dead queue and the model would never learn why the member went silent.
+      // `windowless` is the one exception the start-up brief also uses — the window
+      // exists to avoid interrupting work, and there is no work left to protect.
+      this.pending.push({
+        text: 'PIGROUPS token 失效：请更新 token 并重启本 session。',
+        kind: 'message',
+        windowless: true,
+      });
       await this.flush();
+      await this.stop();
       return;
     }
 
