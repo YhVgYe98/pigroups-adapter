@@ -18,7 +18,7 @@
 下一步：**先把 `pg_report` 定为“加第 10 个工具”还是保持“汇报=说话”**（它不再是第 4 级的判据，但仍是产品缺口）；补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘；再把第 4 级从 1 个子成员扩到 2 个并验重启/级联。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
 
 ```
-平台仓库  ~/Documents/PiGroups          0.2.0  v0.2.0  56 tests   typecheck 干净  已定稿
+平台仓库  ~/Documents/PiGroups          0.2.0  v0.2.0  57 tests   typecheck 干净  已发版 v0.2.0
 适配器    ~/Documents/pigroups-adapter  0.2.0  v0.2.0  78 tests   typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
 ```
 
@@ -459,7 +459,7 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 
 ## 8. 怎么重跑一切
 
-**先确认你手里是哪一版。** 两个仓库都是 `0.2.0`，各有一个未签名 annotated 标签 `v0.2.0`（平台 `1d68dd4`、适配器 `f340f25`）；本文档描述的就是这一对。`git describe --tags` 在平台仍输出 `v0.2.0`；适配器会在标签后带后缀（`v0.2.0-N-g<hash>`），因为本文档的提交在发版之后——后缀不是新版本。
+**先确认你手里是哪一版。** 两个仓库都是 `0.2.0`，各有一个未签名 annotated 标签 `v0.2.0`（平台 `1d68dd4`、适配器 `f340f25`）；本文档描述的就是这一对。两个仓库的 `git describe --tags` 现在都会带后缀（`v0.2.0-N-g<hash>`），因为发版之后还有文档/元数据提交——**后缀不是新版本**，标签仍钉在发版提交上。
 
 **号住在哪。** 平台只有一处：`package.json`；`src/version.ts` 直接 import 它，`/v1/health` 与每个响应的 `server_version` 都是这个数，没有第二个常量。适配器两处必须一致：`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`（`test/version.test.ts` 也会比对 lockfile）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。**平台的 `package-lock.json` 仍是 `0.1.0`**——生成文件没跟上，真值以 `package.json` 与标签为准，平台的版本守卫不查 lockfile。
 
@@ -475,7 +475,7 @@ git cat-file -p v0.3.0 | grep -c gpgsig     # 期望 0
 
 口径（`CHANGELOG.md` 里也写着）：0.x 阶段按本项目自己的定义，不按 semver 默认——patch（`0.x.N+1`）只修 bug，端点、字段、工具名都不变；minor（`0.X+1.0`）是契约变化：加/删字段、端点、工具，改已记录的行为，数据迁移，新增接口成员。两个仓库一起走到同一个号，标签记录这一对。
 
-**本轮实测到、没修的问题**：平台的变异守卫清单里“只改 `package.json` 看测试变红”这一条按字面做不到（单源，改它不会红；把 `SERVER_VERSION` 写死成 `0.1.0` 才会红，实测 1 条失败），适配器那份按字面有效（`0.2.1` ≠ `0.2.0`，实测 1 条失败）；平台 `CHANGELOG.md` 写 `sys.terminated` 的入队与唤醒都在同一事务——入队确实在（`src/routes/org.ts:82-125`），`wakeMembers` 在事务提交之后（同文件 `:127`）。
+**本轮实测到、没修的问题**：平台的变异守卫清单里“只改 `package.json` 看测试变红”这一条按字面做不到（单源，改它不会红；把 `SERVER_VERSION` 写死成 `0.1.0` 才会红，实测 1 条失败），适配器那份按字面有效（`0.2.1` ≠ `0.2.0`，实测 1 条失败）；~~平台 `CHANGELOG.md` 那句“入队与唤醒都在同一事务”~~ 已改正为“在删除事务里入队，事务提交后再唤醒”（`210ed07`）；~~平台 `package-lock.json` 还写着 0.1.0~~ 同一次提交重新生成，并加了锁文件漂移测试（`test/version.test.ts`）。
 
 **以人身份读全部内容，三步，别想当然**（第 4 级真机跑时踩过）：
 
