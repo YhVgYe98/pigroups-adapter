@@ -1,0 +1,1 @@
+2026-11-01T13:24:11.823Z [{"type":"text","text":"{\"terminated\":[\"m_cabea0\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}]

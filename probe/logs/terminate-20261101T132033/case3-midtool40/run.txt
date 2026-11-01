@@ -1,0 +1,54 @@
+[terminate:case3-midtool40] 2026-11-01T13:22:44.849Z == 0. baseline ==
+[terminate:case3-midtool40] 2026-11-01T13:22:44.971Z baseline panes: wD:p1E wE:pB wE:p1 wE:p12 wE:p1J 
+[terminate:case3-midtool40] 2026-11-01T13:22:44.973Z commit 25b8c1b, herdr.ts dddf0eef558b77dd
+[terminate:case3-midtool40] 2026-11-01T13:22:44.973Z == 1. throwaway platform ==
+[terminate:case3-midtool40] 2026-11-01T13:22:45.088Z platform pid 145393 healthy at http://127.0.0.1:40863 (data /tmp/pgpc-data.2hQCY2)
+[terminate:case3-midtool40] 2026-11-01T13:22:45.088Z == 2. root member (bootstrap, once) ==
+[terminate:case3-midtool40] 2026-11-01T13:22:45.124Z root member m_f32661
+[terminate:case3-midtool40] 2026-11-01T13:22:45.145Z == 3. root pane (env rides on pane split) ==
+[terminate:case3-midtool40] 2026-11-01T13:22:45.163Z root pane wE:p1N
+[terminate:case3-midtool40] 2026-11-01T13:22:49.085Z agent start root -> {"id":"cli:agent:start","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgpc-scratch.kp13eY","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.kp13eY","interactive_ready":true,"nam
+[terminate:case3-midtool40] 2026-11-01T13:22:49.087Z root idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgpc-scratch.kp13eY","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.kp13eY","interactive_ready":true,"name
+[terminate:case3-midtool40] 2026-11-01T13:22:49.087Z == 4. root spawns the child ==
+[terminate:case3-midtool40] 2026-11-01T13:22:49.088Z child task: midtool
+[terminate:case3-midtool40] 2026-11-01T13:22:49.088Z prompt(spawn): Call the pg_spawn tool exactly once with name=probe-child and this brief: "You are probe-child. Do exactly this and nothing else: call the pg_say tool once with to=g:m_f32661 and text=probe-child here. Then stop." Then stop.
+[terminate:case3-midtool40] 2026-11-01T13:23:10.407Z spawn turn settled at 1793539390406 (2026-11-01T13:23:10.406Z): {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":211,"cwd":"/tmp/pgpc-scratch.kp13eY","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.kp13eY","intera
+[terminate:case3-midtool40] 2026-11-01T13:23:10.408Z == 5. identify the child (platform tree + pane diff) ==
+[terminate:case3-midtool40] 2026-11-01T13:23:10.427Z child member m_6f8d83
+[terminate:case3-midtool40] 2026-11-01T13:23:10.443Z new panes vs baseline: 'wE:p1P'
+[terminate:case3-midtool40] 2026-11-01T13:23:10.446Z child pane wE:p1P: "agent":"pi" "agent_status":"working" 
+[terminate:case3-midtool40] 2026-11-01T13:23:10.465Z child pi pid 145923 is the pane's foreground process, HERDR_PANE_ID=wE:p1P, token != root
+[terminate:case3-midtool40] 2026-11-01T13:23:10.466Z == 6. wait until the child is genuinely running and has spoken ==
+[terminate:case3-midtool40] 2026-11-01T13:23:10.469Z child session /tmp/pgpc-childsess.XD0xSw/2026-11-01T13-22-51-153Z_01a19746-f090-7105-bbc5-0e61a3a036ff.jsonl (20 lines)
+[terminate:case3-midtool40] 2026-11-01T13:23:10.483Z child pg_say result: "toolName":"pg_say","content":[{"type":"text","text":"{\"conv\":\"dm:m_6f8d83_m_f32661\",\"seq\":2}"}],"isError":false,"durationMs":2,"timestamp":1793539378507}}
+[terminate:case3-midtool40] 2026-11-01T13:23:10.502Z group messages: probe-child:1:probe-child here
+[terminate:case3-midtool40] 2026-11-01T13:23:15.308Z child idle after its first turn: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":213,"cwd":"/tmp/pgpc-scratch.kp13eY","focused":false,"foreground_c
+[terminate:case3-midtool40] 2026-11-01T13:23:15.309Z prompt(start the long tool): Call the pg_say tool exactly once with to=m_6f8d83 and text="Now call the bash tool exactly once with command 'sleep 40', then stop." Then stop.
+[terminate:case3-midtool40] 2026-11-01T13:23:22.817Z long-tool instruction turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":215,"cwd":"/tmp/pgpc-scratch.kp13eY","focused":false,"foreground
+[terminate:case3-midtool40] 2026-11-01T13:23:22.818Z waiting for the child's real bash toolCall
+[terminate:case3-midtool40] 2026-11-01T13:23:23.025Z bash toolCall in the child session: "type":"toolCall","id":"call_00_mrQp8bfzP30ihxPbTVu11890","name":"bash","arguments":{"command":"sleep 40","timeout":60}}],"api":"openai-completions","provider":"
+[terminate:case3-midtool40] 2026-11-01T13:23:24.028Z child pane tail (before terminate): ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── /tmp/pgpc-scratch.kp13eY • probe-child ↑2.4k ↓1.3k R43k CH96.
+[terminate:case3-midtool40] 2026-11-01T13:23:24.045Z child running pane entry: {"pane_id":"wE:p1P","agent":"pi","agent_status":"working","title":"π - probe-child - pgpc-scratch.kp13eY"}
+[terminate:case3-midtool40] 2026-11-01T13:23:24.046Z child session at pre-terminate: 28527 bytes, mtime 2026-11-01 21:23:22.979117315 +0800
+[terminate:case3-midtool40] 2026-11-01T13:23:24.046Z == 7. sample, then terminate ==
+[terminate:case3-midtool40] 2026-11-01T13:23:24.548Z prompt(terminate): Call the pg_terminate tool exactly once with member=m_6f8d83. Then stop. Do not send any message.
+[terminate:case3-midtool40] 2026-11-01T13:23:29.756Z terminate turn settled at 1793539409755: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":218,"cwd":"/tmp/pgpc-scratch.kp13eY","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.kp13eY","interactive_ready":true,"name":"root-pc","pane_id":"wE:p1N","revision":3,"state_change_seq":218,"tab_id":"
+[terminate:case3-midtool40] 2026-11-01T13:23:29.757Z == 8. wait for the pane to disappear ==
+[terminate:case3-midtool40] 2026-11-01T13:23:29.760Z child pane absent from pane list at 1793539409759 (2026-11-01T13:23:29.760Z)
+[terminate:case3-midtool40] 2026-11-01T13:23:29.761Z == 9. post state ==
+[terminate:case3-midtool40] 2026-11-01T13:23:29.778Z member: {"id":"m_6f8d83","name":"probe-child","parent_id":"m_f32661","status":"gone","is_root":false,"child_count":0,"groups":[],"last_seen_at":1793539405758,"created_at":1793539370922,"server_version":"0.2.0
+[terminate:case3-midtool40] 2026-11-01T13:23:29.784Z remaining child pi processes: 0
+[terminate:case3-midtool40] 2026-11-01T13:23:29.785Z child pane in pane list: 0
+[terminate:case3-midtool40] 2026-11-01T13:23:29.785Z == 10. copy and validate the child's session file ==
+[terminate:case3-midtool40] 2026-11-01T13:23:29.804Z == 10b. the root's own transcript (pg_terminate result) ==
+[terminate:case3-midtool40] 2026-11-01T13:23:29.820Z root session /tmp/pgpc-rootsess.m9gnFY/2026-11-01T13-22-45-337Z_01a19746-d9d8-71e6-b9ab-0603a6d804b5.jsonl (32 lines)
+[terminate:case3-midtool40] 2026-11-01T13:23:29.820Z == 11. herdr server log window (pane close) ==
+[terminate:case3-midtool40] 2026-11-01T13:23:29.840Z herdr numeric pane 48 (shell pid 145806); lifecycle lines: 6
+[terminate:case3-midtool40] 2026-11-01T13:23:29.842Z harvest: /home/yang/Documents/pigroups-adapter/probe/logs/terminate-20261101T132033/case3-midtool40/pid-samples.tsv 2 lines; pane-samples 45 lines
+[terminate:case3-midtool40] 2026-11-01T13:23:29.843Z == done; see timeline.txt for the verdict ==
+[terminate:case3-midtool40] 2026-11-01T13:23:29.843Z == cleanup ==
+[terminate:case3-midtool40] 2026-11-01T13:23:29.845Z closed pane wE:p1P (exit 1)
+[terminate:case3-midtool40] 2026-11-01T13:23:29.869Z closed pane wE:p1N (exit 0)
+[terminate:case3-midtool40] 2026-11-01T13:23:29.874Z platform stopped (pid 145393)
+[terminate:case3-midtool40] 2026-11-01T13:23:29.876Z final panes: wD:p1E wE:pB wE:p1 wE:p12 wE:p1J 
+[terminate:case3-midtool40] 2026-11-01T13:23:29.877Z driver exit 0

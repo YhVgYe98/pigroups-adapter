@@ -1,0 +1,50 @@
+[terminate:case1-idle] 2026-11-01T13:23:40.208Z == 0. baseline ==
+[terminate:case1-idle] 2026-11-01T13:23:40.331Z baseline panes: wD:p1E wE:pB wE:p1 wE:p12 wE:p1J 
+[terminate:case1-idle] 2026-11-01T13:23:40.333Z commit 25b8c1b, herdr.ts dddf0eef558b77dd
+[terminate:case1-idle] 2026-11-01T13:23:40.334Z == 1. throwaway platform ==
+[terminate:case1-idle] 2026-11-01T13:23:40.448Z platform pid 147032 healthy at http://127.0.0.1:40861 (data /tmp/pgpc-data.CpFM2k)
+[terminate:case1-idle] 2026-11-01T13:23:40.448Z == 2. root member (bootstrap, once) ==
+[terminate:case1-idle] 2026-11-01T13:23:40.486Z root member m_71f420
+[terminate:case1-idle] 2026-11-01T13:23:40.507Z == 3. root pane (env rides on pane split) ==
+[terminate:case1-idle] 2026-11-01T13:23:40.526Z root pane wE:p1Q
+[terminate:case1-idle] 2026-11-01T13:23:44.448Z agent start root -> {"id":"cli:agent:start","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgpc-scratch.5dooEV","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.5dooEV","interactive_ready":true,"nam
+[terminate:case1-idle] 2026-11-01T13:23:44.451Z root idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgpc-scratch.5dooEV","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.5dooEV","interactive_ready":true,"name
+[terminate:case1-idle] 2026-11-01T13:23:44.451Z == 4. root spawns the child ==
+[terminate:case1-idle] 2026-11-01T13:23:44.452Z child task: idle
+[terminate:case1-idle] 2026-11-01T13:23:44.452Z prompt(spawn): Call the pg_spawn tool exactly once with name=probe-child and this brief: "You are probe-child. Do exactly this and nothing else: call the pg_say tool once with to=g:m_71f420 and text=probe-child here. Then stop." Then stop.
+[terminate:case1-idle] 2026-11-01T13:24:01.868Z spawn turn settled at 1793539441867 (2026-11-01T13:24:01.867Z): {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":224,"cwd":"/tmp/pgpc-scratch.5dooEV","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.5dooEV","intera
+[terminate:case1-idle] 2026-11-01T13:24:01.869Z == 5. identify the child (platform tree + pane diff) ==
+[terminate:case1-idle] 2026-11-01T13:24:01.888Z child member m_cabea0
+[terminate:case1-idle] 2026-11-01T13:24:01.903Z new panes vs baseline: 'wE:p1R'
+[terminate:case1-idle] 2026-11-01T13:24:01.907Z child pane wE:p1R: "agent":"pi" "agent_status":"working" 
+[terminate:case1-idle] 2026-11-01T13:24:01.927Z child pi pid 147535 is the pane's foreground process, HERDR_PANE_ID=wE:p1R, token != root
+[terminate:case1-idle] 2026-11-01T13:24:01.927Z == 6. wait until the child is genuinely running and has spoken ==
+[terminate:case1-idle] 2026-11-01T13:24:01.930Z child session /tmp/pgpc-childsess.EQxIxs/2026-11-01T13-23-46-461Z_01a19747-c89d-779f-87bf-a05a208b98bd.jsonl (20 lines)
+[terminate:case1-idle] 2026-11-01T13:24:01.944Z child pg_say result: "toolName":"pg_say","content":[{"type":"text","text":"{\"conv\":\"dm:m_71f420_m_cabea0\",\"seq\":2}"}],"isError":false,"durationMs":2,"timestamp":1793539431854}}
+[terminate:case1-idle] 2026-11-01T13:24:01.965Z group messages: probe-child:1:probe-child here
+[terminate:case1-idle] 2026-11-01T13:24:09.173Z child idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":226,"cwd":"/tmp/pgpc-scratch.5dooEV","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.5dooEV","interact
+[terminate:case1-idle] 2026-11-01T13:24:09.442Z child pane tail (before terminate): ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── /tmp/pgpc-scratch.5dooEV • probe-child ↑2.4k ↓1.3k R41k CH94.
+[terminate:case1-idle] 2026-11-01T13:24:09.459Z child running pane entry: {"pane_id":"wE:p1R","agent":"pi","agent_status":"idle","title":"π - probe-child - pgpc-scratch.5dooEV"}
+[terminate:case1-idle] 2026-11-01T13:24:09.460Z child session at pre-terminate: 28929 bytes, mtime 2026-11-01 21:24:08.560175314 +0800
+[terminate:case1-idle] 2026-11-01T13:24:09.460Z == 7. sample, then terminate ==
+[terminate:case1-idle] 2026-11-01T13:24:09.962Z prompt(terminate): Call the pg_terminate tool exactly once with member=m_cabea0. Then stop. Do not send any message.
+[terminate:case1-idle] 2026-11-01T13:24:15.771Z terminate turn settled at 1793539455770: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":227,"cwd":"/tmp/pgpc-scratch.5dooEV","focused":false,"foreground_cwd":"/tmp/pgpc-scratch.5dooEV","interactive_ready":true,"name":"root-pc","pane_id":"wE:p1Q","revision":3,"state_change_seq":227,"tab_id":"
+[terminate:case1-idle] 2026-11-01T13:24:15.772Z == 8. wait for the pane to disappear ==
+[terminate:case1-idle] 2026-11-01T13:24:15.775Z child pane absent from pane list at 1793539455774 (2026-11-01T13:24:15.774Z)
+[terminate:case1-idle] 2026-11-01T13:24:15.776Z == 9. post state ==
+[terminate:case1-idle] 2026-11-01T13:24:15.793Z member: {"id":"m_cabea0","name":"probe-child","parent_id":"m_71f420","status":"gone","is_root":false,"child_count":0,"groups":[],"last_seen_at":1793539451518,"created_at":1793539426230,"server_version":"0.2.0
+[terminate:case1-idle] 2026-11-01T13:24:15.798Z remaining child pi processes: 0
+[terminate:case1-idle] 2026-11-01T13:24:15.799Z child pane in pane list: 0
+[terminate:case1-idle] 2026-11-01T13:24:15.800Z == 10. copy and validate the child's session file ==
+[terminate:case1-idle] 2026-11-01T13:24:15.816Z == 10b. the root's own transcript (pg_terminate result) ==
+[terminate:case1-idle] 2026-11-01T13:24:15.834Z root session /tmp/pgpc-rootsess.KZA5nS/2026-11-01T13-23-40-700Z_01a19747-b21b-75b6-a5b8-e31f3813e974.jsonl (27 lines)
+[terminate:case1-idle] 2026-11-01T13:24:15.835Z == 11. herdr server log window (pane close) ==
+[terminate:case1-idle] 2026-11-01T13:24:15.857Z herdr numeric pane 50 (shell pid 147418); lifecycle lines: 6
+[terminate:case1-idle] 2026-11-01T13:24:15.858Z harvest: /home/yang/Documents/pigroups-adapter/probe/logs/terminate-20261101T132033/case1-idle/pid-samples.tsv 2 lines; pane-samples 59 lines
+[terminate:case1-idle] 2026-11-01T13:24:15.859Z == done; see timeline.txt for the verdict ==
+[terminate:case1-idle] 2026-11-01T13:24:15.860Z == cleanup ==
+[terminate:case1-idle] 2026-11-01T13:24:15.861Z closed pane wE:p1R (exit 1)
+[terminate:case1-idle] 2026-11-01T13:24:15.887Z closed pane wE:p1Q (exit 0)
+[terminate:case1-idle] 2026-11-01T13:24:15.892Z platform stopped (pid 147032)
+[terminate:case1-idle] 2026-11-01T13:24:15.895Z final panes: wD:p1E wE:pB wE:p1 wE:p12 wE:p1J 
+[terminate:case1-idle] 2026-11-01T13:24:15.895Z driver exit 0

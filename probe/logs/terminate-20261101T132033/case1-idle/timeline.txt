@@ -1,0 +1,46 @@
+
+=== case1-idle (idle) ===
+evidence: case1-idle
+child: member m_cabea0, pane wE:p1R, pi pid 147535, herdr pane 50
+
+timeline (all times UTC, epoch ms in parentheses; pid sampled every 20 ms, pane every 40 ms)
+  ?  child's bash toolCall written (NaN)
+  2026-11-01T13:24:11.414Z  DELETE committed, sys.terminated written (1793539451414) [idle at last pane sample before DELETE]
+  2026-11-01T13:24:11.414Z  child's poll took that notice (state=delivered) (1793539451414)
+  ?  child's bash toolResult written (NaN) [?]
+  2026-11-01T13:24:08.561Z  last session write (1793539448561) [-2853 ms after DELETE]
+  2026-11-01T13:24:11.544Z  first pid sample: pi gone (1793539451544) [130 ms after DELETE]
+  2026-11-01T13:24:11.811Z  pane list first reported the pane with no agent (1793539451811) [397 ms after DELETE]
+  2026-11-01T13:24:11.820Z  herdr pane.close request (1793539451820) [406 ms after DELETE]
+  2026-11-01T13:24:11.852Z  pane list first reported the pane absent (1793539451852) [438 ms after DELETE]
+  2026-11-01T13:24:11.823333Z  herdr logged signal=Hangup for pane 50: yes
+
+PASS  S1 the child session file is complete
+      27 entries, 0 unparseable lines, endsWithNewline=true
+PASS  S2 the child consumed sys.terminated before it exited
+      receipt delivered at 2026-11-01T13:24:11.414Z, pi gone at 2026-11-01T13:24:11.544Z (130 ms)
+PASS  S3 the child pi process exited before pane.close
+      pi gone at 2026-11-01T13:24:11.544Z; pane.close at 2026-11-01T13:24:11.820Z (276 ms before the close)
+PASS  S4 pane list reported the agent gone before pane.close
+      pane list: agent gone at 2026-11-01T13:24:11.811Z; pane.close at 2026-11-01T13:24:11.820Z (9 ms before the close)
+PASS  S5 pi reached its graceful interactive exit path
+      the scrollback captured when the agent vanished contains pi's graceful-exit line
+PASS  S6 pane gone, child pi gone, member gone
+      pane "wE:p1R": absent; ps for 147535: absent; member status gone
+PASS  S7 pg_terminate reported no pane_close_failed
+      answer: 2026-11-01T13:24:11.823Z [{"type":"text","text":"{\"terminated\":[\"m_cabea0\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}] -> pane_close_failed=[]
+PASS  S8 pg_terminate reported no pane_close_forced
+      answer: 2026-11-01T13:24:11.823Z [{"type":"text","text":"{\"terminated\":[\"m_cabea0\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}] -> pane_close_forced=[]
+PASS  S9 the close stayed inside the 5 s hard bound
+      DELETE 2026-11-01T13:24:11.414Z -> pane.close 2026-11-01T13:24:11.820Z: 406 ms of the 5000 ms PANE_AGENT_EXIT_TIMEOUT_MS (margin 4594 ms)
+PASS  C1idle the delete landed on an idle child
+      last pane sample before DELETE: idle at 2026-11-01T13:24:11.401Z
+PASS  C2idle the idle child was not cut: its session still ends on a normal turn
+      last entry message/assistant stopReason=stop at 2026-11-01T13:24:08.561Z (DELETE 2026-11-01T13:24:11.414Z)
+NOTE  session ending: type=message role=assistant stopReason=stop errorMessage=""
+
+VERDICT: PASS (11/11 observations)
+
+=== summary ===
+PASS  case1-idle (11/11)
+OVERALL: PASS

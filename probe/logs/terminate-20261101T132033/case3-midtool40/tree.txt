@@ -1,0 +1,5 @@
+commit: 25b8c1b0817886586c79f869f4020e3f9095ac3f
+herdr.ts sha256: dddf0eef558b77ddef2e121993bd4202af5794e6ae6108a1a8efc6d63001ce7e  /home/yang/Documents/pigroups-adapter/src/herdr.ts
+pi: 1.4.0
+herdr: herdr 0.9.5
+?? probe/logs/terminate-20261101T132033/

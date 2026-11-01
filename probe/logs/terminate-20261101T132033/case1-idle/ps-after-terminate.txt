@@ -1,0 +1,489 @@
+    PID    PPID                  STARTED COMMAND
+      1       0 日 11月  1 18:34:08 2026 /usr/lib/systemd/systemd --switched-root --system --deserialize=53
+      2       0 日 11月  1 18:34:08 2026 [kthreadd]
+      3       2 日 11月  1 18:34:08 2026 [pool_workqueue_release]
+      4       2 日 11月  1 18:34:08 2026 [kworker/R-rcu_gp]
+      5       2 日 11月  1 18:34:08 2026 [kworker/R-sync_wq]
+      6       2 日 11月  1 18:34:08 2026 [kworker/R-kvfree_rcu_reclaim]
+      7       2 日 11月  1 18:34:08 2026 [kworker/R-slub_flushwq]
+      8       2 日 11月  1 18:34:08 2026 [kworker/R-netns]
+     11       2 日 11月  1 18:34:08 2026 [kworker/0:0H-kblockd]
+     14       2 日 11月  1 18:34:08 2026 [kworker/R-mm_percpu_wq]
+     15       2 日 11月  1 18:34:08 2026 [ksoftirqd/0]
+     16       2 日 11月  1 18:34:08 2026 [rcu_preempt]
+     17       2 日 11月  1 18:34:08 2026 [rcub/0]
+     18       2 日 11月  1 18:34:08 2026 [rcu_exp_par_gp_kthread_worker/0]
+     19       2 日 11月  1 18:34:08 2026 [rcu_exp_gp_kthread_worker]
+     20       2 日 11月  1 18:34:08 2026 [migration/0]
+     21       2 日 11月  1 18:34:08 2026 [kprobe-optimizer]
+     22       2 日 11月  1 18:34:08 2026 [idle_inject/0]
+     23       2 日 11月  1 18:34:08 2026 [cpuhp/0]
+     24       2 日 11月  1 18:34:08 2026 [cpuhp/1]
+     25       2 日 11月  1 18:34:08 2026 [idle_inject/1]
+     26       2 日 11月  1 18:34:08 2026 [migration/1]
+     27       2 日 11月  1 18:34:08 2026 [ksoftirqd/1]
+     29       2 日 11月  1 18:34:08 2026 [kworker/1:0H-kblockd]
+     30       2 日 11月  1 18:34:08 2026 [cpuhp/2]
+     31       2 日 11月  1 18:34:08 2026 [idle_inject/2]
+     32       2 日 11月  1 18:34:08 2026 [migration/2]
+     33       2 日 11月  1 18:34:08 2026 [ksoftirqd/2]
+     35       2 日 11月  1 18:34:08 2026 [kworker/2:0H-kblockd]
+     36       2 日 11月  1 18:34:08 2026 [cpuhp/3]
+     37       2 日 11月  1 18:34:08 2026 [idle_inject/3]
+     38       2 日 11月  1 18:34:08 2026 [migration/3]
+     39       2 日 11月  1 18:34:08 2026 [ksoftirqd/3]
+     41       2 日 11月  1 18:34:08 2026 [kworker/3:0H-kblockd]
+     42       2 日 11月  1 18:34:08 2026 [cpuhp/4]
+     43       2 日 11月  1 18:34:08 2026 [idle_inject/4]
+     44       2 日 11月  1 18:34:08 2026 [migration/4]
+     45       2 日 11月  1 18:34:08 2026 [ksoftirqd/4]
+     47       2 日 11月  1 18:34:08 2026 [kworker/4:0H-kblockd]
+     48       2 日 11月  1 18:34:08 2026 [cpuhp/5]
+     49       2 日 11月  1 18:34:08 2026 [idle_inject/5]
+     50       2 日 11月  1 18:34:08 2026 [migration/5]
+     51       2 日 11月  1 18:34:08 2026 [ksoftirqd/5]
+     53       2 日 11月  1 18:34:08 2026 [kworker/5:0H-kblockd]
+     54       2 日 11月  1 18:34:08 2026 [cpuhp/6]
+     55       2 日 11月  1 18:34:08 2026 [idle_inject/6]
+     56       2 日 11月  1 18:34:08 2026 [migration/6]
+     57       2 日 11月  1 18:34:08 2026 [ksoftirqd/6]
+     58       2 日 11月  1 18:34:08 2026 [kworker/6:0-cgroup_free]
+     59       2 日 11月  1 18:34:08 2026 [kworker/6:0H-kblockd]
+     60       2 日 11月  1 18:34:08 2026 [cpuhp/7]
+     61       2 日 11月  1 18:34:08 2026 [idle_inject/7]
+     62       2 日 11月  1 18:34:08 2026 [migration/7]
+     63       2 日 11月  1 18:34:08 2026 [ksoftirqd/7]
+     65       2 日 11月  1 18:34:08 2026 [kworker/7:0H-kblockd]
+     66       2 日 11月  1 18:34:08 2026 [cpuhp/8]
+     67       2 日 11月  1 18:34:08 2026 [idle_inject/8]
+     68       2 日 11月  1 18:34:08 2026 [migration/8]
+     69       2 日 11月  1 18:34:08 2026 [ksoftirqd/8]
+     71       2 日 11月  1 18:34:08 2026 [kworker/8:0H-kblockd]
+     72       2 日 11月  1 18:34:08 2026 [cpuhp/9]
+     73       2 日 11月  1 18:34:08 2026 [idle_inject/9]
+     74       2 日 11月  1 18:34:08 2026 [migration/9]
+     75       2 日 11月  1 18:34:08 2026 [ksoftirqd/9]
+     77       2 日 11月  1 18:34:08 2026 [kworker/9:0H-kblockd]
+     78       2 日 11月  1 18:34:08 2026 [cpuhp/10]
+     79       2 日 11月  1 18:34:08 2026 [idle_inject/10]
+     80       2 日 11月  1 18:34:08 2026 [migration/10]
+     81       2 日 11月  1 18:34:08 2026 [ksoftirqd/10]
+     83       2 日 11月  1 18:34:08 2026 [kworker/10:0H-kblockd]
+     84       2 日 11月  1 18:34:08 2026 [cpuhp/11]
+     85       2 日 11月  1 18:34:08 2026 [idle_inject/11]
+     86       2 日 11月  1 18:34:08 2026 [migration/11]
+     87       2 日 11月  1 18:34:08 2026 [ksoftirqd/11]
+     89       2 日 11月  1 18:34:08 2026 [kworker/11:0H-kblockd]
+     90       2 日 11月  1 18:34:08 2026 [cpuhp/12]
+     91       2 日 11月  1 18:34:08 2026 [idle_inject/12]
+     92       2 日 11月  1 18:34:08 2026 [migration/12]
+     93       2 日 11月  1 18:34:08 2026 [ksoftirqd/12]
+     95       2 日 11月  1 18:34:08 2026 [kworker/12:0H-kblockd]
+     96       2 日 11月  1 18:34:08 2026 [cpuhp/13]
+     97       2 日 11月  1 18:34:08 2026 [idle_inject/13]
+     98       2 日 11月  1 18:34:08 2026 [migration/13]
+     99       2 日 11月  1 18:34:08 2026 [ksoftirqd/13]
+    101       2 日 11月  1 18:34:08 2026 [kworker/13:0H-kblockd]
+    102       2 日 11月  1 18:34:08 2026 [cpuhp/14]
+    103       2 日 11月  1 18:34:08 2026 [idle_inject/14]
+    104       2 日 11月  1 18:34:08 2026 [migration/14]
+    105       2 日 11月  1 18:34:08 2026 [ksoftirqd/14]
+    107       2 日 11月  1 18:34:08 2026 [kworker/14:0H-kblockd]
+    108       2 日 11月  1 18:34:08 2026 [cpuhp/15]
+    109       2 日 11月  1 18:34:08 2026 [idle_inject/15]
+    110       2 日 11月  1 18:34:08 2026 [migration/15]
+    111       2 日 11月  1 18:34:08 2026 [ksoftirqd/15]
+    113       2 日 11月  1 18:34:08 2026 [kworker/15:0H-kblockd]
+    114       2 日 11月  1 18:34:08 2026 [kdevtmpfs]
+    115       2 日 11月  1 18:34:08 2026 [kworker/R-inet_frag_wq]
+    116       2 日 11月  1 18:34:08 2026 [rcu_tasks_kthread]
+    117       2 日 11月  1 18:34:08 2026 [rcu_tasks_rude_kthread]
+    118       2 日 11月  1 18:34:08 2026 [kauditd]
+    119       2 日 11月  1 18:34:08 2026 [khungtaskd]
+    120       2 日 11月  1 18:34:08 2026 [oom_reaper]
+    122       2 日 11月  1 18:34:08 2026 [kworker/R-writeback]
+    123       2 日 11月  1 18:34:08 2026 [kcompactd0]
+    124       2 日 11月  1 18:34:08 2026 [ksmd]
+    125       2 日 11月  1 18:34:08 2026 [khugepaged]
+    126       2 日 11月  1 18:34:08 2026 [kworker/R-kblockd]
+    127       2 日 11月  1 18:34:08 2026 [kworker/R-blkcg_punt_bio]
+    128       2 日 11月  1 18:34:08 2026 [kworker/R-kintegrityd]
+    129       2 日 11月  1 18:34:08 2026 [irq/9-acpi]
+    132       2 日 11月  1 18:34:09 2026 [kworker/R-tpm_dev_wq]
+    133       2 日 11月  1 18:34:09 2026 [kworker/R-ata_sff]
+    134       2 日 11月  1 18:34:09 2026 [kworker/R-edac-poller]
+    135       2 日 11月  1 18:34:09 2026 [kworker/R-devfreq_wq]
+    136       2 日 11月  1 18:34:09 2026 [watchdogd]
+    138       2 日 11月  1 18:34:09 2026 [kworker/R-quota_events_unbound]
+    142       2 日 11月  1 18:34:09 2026 [irq/30-AMD-Vi]
+    143       2 日 11月  1 18:34:09 2026 [kswapd0]
+    144       2 日 11月  1 18:34:09 2026 [kworker/R-kthrotld]
+    146       2 日 11月  1 18:34:09 2026 [kworker/R-acpi_thermal_pm]
+    148       2 日 11月  1 18:34:09 2026 [scsi_eh_0]
+    149       2 日 11月  1 18:34:09 2026 [kworker/R-scsi_tmf_0]
+    150       2 日 11月  1 18:34:09 2026 [scsi_eh_1]
+    151       2 日 11月  1 18:34:09 2026 [kworker/R-scsi_tmf_1]
+    152       2 日 11月  1 18:34:09 2026 [scsi_eh_2]
+    153       2 日 11月  1 18:34:09 2026 [kworker/R-scsi_tmf_2]
+    154       2 日 11月  1 18:34:09 2026 [scsi_eh_3]
+    155       2 日 11月  1 18:34:09 2026 [kworker/R-scsi_tmf_3]
+    156       2 日 11月  1 18:34:09 2026 [scsi_eh_4]
+    157       2 日 11月  1 18:34:09 2026 [kworker/R-scsi_tmf_4]
+    158       2 日 11月  1 18:34:09 2026 [scsi_eh_5]
+    159       2 日 11月  1 18:34:09 2026 [kworker/R-scsi_tmf_5]
+    171       2 日 11月  1 18:34:09 2026 [kworker/R-mld]
+    172       2 日 11月  1 18:34:09 2026 [kworker/R-ipv6_addrconf]
+    173       2 日 11月  1 18:34:09 2026 [kworker/R-kstrp]
+    181       2 日 11月  1 18:34:09 2026 [kworker/R-zswap-shrink]
+    185       2 日 11月  1 18:34:09 2026 [irq/31-ACPI:Event]
+    186       2 日 11月  1 18:34:09 2026 [irq/32-ACPI:Event]
+    214       2 日 11月  1 18:34:10 2026 [kworker/R-vfio-irqfd-cleanup]
+    272       2 日 11月  1 18:34:10 2026 [kworker/R-nvme-wq]
+    273       2 日 11月  1 18:34:10 2026 [kworker/R-nvme-reset-wq]
+    274       2 日 11月  1 18:34:10 2026 [kworker/R-nvme-delete-wq]
+    275       2 日 11月  1 18:34:10 2026 [kworker/R-nvme-auth-wq]
+    281       2 日 11月  1 18:34:10 2026 [kworker/0:1H-kblockd]
+    282       2 日 11月  1 18:34:10 2026 [kworker/8:1H-kblockd]
+    284       2 日 11月  1 18:34:10 2026 [kworker/10:1H-kblockd]
+    286       2 日 11月  1 18:34:10 2026 [kworker/14:1H-kblockd]
+    290       2 日 11月  1 18:34:10 2026 [kworker/11:1H-kblockd]
+    292       2 日 11月  1 18:34:11 2026 [kworker/12:3-cgroup_free]
+    294       2 日 11月  1 18:34:11 2026 [kworker/2:1H-kblockd]
+    295       2 日 11月  1 18:34:11 2026 [jbd2/nvme0n1p2-8]
+    296       2 日 11月  1 18:34:11 2026 [kworker/R-ext4-rsv-conversion]
+    304       2 日 11月  1 18:34:12 2026 [kworker/R-amdgpu-reset-dev]
+    305       2 日 11月  1 18:34:12 2026 [kworker/R-ttm]
+    306       2 日 11月  1 18:34:12 2026 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    307       2 日 11月  1 18:34:12 2026 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    308       2 日 11月  1 18:34:12 2026 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    309       2 日 11月  1 18:34:12 2026 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    310       2 日 11月  1 18:34:12 2026 [kworker/R-amdgpu_dm_hpd_rx_offload_wq]
+    311       2 日 11月  1 18:34:12 2026 [kworker/R-dm_vblank_control_workqueue]
+    312       2 日 11月  1 18:34:12 2026 [kworker/R-hdmi_frl_status_polling_workque]
+    313       2 日 11月  1 18:34:12 2026 [card1-crtc0]
+    314       2 日 11月  1 18:34:12 2026 [card1-crtc1]
+    315       2 日 11月  1 18:34:12 2026 [card1-crtc2]
+    316       2 日 11月  1 18:34:12 2026 [card1-crtc3]
+    317       2 日 11月  1 18:34:12 2026 [kworker/R-gfx_0.0.0]
+    318       2 日 11月  1 18:34:12 2026 [kworker/R-gfx_0.1.0]
+    319       2 日 11月  1 18:34:12 2026 [kworker/R-comp_1.0.0]
+    320       2 日 11月  1 18:34:12 2026 [kworker/R-comp_1.1.0]
+    321       2 日 11月  1 18:34:12 2026 [kworker/R-comp_1.2.0]
+    322       2 日 11月  1 18:34:12 2026 [kworker/R-comp_1.3.0]
+    323       2 日 11月  1 18:34:12 2026 [kworker/R-comp_1.0.1]
+    324       2 日 11月  1 18:34:12 2026 [kworker/R-comp_1.1.1]
+    325       2 日 11月  1 18:34:12 2026 [kworker/R-comp_1.2.1]
+    326       2 日 11月  1 18:34:12 2026 [kworker/R-comp_1.3.1]
+    327       2 日 11月  1 18:34:12 2026 [kworker/R-sdma0]
+    328       2 日 11月  1 18:34:12 2026 [kworker/R-vcn_dec_0]
+    329       2 日 11月  1 18:34:12 2026 [kworker/R-vcn_enc_0.0]
+    330       2 日 11月  1 18:34:12 2026 [kworker/R-vcn_enc_0.1]
+    331       2 日 11月  1 18:34:12 2026 [kworker/R-jpeg_dec]
+    341       2 日 11月  1 18:34:12 2026 [kworker/1:1H-kblockd]
+    362       2 日 11月  1 18:34:12 2026 [kworker/9:1H-kblockd]
+    369       2 日 11月  1 18:34:12 2026 [kworker/5:1H-kblockd]
+    370       2 日 11月  1 18:34:12 2026 [kworker/13:1H-kblockd]
+    372       2 日 11月  1 18:34:12 2026 [kworker/7:1H-kblockd]
+    373       2 日 11月  1 18:34:12 2026 [kworker/15:1H-kblockd]
+    380       2 日 11月  1 18:34:12 2026 [psimon]
+    390       1 日 11月  1 18:34:12 2026 /usr/lib/systemd/systemd-journald
+    394       2 日 11月  1 18:34:12 2026 [kworker/3:1H-kblockd]
+    395       2 日 11月  1 18:34:12 2026 [kworker/6:1H-kblockd]
+    403       2 日 11月  1 18:34:12 2026 [kworker/12:1H-kblockd]
+    404       2 日 11月  1 18:34:12 2026 [kworker/4:1H-kblockd]
+    422       1 日 11月  1 18:34:12 2026 /usr/lib/systemd/systemd-resolved
+    426       1 日 11月  1 18:34:12 2026 /usr/lib/systemd/systemd-udevd
+    427       1 日 11月  1 18:34:12 2026 /usr/lib/systemd/systemd-timesyncd
+    432       2 日 11月  1 18:34:12 2026 [psimon]
+    595       2 日 11月  1 18:34:12 2026 [nv_queue]
+    596       2 日 11月  1 18:34:12 2026 [nv_mem_pool_scrubber_queue]
+    597       2 日 11月  1 18:34:12 2026 [nv_mem_pool_scrubber_queue]
+    598       2 日 11月  1 18:34:12 2026 [nv_mem_pool_scrubber_queue]
+    599       2 日 11月  1 18:34:12 2026 [nv_queue]
+    601       2 日 11月  1 18:34:12 2026 [nv_open_q]
+    602       2 日 11月  1 18:34:12 2026 [irq/122-nvidia]
+    603       2 日 11月  1 18:34:12 2026 [irq/123-nvidia]
+    604       2 日 11月  1 18:34:12 2026 [irq/124-nvidia]
+    605       2 日 11月  1 18:34:12 2026 [irq/125-nvidia]
+    606       2 日 11月  1 18:34:12 2026 [irq/126-nvidia]
+    607       2 日 11月  1 18:34:12 2026 [irq/127-nvidia]
+    608       2 日 11月  1 18:34:12 2026 [irq/128-nvidia]
+    609       2 日 11月  1 18:34:12 2026 [irq/129-nvidia]
+    610       2 日 11月  1 18:34:12 2026 [nvidia]
+    611       2 日 11月  1 18:34:12 2026 [nv_queue]
+    719       2 日 11月  1 18:34:13 2026 [nvidia-modeset/kthread_q]
+    720       2 日 11月  1 18:34:13 2026 [nvidia-modeset/deferred_close_kthread_q]
+    753       2 日 11月  1 18:34:13 2026 [kworker/R-cfg80211]
+    761       1 日 11月  1 18:34:14 2026 /usr/bin/dbus-broker-launch --scope system --audit
+    762     761 日 11月  1 18:34:14 2026 dbus-broker --log 10 --controller 9 --machine-id 7cef3d619d5646059cabe2c2a8350af8 --max-bytes 536870912 --max-fds 4096 --max-matches 131072 --audit
+    764       1 日 11月  1 18:34:14 2026 /usr/bin/python /usr/bin/firewalld --nofork --nopid
+    765       1 日 11月  1 18:34:14 2026 /usr/bin/NetworkManager --no-daemon
+    766       1 日 11月  1 18:34:14 2026 /usr/lib/systemd/systemd-logind
+    767       1 日 11月  1 18:34:14 2026 /usr/lib/systemd/systemd-machined
+    768       1 日 11月  1 18:34:14 2026 /usr/bin/wpa_supplicant -u -s -O /run/wpa_supplicant
+    851       1 日 11月  1 18:34:14 2026 /usr/bin/cupsd -l
+    852       1 日 11月  1 18:34:14 2026 /usr/bin/libvirtd --timeout 120
+    854       1 日 11月  1 18:34:14 2026 /home/natfrp/natfrp-service --daemon
+    855       1 日 11月  1 18:34:14 2026 sshd: /usr/bin/sshd -D [listener] 0 of 10-100 startups
+    867       1 日 11月  1 18:34:14 2026 /usr/lib/systemd/systemd --user
+    868       1 日 11月  1 18:34:14 2026 /usr/lib/systemd/systemd --user
+    869       1 日 11月  1 18:34:14 2026 /usr/lib/systemd/systemd --user
+    870       1 日 11月  1 18:34:14 2026 /usr/lib/systemd/systemd --user
+    871       1 日 11月  1 18:34:14 2026 /usr/bin/containerd
+    876     851 日 11月  1 18:34:14 2026 /usr/lib/cups/notifier/dbus dbus://
+    883     867 日 11月  1 18:34:14 2026 (sd-pam)
+    884     869 日 11月  1 18:34:14 2026 (sd-pam)
+    885     870 日 11月  1 18:34:14 2026 (sd-pam)
+    887       2 日 11月  1 18:34:14 2026 [irq/131-rtw89_pci]
+    888     868 日 11月  1 18:34:14 2026 (sd-pam)
+    939       2 日 11月  1 18:34:14 2026 [UVM global queue]
+    940       2 日 11月  1 18:34:14 2026 [UVM deferred release queue]
+    941       2 日 11月  1 18:34:14 2026 [UVM Tools Event Queue]
+    983       1 日 11月  1 18:34:14 2026 /usr/lib/polkit-1/polkitd --no-debug --log-level=notice
+   1019     867 日 11月  1 18:34:14 2026 /usr/bin/aria2c --conf-path=/home/yang/.config/aria2/aria2.conf --all-proxy=http://127.0.0.1:7890
+   1020     867 日 11月  1 18:34:14 2026 /home/yang/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 -I -c import os, re, sys os.environ.pop('PYTHONHOME', None) os.environ.pop('PYTHONPATH', None) sys.path.insert(0, '/home/yang/.hermes/hermes-agent') if sys.argv[1:2] == ['--print-runtime-command']: sys.dont_write_bytecode = True from hermes_constants import get_default_hermes_root os.environ['HERMES_HOME'] = os.environ.get('HERMES_HOME') or str(get_default_hermes_root()) if sys.argv[1:2] == ['--print-runtime-command']:     from pathlib import Path     from hermes_cli._launchers import print_runtime_command     print_runtime_command(Path('/home/yang/.hermes/hermes-agent'), sys.argv[2:])     sys.exit(0) import hermes_bootstrap if sys.argv[1:2] == ['--run-module']:     import runpy     if len(sys.argv) < 3: sys.exit('hermes: --run-module needs a module')     module = sys.argv.pop(2)     del sys.argv[1]     runpy.run_module(module, run_name='__main__', alter_sys=True)     sys.exit(0) from hermes_cli.main import main sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0]) sys.exit(main())  gateway run
+   1023     867 日 11月  1 18:34:14 2026 /usr/bin/syncthing serve --no-browser --no-restart
+   1024     868 日 11月  1 18:34:14 2026 mihomo -d /home/proxy-server/.config/mihomo/
+   1066    1023 日 11月  1 18:34:14 2026 /usr/bin/syncthing serve --no-browser --no-restart
+   1162       1 日 11月  1 18:34:15 2026 /usr/bin/plasmalogin
+   1164       1 日 11月  1 18:34:15 2026 /usr/lib/bluetooth/bluetoothd
+   1403       1 日 11月  1 18:34:15 2026 /usr/bin/dnsmasq --conf-file=/var/lib/libvirt/dnsmasq/default.conf --leasefile-ro --dhcp-script=/usr/lib/libvirt/libvirt_leaseshelper
+   1404    1403 日 11月  1 18:34:15 2026 /usr/bin/dnsmasq --conf-file=/var/lib/libvirt/dnsmasq/default.conf --leasefile-ro --dhcp-script=/usr/lib/libvirt/libvirt_leaseshelper
+   1483       1 日 11月  1 18:34:16 2026 /usr/lib/upowerd
+   1518       2 日 11月  1 18:34:16 2026 [krfcommd]
+   1541    1162 日 11月  1 18:34:20 2026 /usr/lib/plasmalogin-helper --socket /tmp/plasmalogin-auth-6850cd21-06b3-4fb0-a78b-86b4b4505c68 --id 1 --start /usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland --user yang
+   1545       1 日 11月  1 18:34:20 2026 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+   1546       1 日 11月  1 18:34:20 2026 /usr/bin/jellyfin --webdir=/usr/share/jellyfin/web --ffmpeg=/usr/lib/jellyfin-ffmpeg/ffmpeg
+   1561       1 日 11月  1 18:34:20 2026 /usr/bin/ksecretd --pam-login 8 9
+   1562    1541 日 11月  1 18:34:20 2026 /usr/bin/startplasma-wayland
+   1655     867 日 11月  1 18:34:20 2026 /usr/bin/dbus-broker-launch --scope user
+   1657    1655 日 11月  1 18:34:20 2026 dbus-broker --log 11 --controller 10 --machine-id 7cef3d619d5646059cabe2c2a8350af8 --max-bytes 100000000000000 --max-fds 25000000000000 --max-matches 5000000000
+   1701     867 日 11月  1 18:34:20 2026 /usr/bin/kwin_wayland_wrapper --xwayland
+   1715    1701 日 11月  1 18:34:20 2026 /usr/bin/kwin_wayland --wayland-fd 7 --socket wayland-1 --xwayland-fd 8 --xwayland-fd 9 --xwayland-display :0 --xwayland-initfd 11 --xwayland-init-display :1 --xwayland-xauthority /run/user/1000/xauth_CKeXAZ --xwayland
+   1719     867 日 11月  1 18:34:20 2026 /usr/bin/ksmserver
+   1723     867 日 11月  1 18:34:20 2026 /usr/bin/kded6
+   1750     867 日 11月  1 18:34:20 2026 /usr/bin/plasmashell --no-respawn
+   1782     869 日 11月  1 18:34:20 2026 catatonit -P
+   1872       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-100]
+   1896     869 日 11月  1 18:34:20 2026 /usr/bin/conmon --api-version 1 -c 1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c -u 1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c -r /usr/bin/crun -b /home/ollama/.local/share/containers/storage/overlay-containers/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c/userdata -p /run/user/1003/containers/overlay-containers/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c/userdata/pidfile -n sillytavern --exit-dir /run/user/1003/libpod/tmp/exits --persist-dir /run/user/1003/libpod/tmp/persist/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c --full-attach -l journald --log-level warning --syslog --runtime-arg --log-format=json --runtime-arg --log --runtime-arg=/run/user/1003/containers/overlay-containers/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c/userdata/oci-log --conmon-pidfile /run/user/1003/containers/overlay-containers/1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c/userdata/conmon.pid --exit-command /usr/bin/podman --exit-command-arg --root --exit-command-arg /home/ollama/.local/share/containers/storage --exit-command-arg --runroot --exit-command-arg /run/user/1003/containers --exit-command-arg --log-level --exit-command-arg warning --exit-command-arg --cgroup-manager --exit-command-arg systemd --exit-command-arg --tmpdir --exit-command-arg /run/user/1003/libpod/tmp --exit-command-arg --network-config-dir --exit-command-arg  --exit-command-arg --volumepath --exit-command-arg /home/ollama/.local/share/containers/storage/volumes --exit-command-arg --transient-store=false --exit-command-arg --hooks-dir --exit-command-arg /usr/share/containers/oci/hooks.d --exit-command-arg --runtime --exit-command-arg crun --exit-command-arg --storage-driver --exit-command-arg overlay --exit-command-arg --storage-opt --exit-command-arg overlay.mountopt=nodev --exit-command-arg --events-backend --exit-command-arg journald --exit-command-arg container --exit-command-arg cleanup --exit-command-arg --stopped-only --exit-command-arg --rm --exit-command-arg 1cdebaf48ed528bac8d6b0186e528377849fac0b8089b3caf39eb633faf3236c
+   1907    1896 日 11月  1 18:34:20 2026 tini -- ./docker-entrypoint.sh
+   1967    1907 日 11月  1 18:34:20 2026 node server.js --listen
+   1979       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-10d]
+   1980     869 日 11月  1 18:34:20 2026 /usr/bin/dbus-broker-launch --scope user
+   1986    1980 日 11月  1 18:34:20 2026 dbus-broker --log 11 --controller 10 --machine-id 7cef3d619d5646059cabe2c2a8350af8 --max-bytes 100000000000000 --max-fds 25000000000000 --max-matches 5000000000
+   1997       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-10e]
+   2000       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-10f]
+   2039       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-110]
+   2047       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-111]
+   2057       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-112]
+   2058       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-113]
+   2059       2 日 11月  1 18:34:20 2026 [nvidia-drm/timeline-114]
+   2073       1 日 11月  1 18:34:20 2026 /usr/lib/power-profiles-daemon
+   2127       2 日 11月  1 18:34:21 2026 [nvidia-drm/timeline-139]
+   2128       2 日 11月  1 18:34:21 2026 [nvidia-drm/timeline-13a]
+   2138     867 日 11月  1 18:34:21 2026 /usr/bin/pipewire
+   2139     867 日 11月  1 18:34:21 2026 /usr/bin/wireplumber
+   2141    1715 日 11月  1 18:34:21 2026 /usr/lib/fcitx5-wayland-launcher --reopen
+   2147       2 日 11月  1 18:34:21 2026 [nvidia-drm/timeline-13b]
+   2148     867 日 11月  1 18:34:21 2026 /usr/bin/fcitx5
+   2160    1715 日 11月  1 18:34:21 2026 /usr/bin/Xwayland :0 -auth /run/user/1000/xauth_CKeXAZ -listenfd 8 -listenfd 9 -displayfd 150 -wm 152 -initfd 11 -rootless
+   2168     867 日 11月  1 18:34:21 2026 /usr/lib/kactivitymanagerd
+   2173       2 日 11月  1 18:34:21 2026 [nvidia-drm/timeline-13c]
+   2181     867 日 11月  1 18:34:21 2026 /usr/bin/gmenudbusmenuproxy
+   2182     867 日 11月  1 18:34:21 2026 /usr/bin/kaccess
+   2183     867 日 11月  1 18:34:21 2026 /usr/lib/polkit-kde-authentication-agent-1
+   2184     867 日 11月  1 18:34:21 2026 /usr/lib/org_kde_powerdevil
+   2185     867 日 11月  1 18:34:21 2026 /usr/bin/xembedsniproxy
+   2240       1 日 11月  1 18:34:21 2026 /usr/lib/udisks2/udisksd
+   2251     867 日 11月  1 18:34:21 2026 /usr/lib/at-spi-bus-launcher
+   2265    2251 日 11月  1 18:34:21 2026 /usr/bin/dbus-broker-launch --config-file=/usr/share/defaults/at-spi2/accessibility.conf --scope user
+   2267    2265 日 11月  1 18:34:21 2026 dbus-broker --log 10 --controller 9 --machine-id 7cef3d619d5646059cabe2c2a8350af8 --max-bytes 100000000000000 --max-fds 6400000 --max-matches 5000000000
+   2295     867 日 11月  1 18:34:21 2026 /usr/lib/dconf-service
+   2326     867 日 11月  1 18:34:21 2026 /usr/bin/pipewire-pulse
+   2336     867 日 11月  1 18:34:21 2026 /usr/lib/at-spi2-registryd --use-gnome-session
+   2366     867 日 11月  1 18:34:21 2026 /usr/bin/xsettingsd
+   2368       2 日 11月  1 18:34:21 2026 [nvidia-drm/timeline-149]
+   2376       2 日 11月  1 18:34:21 2026 [nvidia-drm/timeline-14c]
+   2400     867 日 11月  1 18:34:22 2026 /usr/bin/kdeconnectd
+   2508     867 日 11月  1 18:34:22 2026 /usr/lib/xdg-desktop-portal
+   2514     867 日 11月  1 18:34:22 2026 /usr/lib/geoclue-2.0/demos/agent
+   2517     867 日 11月  1 18:34:22 2026 /usr/lib/DiscoverNotifier --check-delay 20
+   2523     867 日 11月  1 18:34:22 2026 /usr/lib/kf6/baloo_file
+   2536     867 日 11月  1 18:34:22 2026 /usr/lib/xdg-permission-store
+   2546     867 日 11月  1 18:34:22 2026 /usr/lib/xdg-document-portal
+   2556    2546 日 11月  1 18:34:22 2026 fusermount3 -o rw,nosuid,nodev,fsname=portal,auto_unmount,subtype=portal -- /run/user/1000/doc
+   2559     867 日 11月  1 18:34:22 2026 /usr/lib/xdg-desktop-portal-gtk
+   2596     867 日 11月  1 18:34:22 2026 /usr/lib/xdg-desktop-portal-kde
+   2751     867 日 11月  1 18:34:41 2026 /usr/bin/konsole
+   2763    2751 日 11月  1 18:34:41 2026 /usr/bin/zsh
+   2834     867 日 11月  1 18:34:41 2026 /usr/bin/zsh
+   2835     867 日 11月  1 18:34:41 2026 /usr/bin/zsh
+   2838     867 日 11月  1 18:34:41 2026 /usr/bin/zsh
+   2843    2838 日 11月  1 18:34:41 2026 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+   2879       2 日 11月  1 18:34:41 2026 [nvidia-drm/timeline-153]
+   2898       1 日 11月  1 18:34:42 2026 /usr/lib/accounts-daemon
+   2916     854 日 11月  1 18:34:47 2026 /home/natfrp/frpc -n --stdin_config 303 --watch 854 --report --traffic_int 1000
+   2917     854 日 11月  1 18:34:47 2026 /home/natfrp/frpc -n --stdin_config 311 --watch 854 --report --traffic_int 1000
+   2918     854 日 11月  1 18:34:47 2026 /home/natfrp/frpc -n --stdin_config 332 --watch 854 --report --traffic_int 1000
+   2957    2763 日 11月  1 18:34:50 2026 herdr
+   2959    2957 日 11月  1 18:34:50 2026 /usr/bin/herdr server
+   2977    2959 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3164     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3165     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3168     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3173    3168 日 11月  1 18:34:50 2026 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+   3326    2959 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3332     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3390     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3391     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3393    3332 日 11月  1 18:34:50 2026 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+   3429    3326 日 11月  1 18:34:50 2026 pi
+   3437    2959 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3443     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3501     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3502     867 日 11月  1 18:34:50 2026 /usr/bin/zsh
+   3504    3443 日 11月  1 18:34:50 2026 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+   3540    3437 日 11月  1 18:34:50 2026 pi
+   3720     867 日 11月  1 18:34:54 2026 /usr/bin/node /home/yang/.pi/agent/npm/node_modules/pi-straw-boss/dist/server/cli.mjs run --detached --by session "01a192d1-dc6f-7492-aae7-f54ef755f615" (01a192d1)
+   3779    3720 日 11月  1 18:34:54 2026 /home/yang/.pi/agent/npm/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2 --ping
+   3810    3429 日 11月  1 18:34:54 2026 /usr/bin/node --import file:///home/yang/.pi/agent/npm/node_modules/tsx/dist/loader.mjs /home/yang/.pi/agent/npm/node_modules/pi-intercom/broker/broker.ts
+   3821    3810 日 11月  1 18:34:54 2026 /home/yang/.pi/agent/npm/node_modules/@esbuild/linux-x64/bin/esbuild --service=0.28.2 --ping
+  10255       2 日 11月  1 18:50:33 2026 [nvidia-drm/timeline-157]
+  43634     867 日 11月  1 19:37:20 2026 node src/main.ts
+  43748     867 日 11月  1 19:37:28 2026 node src/main.ts
+  50100     867 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --proxy-server=http://127.0.0.1:7890
+  50103   50100 日 11月  1 19:45:03 2026 cat
+  50104   50100 日 11月  1 19:45:03 2026 cat
+  50106     867 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium_crashpad_handler --monitor-self --monitor-self-annotation=ptype=crashpad-handler --user-stream-region=4,65568 --database=/home/yang/.config/net.imput.helium/Crash Reports --url=https://crash.helium.computer/crash --annotation=channel=Arch Linux --annotation=lsb-release=Arch Linux --annotation=plat=Linux --annotation=prod=Helium --annotation=ver=0.20.2.1 --initial-client-fd=7 --shared-client-connection
+  50108     867 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium_crashpad_handler --no-periodic-tasks --monitor-self-annotation=ptype=crashpad-handler --database=/home/yang/.config/net.imput.helium/Crash Reports --url=https://crash.helium.computer/crash --annotation=channel=Arch Linux --annotation=lsb-release=Arch Linux --annotation=plat=Linux --annotation=prod=Helium --annotation=ver=0.20.2.1 --initial-client-fd=4 --shared-client-connection
+  50118   50100 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=zygote --no-zygote-sandbox --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable
+  50119   50100 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=zygote --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable
+  50121   50119 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=zygote --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable
+  50146   50118 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=gpu-process --gpu-recent-crash-count=0 --ozone-platform=wayland --render-node-override=/dev/dri/renderD129 --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable --gpu-preferences=YAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAASAAAAAAAAAABAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAMAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAMAAAAAQAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --metrics-shmem-handle=4,i,11629076162914442056,3474706987061338579,262144 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190708988185955192
+  50151   50100 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --render-node-override=/dev/dri/renderD129 --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,17678615420478496370,17579505143153309459,524288 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190708989122997041
+  50163   50121 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=utility --utility-sub-type=storage.mojom.StorageService --lang=zh-CN --service-sandbox-type=utility --render-node-override=/dev/dri/renderD129 --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,4573397049185059043,841651012852492138,524288 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190708990060038890
+  50174       2 日 11月  1 19:45:03 2026 [nvidia-drm/timeline-187]
+  50177   50146 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=broker
+  50188   50121 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=renderer --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable --ozone-platform=wayland --lang=zh-CN --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=7 --launch-time-ticks=4255525833 --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,8445317234918700067,16949206816291743483,1572864 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190708992871164437
+  50255   50121 日 11月  1 19:45:03 2026 /opt/helium-browser-bin/helium --type=renderer --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --extension-process --change-stack-guard-on-fork=enable --ozone-platform=wayland --lang=zh-CN --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=8 --launch-time-ticks=4255553713 --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,16554118954160972933,918054002083001798,1572864 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190708993808206286
+  50296     867 日 11月  1 19:45:03 2026 /usr/bin/kwalletd6
+  50399   50121 日 11月  1 19:45:05 2026 /opt/helium-browser-bin/helium --type=renderer --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable --ozone-platform=wayland --lang=zh-CN --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=10 --launch-time-ticks=4257108869 --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,16152028644880123146,478806807676040150,1572864 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190708995682289984
+  50452   50121 日 11月  1 19:45:06 2026 /opt/helium-browser-bin/helium --type=renderer --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable --ozone-platform=wayland --lang=zh-CN --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=11 --launch-time-ticks=4258369412 --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,14032801856801332339,2319477160451384071,1572864 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190708996619331833
+  50545   50100 日 11月  1 19:45:07 2026 /opt/helium-browser-bin/helium --type=utility --utility-sub-type=audio.mojom.AudioService --lang=zh-CN --service-sandbox-type=none --render-node-override=/dev/dri/renderD129 --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,1114238715584954419,3907740414629589796,524288 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190708997556373682
+  50568       2 日 11月  1 19:45:07 2026 [nvidia-drm/timeline-190]
+  52776     867 日 11月  1 19:45:39 2026 bash /home/yang/.local/share/Steam/steam.sh -srt-logger-opened
+  52795     867 日 11月  1 19:45:39 2026 /home/yang/.local/share/Steam/ubuntu12_32/steam-runtime/usr/libexec/steam-runtime-tools-0/srt-logger --sh-syntax --rotate=8388608 --log-directory /home/yang/.local/share/Steam/logs --filename console-linux.txt --log-fd=7 --journal-fd=5 --parse-level-prefix
+  52889   52776 日 11月  1 19:45:40 2026 /home/yang/.local/share/Steam/ubuntu12_32/steam -srt-logger-opened
+  52984       2 日 11月  1 19:45:41 2026 [nvidia-drm/timeline-1a0]
+  52993   52889 日 11月  1 19:45:42 2026 /home/yang/.local/share/Steam/steamrt64/pv-runtime/steam-runtime-steamrt/pressure-vessel/libexec/steam-runtime-tools-0/srt-bwrap --args 26 /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --fd 11 --regenerate-ld.so-cache /var/pressure-vessel/ldso --add-ld.so-path /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu --add-ld.so-path /usr/lib/pressure-vessel/overrides/lib/i386-linux-gnu --set-ld-library-path /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/aliases:/usr/lib/pressure-vessel/overrides/lib/i386-linux-gnu/aliases --overrides-path /usr/lib/pressure-vessel/overrides --assign-fd=1=3 --assign-fd=2=4 -- /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper_sniper_wrap.sh -nocrashdialog -lang=zh_CN -cachedir=/home/yang/.local/share/Steam/config/htmlcache -steampid=52889 -buildid=1792618285 -steamid=0 -logdir=/home/yang/.local/share/Steam/logs -uimode=7 -startcount=0 -steamuniverse=Public -realm=Global -clientui=/home/yang/.local/share/Steam/clientui -steampath=/home/yang/.local/share/Steam/ubuntu12_32/steam -launcher=0 --valve-initial-threadpool-size=4 --valve-enable-site-isolation --crl-sets-path=/home/yang/.local/share/Steam/resource/crl-set --enable-smooth-scrolling --password-store=basic --log-file=/home/yang/.local/share/Steam/logs/cef_log.txt --disable-quick-menu --disable-component-update --gaia-url=http://disabled.invalid --enable-features=PlatformHEVCDecoderSupport --disable-features=WinRetrieveSuggestionsOnlyOnDemand,SpareRendererForSitePerProcess,BlockPromptsIfIgnoredOften,WebUsbDeviceDetection,ValveFFmpegAllowLowDelayHEVC
+  53005     867 日 11月  1 19:45:42 2026 /home/yang/.local/share/Steam/ubuntu12_32/steam-runtime/usr/libexec/steam-runtime-tools-0/srt-logger --sh-syntax --rotate=8388608 --log-directory /home/yang/.steam/steam/logs --filename webhelper-linux.txt --log-fd=7 --journal-fd=5 --parse-level-prefix --journal-level=info
+  53141   52993 日 11月  1 19:45:42 2026 /usr/lib/pressure-vessel/from-host/libexec/steam-runtime-tools-0/pv-adverb --prefix=/usr/lib/pressure-vessel/from-host --generate-locales --fd 11 --regenerate-ld.so-cache /var/pressure-vessel/ldso --add-ld.so-path /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu --add-ld.so-path /usr/lib/pressure-vessel/overrides/lib/i386-linux-gnu --set-ld-library-path /usr/lib/pressure-vessel/overrides/lib/x86_64-linux-gnu/aliases:/usr/lib/pressure-vessel/overrides/lib/i386-linux-gnu/aliases --overrides-path /usr/lib/pressure-vessel/overrides --assign-fd=1=3 --assign-fd=2=4 -- /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper_sniper_wrap.sh -nocrashdialog -lang=zh_CN -cachedir=/home/yang/.local/share/Steam/config/htmlcache -steampid=52889 -buildid=1792618285 -steamid=0 -logdir=/home/yang/.local/share/Steam/logs -uimode=7 -startcount=0 -steamuniverse=Public -realm=Global -clientui=/home/yang/.local/share/Steam/clientui -steampath=/home/yang/.local/share/Steam/ubuntu12_32/steam -launcher=0 --valve-initial-threadpool-size=4 --valve-enable-site-isolation --crl-sets-path=/home/yang/.local/share/Steam/resource/crl-set --enable-smooth-scrolling --password-store=basic --log-file=/home/yang/.local/share/Steam/logs/cef_log.txt --disable-quick-menu --disable-component-update --gaia-url=http://disabled.invalid --enable-features=PlatformHEVCDecoderSupport --disable-features=WinRetrieveSuggestionsOnlyOnDemand,SpareRendererForSitePerProcess,BlockPromptsIfIgnoredOften,WebUsbDeviceDetection,ValveFFmpegAllowLowDelayHEVC
+  53176   53141 日 11月  1 19:45:42 2026 ./steamwebhelper -nocrashdialog -lang=zh_CN -cachedir=/home/yang/.local/share/Steam/config/htmlcache -steampid=52889 -buildid=1792618285 -steamid=0 -logdir=/home/yang/.local/share/Steam/logs -uimode=7 -startcount=0 -steamuniverse=Public -realm=Global -clientui=/home/yang/.local/share/Steam/clientui -steampath=/home/yang/.local/share/Steam/ubuntu12_32/steam -launcher=0 --valve-initial-threadpool-size=4 --valve-enable-site-isolation --crl-sets-path=/home/yang/.local/share/Steam/resource/crl-set --enable-smooth-scrolling --password-store=basic --log-file=/home/yang/.local/share/Steam/logs/cef_log.txt --disable-quick-menu --disable-component-update --gaia-url=http://disabled.invalid --enable-features=PlatformHEVCDecoderSupport --disable-features=WinRetrieveSuggestionsOnlyOnDemand,SpareRendererForSitePerProcess,BlockPromptsIfIgnoredOften,WebUsbDeviceDetection,ValveFFmpegAllowLowDelayHEVC
+  53180   53141 日 11月  1 19:45:42 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --monitor-self-annotation=ptype=crashpad-handler --type=crashpad-handler --max-uploads=5 --max-db-size=20 --max-db-age=5 --database=/tmp/dumps --url=https://crash.steampowered.com/submit --annotation=lsb-release=Steam Runtime 3c (steamrt3c) --annotation=platform=linux64 --annotation=product=cefwebhelper --annotation=version=1792618285 --initial-client-fd=10 --shared-client-connection
+  53185   53176 日 11月  1 19:45:42 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --type=zygote --no-zygote-sandbox --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4
+  53186   53176 日 11月  1 19:45:42 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --type=zygote --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4
+  53188   53186 日 11月  1 19:45:42 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --type=zygote --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4
+  53205   53185 日 11月  1 19:45:42 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --type=zygote --no-zygote-sandbox --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4
+  53217       2 日 11月  1 19:45:42 2026 [nvidia-drm/timeline-1c3]
+  53224   53205 日 11月  1 19:45:42 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --type=zygote --no-zygote-sandbox --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4
+  53234   52889 日 11月  1 19:45:42 2026 steam-runtime-launcher-service --alongside-steam
+  53239   53176 日 11月  1 19:45:43 2026 /proc/self/exe --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4 --shared-files --field-trial-handle=3,i,15609874238264894601,13703916793640346913,262144 --enable-features=PlatformHEVCDecoderSupport --disable-features=BlockPromptsIfIgnoredOften,SpareRendererForSitePerProcess,ValveFFmpegAllowLowDelayHEVC,WebUsbDeviceDetection,WinRetrieveSuggestionsOnlyOnDemand --variations-seed-version --log-file=/home/yang/.local/share/Steam/logs/cef_log.txt
+  53240   53188 日 11月  1 19:45:43 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --type=zygote --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4
+  53258   53188 日 11月  1 19:45:43 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --type=zygote --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4
+  53310       2 日 11月  1 19:45:43 2026 [nvidia-drm/timeline-1ca]
+  53855       2 日 11月  1 19:45:50 2026 [nvidia-drm/timeline-1e4]
+  53924   53176 日 11月  1 19:45:55 2026 /proc/self/exe --type=utility --utility-sub-type=audio.mojom.AudioService --lang=zh-CN --service-sandbox-type=none --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4 --shared-files --field-trial-handle=3,i,15609874238264894601,13703916793640346913,262144 --enable-features=PlatformHEVCDecoderSupport --disable-features=BlockPromptsIfIgnoredOften,SpareRendererForSitePerProcess,ValveFFmpegAllowLowDelayHEVC,WebUsbDeviceDetection,WinRetrieveSuggestionsOnlyOnDemand --variations-seed-version --log-file=/home/yang/.local/share/Steam/logs/cef_log.txt
+  55501    2977 日 11月  1 19:46:29 2026 /home/yang/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 -I -c import os, re, sys os.environ.pop('PYTHONHOME', None) os.environ.pop('PYTHONPATH', None) sys.path.insert(0, '/home/yang/.hermes/hermes-agent') if sys.argv[1:2] == ['--print-runtime-command']: sys.dont_write_bytecode = True from hermes_constants import get_default_hermes_root os.environ['HERMES_HOME'] = os.environ.get('HERMES_HOME') or str(get_default_hermes_root()) if sys.argv[1:2] == ['--print-runtime-command']:     from pathlib import Path     from hermes_cli._launchers import print_runtime_command     print_runtime_command(Path('/home/yang/.hermes/hermes-agent'), sys.argv[2:])     sys.exit(0) import hermes_bootstrap if sys.argv[1:2] == ['--run-module']:     import runpy     if len(sys.argv) < 3: sys.exit('hermes: --run-module needs a module')     module = sys.argv.pop(2)     del sys.argv[1]     runpy.run_module(module, run_name='__main__', alter_sys=True)     sys.exit(0) from hermes_cli.main import main sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0]) sys.exit(main())  gui
+  55529   55501 日 11月  1 19:46:30 2026 /home/yang/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/Hermes --disable-setuid-sandbox --ozone-platform=x11
+  55532   55529 日 11月  1 19:46:30 2026 /home/yang/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/Hermes --type=zygote --no-zygote-sandbox
+  55533   55529 日 11月  1 19:46:30 2026 /home/yang/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/Hermes --type=zygote
+  55535   55533 日 11月  1 19:46:30 2026 /home/yang/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/Hermes --type=zygote
+  55550     867 日 11月  1 19:46:31 2026 /home/yang/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/chrome_crashpad_handler --monitor-self-annotation=ptype=crashpad-handler --no-rate-limit --no-upload-gzip --database=/home/yang/.config/Hermes/Crashpad --annotation=_productName=Hermes --annotation=_version=0.0.0 --annotation=lsb-release=Arch Linux --annotation=plat=Linux --annotation=prod=Electron --annotation=ver=40.10.2 --initial-client-fd=46 --shared-client-connection
+  55562   55532 日 11月  1 19:46:31 2026 /home/yang/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/Hermes --type=zygote --no-zygote-sandbox
+  55576   55529 日 11月  1 19:46:31 2026 /proc/self/exe --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --crashpad-handler-pid=55550 --enable-crash-reporter=17f9d597-246b-4336-ad50-c5df9fc18a1e,no_channel --user-data-dir=/home/yang/.config/Hermes --standard-schemes=hermes-media --secure-schemes=hermes-media --fetch-schemes=hermes-media --streaming-schemes=hermes-media --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,16462160370424134395,16657918792960288411,262144 --enable-features=PdfUseShowSaveFilePicker --disable-features=LocalNetworkAccessChecks,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation --variations-seed-version --trace-process-track-uuid=3190708989122997041 --enable-logging=file --log-file=/home/yang/.hermes/logs/desktop-chromium.log --log-level=2
+  55747   55535 日 11月  1 19:46:31 2026 /home/yang/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/Hermes --type=zygote
+  55840       2 日 11月  1 19:46:31 2026 [nvidia-drm/timeline-2dd]
+  55857   55562 日 11月  1 19:46:31 2026 /home/yang/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/Hermes --type=zygote --no-zygote-sandbox
+  56088   55529 日 11月  1 19:46:31 2026 /home/yang/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 -I -c import os, re, sys os.environ.pop('PYTHONHOME', None) os.environ.pop('PYTHONPATH', None) sys.path.insert(0, '/home/yang/.hermes/hermes-agent') if sys.argv[1:2] == ['--print-runtime-command']: sys.dont_write_bytecode = True from hermes_constants import get_default_hermes_root os.environ['HERMES_HOME'] = os.environ.get('HERMES_HOME') or str(get_default_hermes_root()) if sys.argv[1:2] == ['--print-runtime-command']:     from pathlib import Path     from hermes_cli._launchers import print_runtime_command     print_runtime_command(Path('/home/yang/.hermes/hermes-agent'), sys.argv[2:])     sys.exit(0) import hermes_bootstrap if sys.argv[1:2] == ['--run-module']:     import runpy     if len(sys.argv) < 3: sys.exit('hermes: --run-module needs a module')     module = sys.argv.pop(2)     del sys.argv[1]     runpy.run_module(module, run_name='__main__', alter_sys=True)     sys.exit(0) from hermes_cli.main import main sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0]) sys.exit(main())  serve --host 127.0.0.1 --port 0
+  56229       2 日 11月  1 19:46:33 2026 [vidmem lazy free]
+  56242       2 日 11月  1 19:46:33 2026 [UVM GPU1 BH]
+  56243       2 日 11月  1 19:46:33 2026 [UVM GPU1 KC]
+  56437       2 日 11月  1 19:46:40 2026 [kworker/11:2-mm_percpu_wq]
+  57894   53188 日 11月  1 19:50:51 2026 /home/yang/.local/share/Steam/ubuntu12_64/steamwebhelper --type=zygote --crashpad-handler-pid=53180 --enable-crash-reporter=, --change-stack-guard-on-fork=enable --enable-chrome-runtime --user-data-dir=/home/yang/.local/share/Steam/config/htmlcache --user-agent-product=Valve Steam Client --buildid=1792618285 --steamid=0 --valve-initial-threadpool-size=4
+  58690       2 日 11月  1 19:52:21 2026 [kworker/10:0-events_freezable]
+  58862    2959 日 11月  1 19:52:52 2026 /usr/bin/zsh
+  58867     867 日 11月  1 19:52:52 2026 /usr/bin/zsh
+  58945     867 日 11月  1 19:52:52 2026 /usr/bin/zsh
+  58946     867 日 11月  1 19:52:52 2026 /usr/bin/zsh
+  58948   58867 日 11月  1 19:52:52 2026 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+  59370       2 日 11月  1 19:53:54 2026 [kworker/13:1-events]
+  69817   50121 日 11月  1 20:07:27 2026 /opt/helium-browser-bin/helium --type=renderer --crashpad-handler-pid=50106 --enable-crash-reporter=,Arch Linux --change-stack-guard-on-fork=enable --ozone-platform=wayland --lang=zh-CN --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=16 --launch-time-ticks=5599281472 --shared-files=v8_context_snapshot_data:100 --metrics-shmem-handle=4,i,2098618870972346124,14527045227207899521,1572864 --field-trial-handle=3,i,13271159338148638794,12190622551440093066,262144 --variations-seed-version --pseudonymization-salt-handle=7,i,14680976262642734699,4102494038327015931,4 --trace-process-track-uuid=3190709001304541078
+  76453       2 日 11月  1 20:14:34 2026 [kworker/15:2-events]
+  83388     867 日 11月  1 20:21:03 2026 node src/main.ts
+  83438     867 日 11月  1 20:21:07 2026 node src/main.ts
+  83555     867 日 11月  1 20:21:17 2026 node src/main.ts
+  86197       2 日 11月  1 20:27:20 2026 [kworker/u64:2-events_unbound]
+  86876       2 日 11月  1 20:27:22 2026 [kworker/u64:8-events_unbound]
+  88885       2 日 11月  1 20:29:02 2026 [kworker/8:1-events]
+  91513     867 日 11月  1 20:30:13 2026 node src/main.ts
+  91838       2 日 11月  1 20:30:35 2026 [kworker/9:2-mm_percpu_wq]
+  96246       2 日 11月  1 20:32:39 2026 [kworker/3:2-events]
+  97659   56088 日 11月  1 20:35:20 2026 /home/yang/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 /home/yang/.hermes/cache/scratch/hermes_kernel_ylnc_0n2/hermes_kernel_runner.py
+  98909       2 日 11月  1 20:35:27 2026 [kworker/u65:2-rtw89_tx_wq]
+ 108841       2 日 11月  1 20:40:49 2026 [kworker/15:1-mm_percpu_wq]
+ 108891       2 日 11月  1 20:40:49 2026 [kworker/14:2]
+ 109238       2 日 11月  1 20:41:57 2026 [kworker/7:0-events]
+ 109291       2 日 11月  1 20:42:19 2026 [kworker/8:0]
+ 109388       2 日 11月  1 20:42:28 2026 [kworker/5:0-events]
+ 109798       2 日 11月  1 20:43:20 2026 [kworker/13:0-cgroup_free]
+ 110936       2 日 11月  1 20:44:21 2026 [kworker/4:1-cgroup_free]
+ 113455       2 日 11月  1 20:47:07 2026 [kworker/6:2-events]
+ 115721       2 日 11月  1 20:50:09 2026 [kworker/10:1-cgroup_free]
+ 115742       2 日 11月  1 20:50:09 2026 [kworker/5:2]
+ 115816     867 日 11月  1 20:50:10 2026 /home/yang/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 -m browser_harness.daemon
+ 118550       2 日 11月  1 20:53:19 2026 [kworker/4:2-events]
+ 119124       2 日 11月  1 20:54:20 2026 [kworker/u64:0-iou_exit]
+ 119126       2 日 11月  1 20:54:20 2026 [kworker/u64:1-events_unbound]
+ 119129       2 日 11月  1 20:54:20 2026 [kworker/u64:4-iou_exit]
+ 120610       2 日 11月  1 20:55:26 2026 [kworker/1:2-cgroup_free]
+ 121949       2 日 11月  1 20:56:20 2026 [kworker/u64:6-iou_exit]
+ 123394       2 日 11月  1 20:57:27 2026 [kworker/0:1-cgroup_free]
+ 123408       2 日 11月  1 20:57:31 2026 [kworker/7:1-events]
+ 128102       2 日 11月  1 21:01:35 2026 [kworker/14:0-mm_percpu_wq]
+ 133894       2 日 11月  1 21:07:47 2026 [kworker/3:1]
+ 134222       2 日 11月  1 21:08:49 2026 [kworker/1:1-cgroup_free]
+ 134817       2 日 11月  1 21:09:22 2026 [kworker/u64:7-flush-259:3]
+ 134822       2 日 11月  1 21:09:22 2026 [kworker/u64:9-flush-259:3]
+ 134882       2 日 11月  1 21:09:22 2026 [kworker/u64:10-iou_exit]
+ 136055       2 日 11月  1 21:11:24 2026 [kworker/2:2-events]
+ 137081       2 日 11月  1 21:12:57 2026 [kworker/0:2-mm_percpu_wq]
+ 138865       2 日 11月  1 21:14:13 2026 [nvidia-drm/timeline-771]
+ 138873       2 日 11月  1 21:14:13 2026 [nvidia-drm/timeline-774]
+ 139267       2 日 11月  1 21:15:01 2026 [kworker/9:1-cgroup_free]
+ 139473   56088 日 11月  1 21:15:53 2026 /home/yang/.hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3 /home/yang/.hermes/cache/scratch/hermes_kernel_spa18jq2/hermes_kernel_runner.py
+ 139582    2959 日 11月  1 21:16:05 2026 /usr/bin/zsh
+ 139587     867 日 11月  1 21:16:05 2026 /usr/bin/zsh
+ 139644     867 日 11月  1 21:16:05 2026 /usr/bin/zsh
+ 139645     867 日 11月  1 21:16:05 2026 /usr/bin/zsh
+ 139647  139587 日 11月  1 21:16:05 2026 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+ 139888       2 日 11月  1 21:16:34 2026 [kworker/2:1]
+ 140313       2 日 11月  1 21:16:58 2026 [kworker/u65:1-rtw89_tx_wq]
+ 140374       2 日 11月  1 21:17:05 2026 [kworker/11:1]
+ 140502     867 日 11月  1 21:17:16 2026 wl-copy
+ 140615       2 日 11月  1 21:17:36 2026 [kworker/12:1-mm_percpu_wq]
+ 141371       2 日 11月  1 21:18:00 2026 [kworker/u64:3-iou_exit]
+ 142436       2 日 11月  1 21:18:55 2026 [kworker/u64:5-iou_exit]
+ 142623       2 日 11月  1 21:19:10 2026 [kworker/1:0-events]
+ 143258       2 日 11月  1 21:20:23 2026 [kworker/u64:11-events_unbound]
+ 143880       2 日 11月  1 21:21:14 2026 [kworker/0:0-cgroup_free]
+ 145036       2 日 11月  1 21:22:26 2026 [kworker/u65:0-rtw89_tx_wq]
+ 146010       2 日 11月  1 21:22:51 2026 [kworker/u64:12]
+ 146983    3540 日 11月  1 21:23:40 2026 bash driver.sh
+ 147032  146983 日 11月  1 21:23:40 2026 node src/main.ts
+ 147092    2959 日 11月  1 21:23:40 2026 /usr/bin/zsh
+ 147119     867 日 11月  1 21:23:40 2026 /usr/bin/zsh
+ 147173     867 日 11月  1 21:23:40 2026 /usr/bin/zsh
+ 147174     867 日 11月  1 21:23:40 2026 /usr/bin/zsh
+ 147176  147119 日 11月  1 21:23:40 2026 /home/yang/.cache/gitstatus/gitstatusd-linux-x86_64 -G v1.5.4 -s -1 -u -1 -d -1 -c -1 -m -1 -v FATAL -t 32
+ 147210  147092 日 11月  1 21:23:40 2026 pi
+ 148369  146983 日 11月  1 21:24:15 2026 ps -eo pid,ppid,lstart,args

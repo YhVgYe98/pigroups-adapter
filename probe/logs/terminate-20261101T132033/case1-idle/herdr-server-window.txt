@@ -1,0 +1,4 @@
+2026-11-01T13:24:11.820106Z  INFO herdr::logging: api request received event="api.request.start" subsystem="api" outcome="started" request_id="cli:pane:close" method="pane.close" changes_ui=true
+2026-11-01T13:24:11.821115Z  INFO herdr::logging: pane child exited event="pane.exit" subsystem="pane" outcome="completed" pane_id=50 status="ExitStatus { code: 1, signal: None }"
+2026-11-01T13:24:11.823333Z  INFO herdr::pane: pane session terminated pane=50 pid=147418 signal=Hangup
+2026-11-01T13:24:11.823426Z  INFO herdr::logging: api request completed event="api.request.complete" subsystem="api" outcome="ok" request_id="cli:pane:close" method="pane.close"

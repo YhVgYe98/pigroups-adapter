@@ -1,0 +1,1 @@
+{"items":[{"seq":1,"id":"terminate:m_9cd4ee","from_id":"sys","to":"m_9cd4ee","cmd":"sys.terminated","payload":{"reason":"deleted","terminated_by":"m_bf0cc5"},"reply_to":null,"receipts":[{"to_id":"m_9cd4ee","state":"delivered","delivered_at":1793539488045}],"created_at":1793539488045}],"next":null,"server_version":"0.2.0"}

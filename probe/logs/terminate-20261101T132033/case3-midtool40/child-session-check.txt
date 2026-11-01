@@ -1,0 +1,7 @@
+lines=29 bad=0 endsWithNewline=true
+last.type=message role=assistant stopReason=error
+entry types: session,session_info,model_change,thinking_level_change,message,custom_message,message,message,message,custom_message,message,message,message,message,message,message,message,message,message,custom_message,message,custom_message,message,message,message,custom_message,message,message,message
+pg_say tool results: 5
+bash call call_00_mrQp8bfzP30ihxPbTVu11890 at 2026-11-01T13:23:22.979Z args={"command":"sleep 40","timeout":60}
+bash result at 2026-11-01T13:23:25.655Z isError=true text="Command aborted"
+last message: {"role":"assistant","content":[],"api":"openai-completions","provider":"deepseek","model":"deepseek-flash","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"This operation was aborted","timestamp":1793539405656,"durationMs":0,"thinkingLevel":"max"}

@@ -1,0 +1,50 @@
+
+=== case3-midtool40 (midtool) ===
+evidence: case3-midtool40
+child: member m_6f8d83, pane wE:p1P, pi pid 145923, herdr pane 48
+
+timeline (all times UTC, epoch ms in parentheses; pid sampled every 20 ms, pane every 40 ms)
+  2026-11-01T13:23:22.979Z  child's bash toolCall written (1793539402979)
+  2026-11-01T13:23:25.652Z  DELETE committed, sys.terminated written (1793539405652) [working at last pane sample before DELETE]
+  2026-11-01T13:23:25.653Z  child's poll took that notice (state=delivered) (1793539405653)
+  2026-11-01T13:23:25.655Z  child's bash toolResult written (1793539405655) [3 ms after DELETE] — cut, "Command aborted"
+  2026-11-01T13:23:25.656Z  last session write (1793539405656) [4 ms after DELETE]
+  2026-11-01T13:23:25.770Z  first pid sample: pi gone (1793539405770) [118 ms after DELETE]
+  2026-11-01T13:23:25.819Z  pane list first reported the pane with no agent (1793539405819) [167 ms after DELETE]
+  2026-11-01T13:23:25.856Z  herdr pane.close request (1793539405856) [204 ms after DELETE]
+  2026-11-01T13:23:25.861Z  pane list first reported the pane absent (1793539405861) [209 ms after DELETE]
+  2026-11-01T13:23:25.859732Z  herdr logged signal=Hangup for pane 48: yes
+
+PASS  S1 the child session file is complete
+      29 entries, 0 unparseable lines, endsWithNewline=true
+PASS  S2 the child consumed sys.terminated before it exited
+      receipt delivered at 2026-11-01T13:23:25.653Z, pi gone at 2026-11-01T13:23:25.770Z (117 ms)
+PASS  S3 the child pi process exited before pane.close
+      pi gone at 2026-11-01T13:23:25.770Z; pane.close at 2026-11-01T13:23:25.856Z (86 ms before the close)
+PASS  S4 pane list reported the agent gone before pane.close
+      pane list: agent gone at 2026-11-01T13:23:25.819Z; pane.close at 2026-11-01T13:23:25.856Z (37 ms before the close)
+PASS  S5 pi reached its graceful interactive exit path
+      the scrollback captured when the agent vanished contains pi's graceful-exit line
+PASS  S6 pane gone, child pi gone, member gone
+      pane "wE:p1P": absent; ps for 145923: absent; member status gone
+PASS  S7 pg_terminate reported no pane_close_failed
+      answer: 2026-11-01T13:23:25.860Z [{"type":"text","text":"{\"terminated\":[\"m_6f8d83\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}] -> pane_close_failed=[]
+PASS  S8 pg_terminate reported no pane_close_forced
+      answer: 2026-11-01T13:23:25.860Z [{"type":"text","text":"{\"terminated\":[\"m_6f8d83\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}] -> pane_close_forced=[]
+PASS  S9 the close stayed inside the 5 s hard bound
+      DELETE 2026-11-01T13:23:25.652Z -> pane.close 2026-11-01T13:23:25.856Z: 204 ms of the 5000 ms PANE_AGENT_EXIT_TIMEOUT_MS (margin 4796 ms)
+PASS  C1midtool the delete landed while the child was running bash
+      last pane sample before DELETE: working; bash call: {"command":"sleep 40","timeout":60}
+PASS  C2midtool the live bash call got a toolResult instead of being left dangling
+      toolResult at 2026-11-01T13:23:25.655Z (3 ms after DELETE), isError=true, text="Command aborted"
+PASS  C3midtool the tool was cut with "Command aborted" before its natural end
+      marker=true; tool ran 2676 ms of a requested 40000 ms
+PASS  C4midtool the session ends on an aborted turn, not a dangling toolUse
+      last entry stopReason=error errorMessage="This operation was aborted" at 2026-11-01T13:23:25.656Z (4 ms after DELETE)
+NOTE  session ending: type=message role=assistant stopReason=error errorMessage="This operation was aborted"
+
+VERDICT: PASS (13/13 observations)
+
+=== summary ===
+PASS  case3-midtool40 (13/13)
+OVERALL: PASS

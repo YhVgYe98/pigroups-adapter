@@ -1,0 +1,46 @@
+
+=== case2-midturn (midturn) ===
+evidence: case2-midturn
+child: member m_9cd4ee, pane wE:p1T, pi pid 149107, herdr pane 52
+
+timeline (all times UTC, epoch ms in parentheses; pid sampled every 20 ms, pane every 40 ms)
+  ?  child's bash toolCall written (NaN)
+  2026-11-01T13:24:48.045Z  DELETE committed, sys.terminated written (1793539488045) [working at last pane sample before DELETE]
+  2026-11-01T13:24:48.045Z  child's poll took that notice (state=delivered) (1793539488045)
+  ?  child's bash toolResult written (NaN) [?]
+  2026-11-01T13:24:48.047Z  last session write (1793539488047) [2 ms after DELETE]
+  2026-11-01T13:24:48.166Z  first pid sample: pi gone (1793539488166) [121 ms after DELETE]
+  2026-11-01T13:24:48.316Z  pane list first reported the pane with no agent (1793539488316) [271 ms after DELETE]
+  2026-11-01T13:24:48.449Z  herdr pane.close request (1793539488449) [404 ms after DELETE]
+  2026-11-01T13:24:48.481Z  pane list first reported the pane absent (1793539488481) [436 ms after DELETE]
+  2026-11-01T13:24:48.453049Z  herdr logged signal=Hangup for pane 52: yes
+
+PASS  S1 the child session file is complete
+      21 entries, 0 unparseable lines, endsWithNewline=true
+PASS  S2 the child consumed sys.terminated before it exited
+      receipt delivered at 2026-11-01T13:24:48.045Z, pi gone at 2026-11-01T13:24:48.166Z (121 ms)
+PASS  S3 the child pi process exited before pane.close
+      pi gone at 2026-11-01T13:24:48.166Z; pane.close at 2026-11-01T13:24:48.449Z (283 ms before the close)
+PASS  S4 pane list reported the agent gone before pane.close
+      pane list: agent gone at 2026-11-01T13:24:48.316Z; pane.close at 2026-11-01T13:24:48.449Z (133 ms before the close)
+PASS  S5 pi reached its graceful interactive exit path
+      the scrollback captured when the agent vanished contains pi's graceful-exit line
+PASS  S6 pane gone, child pi gone, member gone
+      pane "wE:p1T": absent; ps for 149107: absent; member status gone
+PASS  S7 pg_terminate reported no pane_close_failed
+      answer: 2026-11-01T13:24:48.453Z [{"type":"text","text":"{\"terminated\":[\"m_9cd4ee\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}] -> pane_close_failed=[]
+PASS  S8 pg_terminate reported no pane_close_forced
+      answer: 2026-11-01T13:24:48.453Z [{"type":"text","text":"{\"terminated\":[\"m_9cd4ee\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}] -> pane_close_forced=[]
+PASS  S9 the close stayed inside the 5 s hard bound
+      DELETE 2026-11-01T13:24:48.045Z -> pane.close 2026-11-01T13:24:48.449Z: 404 ms of the 5000 ms PANE_AGENT_EXIT_TIMEOUT_MS (margin 4596 ms)
+PASS  C1midturn the delete landed while the child was in a model turn
+      last pane sample before DELETE: working at 2026-11-01T13:24:48.030Z
+PASS  C2midturn the running turn was cut, not allowed to finish
+      last entry stopReason=aborted errorMessage="Operation aborted" at 2026-11-01T13:24:48.047Z (2 ms after DELETE)
+NOTE  session ending: type=message role=assistant stopReason=aborted errorMessage="Operation aborted"
+
+VERDICT: PASS (11/11 observations)
+
+=== summary ===
+PASS  case2-midturn (11/11)
+OVERALL: PASS
