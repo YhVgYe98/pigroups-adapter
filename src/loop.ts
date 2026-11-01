@@ -104,9 +104,9 @@ const REPORT_TIMEOUT_MS = 2000;
  */
 const STOP_TIMEOUT_MS = 3000;
 
-/** A roster read is a settle-time cost, not a poll-time one (§4.1). */
+/** A roster read is a settle/startup cost, not a poll-time one (§4.1). */
 const ROSTER_TTL_MS = 30_000;
-/** A slow roster must delay a settle's delivery no further than this. */
+/** A slow roster must delay startup or a settle's delivery no further than this. */
 const ROSTER_TIMEOUT_MS = 2000;
 /** A failed roster read is not retried on every settle; the platform may be down. */
 const ROSTER_RETRY_BACKOFF_MS = 5000;
@@ -205,7 +205,7 @@ export class AdapterLoop {
   private readonly settles = new Set<Promise<unknown>>();
   /** Deliveries started so far. One settle may deliver once, whoever started it (§2.3). */
   private deliveredCount = 0;
-  /** The live roster (§4.4), cached: an obligation check must not cost a request per settle. */
+  /** The last good roster (§4.4), cached: an obligation check must not cost a request per settle. */
   private roster: RosterSnapshot | undefined;
   /** After a failed roster read, the next attempt waits until this instant. */
   private rosterRetryAt = 0;
@@ -598,7 +598,7 @@ export class AdapterLoop {
     await this.readyPromise;
   }
 
-  /** §8 startup: identity, briefing, owed reconciliation, journal replay. */
+  /** §8 startup: identity, briefing, owed reconciliation, journal replay, then the first prune. */
   private async init(): Promise<void> {
     const who = await this.pg.whoami();
     this.selfId = who.member.id;
@@ -1051,9 +1051,10 @@ export class AdapterLoop {
    * for the life of the surviving member: found on a real run, where a child was deleted
    * and its parent kept being told to answer a conversation with nobody on the other end.
    *
-   * The roster (`GET /v1/tree`) lists exactly the living members. Failing to read it —
-   * or reading something that is not a roster — keeps every debt: a wrong prune loses a
-   * real obligation, a late prune loses nothing.
+   * The roster (`GET /v1/tree`) lists exactly the living members. A read that fails
+   * falls back to the last good snapshot; when there is none, or the body is not a
+   * roster, every debt is kept: a wrong prune loses a real obligation, a late prune
+   * loses nothing.
    *
    * ``since`` guards the other direction. The roster is cached, so a peer created after
    * the read is absent from a list that was true when it was taken. A debt that became
