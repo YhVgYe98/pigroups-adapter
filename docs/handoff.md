@@ -262,7 +262,7 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 
 **这次没有证明什么**：只跑了 1 个子成员（不是 2 个），完整场景只跑了 1 次（第二次只复跑失败点）；没有重启/重放/崩溃；
 没有模型主动发出的 `pg.report`（工具不存在），只有适配器自发的控制项；没有验孙子成员、
-父适配器重启后关 pane、以及 `GET /v1/control?all=true` 的删除后视图（平台 500，见 §7）。
+父适配器重启后关 pane（平台侧那个删除后 500 已在 PiGroups `e03af1a` 修掉）。
 一次 run 是样本，不是对所有路径的证明。
 
 **探针隔离的教训**：第一次 run 的 `pi -e extension.ts` 继承了用户全局扩展
@@ -411,7 +411,7 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 | `herdr agent start` 在真实 pane 里的行为 | **已验证**（第 4 级）：root 与 child 都由 `agent start` 起，返回 `interactive_ready:true`，pane 显示 `agent=pi`。**未验**的是失败后的 `pane send-text` 兜底路径 |
 | `pg_terminate` 关 pane 只覆盖“本适配器内存里记得的 pane” | 已修一半（`9453f6d`）：`spawn()` 按成员 id 记住 pane，DELETE 成功后 `close()`；真机复跑确认。**仍漏**：父适配器重启后内存映射丢失；子成员（孙子）由子适配器拉起，父/根直接删它时关不掉。要补需持久化/共享 pane map，或平台协作 |
 | 模型侧没有 `pg_report` 工具 | **产品缺口，未决**。规范只列 9 个工具；第 4 级却要求“根收到 `pg.report`”。适配器可自发 `blocked`/`exiting` 控制项，模型不能主动发 `done`/`progress`。要么加第 10 个工具并改 `docs/设计说明.md` §5.3，要么改第 4 级判据 |
-| 删除后 `GET /v1/control?all=true` 500 | **平台 bug，未修**。`sys.terminated` 的 `to_json` 存裸 id，`src/routes/control.ts:68` 直接 `JSON.parse` → `SyntaxError`；删除后正是最需要看指令的时候。本轮只动 adapter 文档，平台未改 |
+| ~~删除后 `GET /v1/control?all=true` 500~~ | **平台侧已修（PiGroups `e03af1a`）**：`sys.terminated` 曾把裸成员 id 写进 `to_json`，而读侧统一 `JSON.parse`——删一个成员就把"解释这次删除的日志"打成 500。新增测试：删完仍能读全量指令 |
 | 删除后父的义务表残留 | **已修**（`d19a179`）：`terminate()` 丢弃指向已删除成员的义务，不再无限催；`test/obligation.test.ts` 守着。第 4 级第一次 run 时观察到 `owed:["dm:…"]` 与 3 次 nudge |
 | 子成员消失后群会话从人类索引消失 | 平台按概念稿 §3.3 是正确的（群只在有子成员时存在）；但删完后 `GET /v1/conversations` 看不到那个群，只能按已知 `g:<parent>` 读历史。已知限制，未改 |
 | 子成员 `gone` 的遥测文案显示 `id（id）` | 小瑕疵，未修：`terminate()` 时 telemetry 没有该成员的名字，回退到 id。不影响状态判断 |
@@ -439,7 +439,7 @@ curl -s localhost:7717/v1/conversations -H "Authorization: Bearer <human token>"
 curl -s 'localhost:7717/v1/messages?to=g:m_xxx&limit=50' -H "Authorization: Bearer <human token>"
 ```
 
-> 注意：`/v1/control?all=true` 在删除之后目前会 500（`sys.terminated` 的裸 id），见 §7；这不是读法错了。
+> 这条曾因平台 bug 在删除后 500（`sys.terminated` 的裸 id），已由 PiGroups `e03af1a` 修掉。
 
 ```bash
 # 平台
