@@ -1,11 +1,11 @@
 # 交接文档
 
-> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12）。
+> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12。**第六轮同日：修 A–D（§13），并把 A 放到真机上复跑四轮——子成员能在 5 s 内退出时成立，卡在长工具里时 `pane close` 仍会切掉活着的 agent（§3.7）。适配器单独发 `v0.2.1`，平台仍是 `0.2.0`（§8）。**）
 >
 > 两个人（或一个人隔几天回来）之间交接用。
 > 面向：接手「把 PiGroups 在 herdr + pi 上真机跑起来」这件事的人。
 >
-> **本文档描述的是 `v0.2.0` 这一对**：平台与适配器都是 `0.2.0`，各有一个未签名的 annotated 标签钉在发版提交上（平台 `1d68dd4`、适配器 `f340f25`）。号住在哪、怎么发下一版、以及本轮实测到的问题，见 §8。
+> **本文档描述的是 `v0.2.1` 这一对**：平台 `0.2.0`（未签名 annotated 标签 `v0.2.0`，`1d68dd4`）+ 适配器 `0.2.1`（未签名 annotated 标签 `v0.2.1`，钉在发版提交上，`git rev-parse v0.2.1^{}`）。这是本仓库第一次**单侧发版**：只有适配器动了，所以只有它进 patch 位（§8）。号住在哪、怎么发下一版、以及本轮实测到的问题，见 §8。
 
 ---
 
@@ -15,14 +15,16 @@
 
 **第 4 级不是“全过”，状态统一为“部分通过”。** 第一次真机 run 抓出两处：模型侧没有 `pg_report` 工具（只有 9 个工具，规范也只列了 9 个），以及删除后子 pane 没人关。后者已由 `9453f6d` 修掉并在真机复跑确认；前者是产品缺口，但**不是**第 4 级的判据——那次 run 的判据被改过两次（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说了一句话），两处都在事后单独的 `de48904` 里，**不在**记录那次 run 的 `3919467` 里（`3919467` 连判据那一行都没动，§3.6 原先把它记成“记录 run 的同一个提交”，本版改正）。整级仍是部分通过，因为只跑了 1 个子成员，判据也是事后改的。详见 §3.6 与 §4。
 
-下一步：**先把 `pg_report` 定为“加第 10 个工具”还是保持“汇报=说话”**（它不再是第 4 级的判据，但仍是产品缺口）；补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘；再把第 4 级从 1 个子成员扩到 2 个并验重启/级联。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
+下一步：**先把 `pg_report` 定为“加第 10 个工具”还是保持“汇报=说话”**（它不再是第 4 级的判据，但仍是产品缺口）；补第 3 级剩下的 print/json 模式；再把第 4 级从 1 个子成员扩到 2 个并验重启/级联。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
+
+**关 pane 的等待只在 5 s 内成立**（§3.7）：四次真机 run 里 3 次 PASS、1 次 FAIL——子成员卡在 `bash sleep 40` 里时，`pane close` 仍在 5031 ms 切掉一个 `agent=pi working` 的活进程，而且 `pg_terminate` 仍报 `pane_close_failed: []`。这条留在 §7，没有关。
 
 ```
 平台仓库  ~/Documents/PiGroups          0.2.0  v0.2.0  57 tests   typecheck 干净  已发版 v0.2.0
-适配器    ~/Documents/pigroups-adapter  0.2.0  v0.2.0  78 tests   typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
+适配器    ~/Documents/pigroups-adapter  0.2.1  v0.2.1  84 tests   typecheck 干净  第 1 级通过 / 第 2、3、4 级部分通过
 ```
 
-两个仓库必须是同一个号，`v0.2.0` 标签记录这一对；本文档描述的就是它。号住在哪、怎么发下一版见 §8。
+两个仓库按**一次发布记一对号**：两边都动就同号，只有一侧动就只动那一侧；现在这一对是平台 `0.2.0` + 适配器 `0.2.1`。号住在哪、怎么发下一版见 §8。
 
 ---
 
@@ -37,7 +39,7 @@
 | 版本 | `0.2.0`，标签 `v0.2.0`（annotated、未签名）。`package.json` 是唯一真值：`src/version.ts` 直接 import 它，`GET /v1/health` 与每个响应的 `server_version` 都报这个数，没有第二个常量 |
 | 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（实现伴稿）、`docs/参考/`（原始讨论稿） |
 | 代码 | `src/` 2105 行，15 个 HTTP 端点，TypeScript + `node:sqlite`；运行时依赖 `hono`、`@hono/node-server`、`zod` |
-| 测试 | `test/` 2681 行，56 个黑盒 HTTP 测试 |
+| 测试 | `test/` 2681 行，57 个黑盒 HTTP 测试 |
 | 运行 | `npm run serve`（`PORT` 默认 7717，`PIGROUPS_DATA`，`PIGROUPS_ADMIN_TOKEN`） |
 | 提交 | `master`（数量见 `git log`） |
 
@@ -49,10 +51,10 @@
 
 | | |
 |---|---|
-| 版本 | `0.2.0`，标签 `v0.2.0`（annotated、未签名）。`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`、lockfile 三处必须相等（`test/version.test.ts` 会红）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它 |
+| 版本 | `0.2.1`，标签 `v0.2.1`（annotated、未签名；平台仍是 `0.2.0` / `v0.2.0`）。`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`、lockfile 三处必须相等（`test/version.test.ts` 会红）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它 |
 | 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（含 `PiSurface`、`Herdr`、循环、journal、`pg.*` 契约） |
-| 代码 | `src/` 2995 行，8 个模块（见下），**无运行时依赖**（只用 `node:*` 和 `fetch`） |
-| 测试 | `test/` 3249 行，78 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
+| 代码 | `src/` 3102 行，8 个模块（见下），**无运行时依赖**（只用 `node:*` 和 `fetch`） |
+| 测试 | `test/` 3641 行，84 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
 | 提交 | `master`（数量见 `git log`） |
 
 ```
@@ -124,18 +126,19 @@ herdr agent start root --kind pi --pane "$PANE" --timeout 60000 \
 
 ### 3.2 平台侧的具体数字
 
-- 56 个黑盒测试，覆盖 15 个端点的全部承诺
+- 57 个黑盒测试，覆盖 15 个端点的全部承诺
 - 变异测试 16 个错误实现，**全部被抓**（含幂等查表顺序、名字唯一索引是否为 partial）
 - 我自己另写了 17 + 24 + 10 项探针，独立复核过越权路径（成员带 `all=true` 的 8 种写法全部 403）
 
 ### 3.3 适配器侧的具体数字
 
-- 78 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
+- 84 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
 - 新补的 15 条（44 → 59，之后又补 3 条到 62）：`test/surface.test.ts` 新增 3 条（幂等门；该文件共 9 条）、
   `test/surface.abort.test.ts` 10 条（abort/isBusy/shutdown/退订/preview，含 3 s 放弃分支）、
   `test/obligation.test.ts` 新增 2 条（`nudgeOwed` 的 abort 竞态）；三组都做过撤掉源码再跑红的验证
 - 第五轮再补 13 条到 75（`obligation` 7、`herdr` 2、`tools` 2、`delivery` 1、`stop` 1），清单与变异证明见 §12
 - 版本工作再补 3 条到 78（`test/version.test.ts`：常量与 `package.json`/lockfile 一致、`pg_whoami` 报 `adapter_version`、启动日志那一行）
+- 第六轮（A–D）再补 6 条到 84：`test/herdr.test.ts` 1 条（关 pane 前等 agent 退出）；`test/obligation.test.ts` 5 条（启动即欠死对端、坏名册保留上一份好快照、退避内不重读、超时中止请求、`PgClient.tree` 把 signal 传进 `fetch`）。六条都做过“撤掉 src 就红”的验证，数字在 §13
 - 变异测试 17 个，抓 12 个；存活 5 个里 3 个已被后补测试覆盖，剩 2 个（水位按成员、`flush()` 返回值）已补并有变异证明
 - 本轮另做 3 个反向变异，全被抓：撤 `turnOpen` 门 → `surface.test.ts` 9 条里 2 条红；撤 `abort()` 放弃时的 warn → `surface.abort.test.ts` 1 条红；撤 `nudgeOwed` 的两处 `aborting` 检查 → `obligation.test.ts` 2 条红。恢复后全绿
 - 此前的两轮独立评审：源码侧 3 blocking + 9 should-fix 全部修完；测试侧 11 条覆盖缺口补了 9 条（2 条判定为文档信息不足，明确跳过）
@@ -225,7 +228,7 @@ adapter 的 `abort()` 在 `ABORT_IDLE_TIMEOUT_MS = 3000` 处放弃时，那一�
 `setTimeout` 也能让进程活过 `shutdown_done`；那次的 `exit_code` 与 runner 输出没归档，只剩一份末行是
 `shutdown_done` 的 JSONL，所以它证明不了 await。19:20 的归档运行才同时有 `exit_code`、
 `run_exit_code` 和 `process_exit`。**仍然没验**：`ctx.shutdown()` 自调用、print/json 模式、
-session 落盘、以及 shutdown 正在跑的一轮。
+session 落盘、以及 shutdown 正在跑的一轮。（第六轮已补上其中三条，只剩 print/json，见 §3.7。）
 
 **abort 后的 settle 仍能起一轮 —— 成立（对照组与硬变体都通过）。** 这是 P1 没覆盖的路径
 （P1 只证明正常 settle）：`settled_3(aborted)` 的处理器里 `sendMessage` 被接受，日志出现
@@ -302,6 +305,49 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 `balance.mjs after-close wE:pX` 重排了用户的 tab。复跑用 `-ne` 只加载适配器。真机探针必须
 隔离，见 §2.3 与 `probe/README.md` 第 4 级。
 
+### 3.7 关 pane 的真机复跑（2026-11-01，fix A）
+
+**结论：子成员能在 5 s 内退出时成立，卡在一个长工具里时失败。** 这是 §7“关 pane 与子成员
+`sys.terminated` 收尾竞争”那一行的复跑，也是 `7ae1adc` 的验收。四次运行各一个目录
+（`probe/logs/paneclose-*`）：根由 herdr 起，root `pg_spawn` 出子成员、等它说过话，再
+`pg_terminate`；每次只改“DELETE 落地时子成员在做什么”。
+
+| 运行 | 删除时子成员在做什么 | DELETE→`pane close` | 判定 |
+|---|---|---|---|
+| `paneclose-20261101T205517-idle` | 空闲 | 608 ms | **PASS 8/8** |
+| `paneclose-20261101T205921-midturn` | 一轮模型 turn 中 | 4626 ms | **PASS 8/8**（余量 374 ms） |
+| `paneclose-20261101T210306-midtool` | `bash sleep 40` 运行中 | **5031 ms** | **FAIL 3/8** |
+| `paneclose-20261101T210437-midtool6` | `bash sleep 6` 运行中 | 3825 ms | **PASS 8/8** |
+
+量法：notice 送达用平台 `sys.terminated` 的 `created_at` / receipt 的 `delivered_at`；子 pi 的
+生死用 `/proc/<pid>` 每 20 ms 采样；pane 的 agent 状态用 `herdr pane list` 每 40 ms 采样，agent
+一消失立刻抓回滚；`pane.close` 用 herdr 服务端日志的微秒时间戳。逐项 PASS/FAIL 由
+`probe/paneclose-analyze.mjs` 产出，汇总在 `probe/logs/paneclose-summary.md`。
+
+两个测量细节：`herdr pane list` 报 agent 消失比进程退出晚 22–162 ms（有这一帧的三次运行），
+所以正常情况 close 总在 pi 退出之后 20–200 ms；pi 会把自己的 argv 重写成 `pi`，`ps`/`pgrep -f`
+认不出来，pid 是用 `herdr pane process-info` + `/proc/<pid>/environ` 的 `HERDR_PANE_ID` 认的。
+
+**PASS 的三次**：pi 先退出、pane 再消失，回滚里有 `To resume this session:`——这句话只在
+**非信号**的 shutdown 分支打印（pi 1.4.0 `interactive-mode.js:3465-3478`），所以子成员走的是
+`ctx.shutdown()`（本适配器 `sys.terminated` → `discardAndShutdown()` → `surface.shutdown()`），
+不是被 SIGHUP 打断。会话 JSONL 每行可解析、以换行结尾，最后一次写入早于进程退出。
+
+**FAIL 的那次**：`13:03:44.335` notice 送达；`13:03:49.340` pane 仍报 `agent=pi working`；
+`13:03:49.366` 适配器在 5031 ms 关窗格；`13:03:49.375` 第一次看不到 pi 进程；`13:03:49.389`
+herdr 记 `pane session terminated … signal=Hangup`，对 `pane=41` 没有“agent 离开窗格”。会话最后
+一条是 `stopReason=toolUse`、没有 toolResult：那一轮被切掉了。修法只是把同一个竞态从 0 ms 推到
+5 s，没有消除它。
+
+**#3 与 #4 的对照给出机制**：`sleep 6` 那次工具在删除后 2.5 s **自然结束**（toolResult 写进会话），
+之后才有收尾消息与退出。**pi 在 shutdown 时等正在跑的工具，不打断它**——所以“剩余工具时间”
+决定你落在 5 s 的哪一边。这同时补上了第 3 级两条原来未验的路径：`ctx.shutdown()` 自调用，以及
+shutdown 时正在跑的一轮（#4 等工具跑完才退）。**print/json 模式仍未验。**
+
+**没证明的**：一份模型 turn 就吃掉了 4626/5000 ms（#2），余量并不宽；`pg_terminate` 在 #3 仍返回
+`{"terminated":[…],"pane_close_failed":[]}`，调用者看不出子成员被切断；`pane list` 读失败时
+`close()` 不等待，直接走关闭（herdr 不可达的情形没有覆盖）。
+
 ---
 
 ## 4. 真机四级清单（2026-11-01 实测后）
@@ -312,8 +358,8 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 |---|---|---|---|---|
 | **1** | 在 `agent_settled` 回调里调 `pi.sendMessage(text, {triggerTurn: true})` **能真起一轮** | 整个消息通道静默失效（最致命，所以排第一） | 探针扩展在 idle 时投一句，日志里出现一次新的 `agent_start` | **通过**。`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮（`delivered p3 → turn_start run 4`） |
 | **2** | 一个卡住的工具在外部 `abort()` 后回到 idle | 卡住的成员永远收不到 `pg.abort`，回到"没人能叫停它" | `abort()` 在有界时间内 resolve，日志里那轮以 `aborted` 结束 | **部分通过**。配合的工具（从 signal 监听器返回）2 ms 结束；**忽略 signal 的工具不会被 pi 杀掉**，settle 要到 58 296 ms 后才来。证据：`run-20261101T1920-control/` 与 `run-20261101T1920-ignore-signal/` |
-| **3** | `shutdown()` 后进程真退、session 落盘 | 被删成员留一个僵尸 pane | 进程 exit 0，session JSONL 有结尾 | **部分通过**。SIGTERM/tui 这条路径已用 3 s 异步体 + `process.on('exit')` 证明 await：`waited_ms=3000`，`process_exit` 在 `shutdown_done` 之后 54 ms，`exit 0`。**没调 `ctx.shutdown()` 自调用，没验 print/json 模式、session 落盘、shutdown 正在跑的一轮** |
-| **4** | 端到端：根 + 子成员、真模型、派活 → 汇报 → 删除 | — | 子成员收到简报、**说了一句话**（"汇报"就是说话：任务由消息关闭，模型没有也不该有 `pg_report` 工具），删除后子进程与 pane 都消失 | **部分通过（主链路通过；只跑了 1 个子成员）**。`probe/logs/level4-20261101T193132/`：根由 herdr 起、`pg_spawn` 建成员与 pane、简报进子模型、子消息人可读、删除后成员/进程退出都成立；pane 已由 `9453f6d` 修好并在 `probe/logs/level4-fix-20261101T193945/` 复跑确认。**判据被改过两处**（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话），逐条记在 §3.6：原判据里 `pg_report` 那条是写判据的人写错了，`pg.report` 只有适配器自己在 blocked/exiting 时发；但只跑了 1 个子成员，所以整级不记通过 |
+| **3** | `shutdown()` 后进程真退、session 落盘 | 被删成员留一个僵尸 pane | 进程 exit 0，session JSONL 有结尾 | **部分通过**。SIGTERM/tui 这条路径已用 3 s 异步体 + `process.on('exit')` 证明 await：`waited_ms=3000`，`process_exit` 在 `shutdown_done` 之后 54 ms，`exit 0`。§3.7 的四次 run 又补上两条：`ctx.shutdown()` 自调用（`sys.terminated` → `discardAndShutdown()`）走通，PASS 的三次都有非信号的 resume 行、会话每行可解析；shutdown 时正在跑的一轮也验了——#4 里 pi 等 `sleep 6` 工具跑完（删除后 2.5 s）才退。**仍没验**：print/json 模式（源码看是 143，未实测）；#3 被 5 s 硬上限切断那次没有正常退出 |
+| **4** | 端到端：根 + 子成员、真模型、派活 → 汇报 → 删除 | — | 子成员收到简报、**说了一句话**（"汇报"就是说话：任务由消息关闭，模型没有也不该有 `pg_report` 工具），删除后子进程与 pane 都消失 | **部分通过（主链路通过；只跑了 1 个子成员）**。`probe/logs/level4-20261101T193132/`：根由 herdr 起、`pg_spawn` 建成员与 pane、简报进子模型、子消息人可读、删除后成员/进程退出都成立；pane 已由 `9453f6d` 修好并在 `probe/logs/level4-fix-20261101T193945/` 复跑确认。**判据被改过两处**（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话），逐条记在 §3.6：原判据里 `pg_report` 那条是写判据的人写错了，`pg.report` 只有适配器自己在 blocked/exiting 时发；但只跑了 1 个子成员，所以整级不记通过。**关 pane 的等待已由 §3.7 四次 run 复验：3 PASS / 1 FAIL**——`bash sleep 40` 那次 5 s 到点仍关掉活 agent，所以“子成员走完退出再关 pane”只在 5 s 内成立 |
 
 三条假设逐条对账（日期 2026-11-01，证据在 `probe/logs/run-20261101T1920-*`）：
 
@@ -345,7 +391,10 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
    通过行是 `shutdown_start`（`reason:"quit", mode:"tui"`）→ `shutdown_done`
    （`waited_ms:3000`）→ `process_exit`（`after_shutdown_done_ms:54`, `code:0`），
    SIGTERM→退出 3130 ms、只派发一次。**缺的部分**：`ctx.shutdown()` 自调用、
-   print/json 模式、session 落盘、以及 shutdown 正在跑的一轮；探针都没碰。
+   print/json 模式、session 落盘、以及 shutdown 正在跑的一轮；第四轮探针都没碰。
+   **第六轮补上了其中三条**（§3.7）：`ctx.shutdown()` 自调用在四次真机 run 里走了四遍，
+   PASS 的三次都有非信号的 resume 行、会话完整（session 落盘）；shutdown 时正在跑的一轮也验了
+   （#4 等 `sleep 6` 工具跑完才退）。**只剩 print/json 模式没验。**
    （print 模式下 `SIGTERM` 会 `process.exit(143)`，这是读 pi 1.4.0
    `dist/modes/print-mode.js:40` 得到的，**未实测**。）`extension.ts` 的
    「先清 `loop` 再 await」与 pi 1.4.0 源码的 `await emitSessionShutdownEvent` 一致，
@@ -438,16 +487,17 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 | `deliver()` 只确认"pi 收下了"，不确认"run 起来了" | 丢失窗口仍在：`pi.sendMessage` 是 void，pi 吞掉启动失败，而水位与 journal 在 `deliver()` resolve 后立刻推进（`docs/设计说明.md §3.4`）。消息会被记成已注入但那一轮没起来。本轮只把契约写准（`PiSurface` 注释、§3.4、本节都写了"收下 ≠ 起来"），没有加 ack；要收紧只能给 `PiSurface` 加"下一次 `agent_start`"的确认，属于接口设计决定 |
 | `details.kind` 写了没人读 | `src/surface.ts` 把它塞进 `pi.sendMessage` 的 `details`，`test/surface.test.ts` 也断言了，但仓库里没有任何读取方。要么定为 UI 契约写进 `docs/设计说明.md`，要么删——产品决定，未做 |
 | 投递排队分支没有真实样本 | 留存日志里 `hasPendingMessages` 恒为 `false`：两笔投递同时排队、以及 turn 中途再投都没观测过；`hasPendingMessages` 在 `src/` 里也一次没读。一次 settle 只投一次的规则不覆盖这个场景 |
-| `ctx.shutdown()` 自调用、print/json 模式下的退出 | 未验证。外部 `SIGTERM` 的 tui 路径已证明 await（3 s 异步体、`process_exit.after_shutdown_done_ms ≥ 0`、exit 0、只派发一次）；`ctx.shutdown()` 自调用、print/json、session 落盘、shutdown 正在跑的一轮都没验。print 模式据源码是 143（未实测） |
+| `ctx.shutdown()` 自调用、print/json 模式下的退出 | **部分已验**。外部 `SIGTERM` 的 tui 路径已证明 await（3 s 异步体、`process_exit.after_shutdown_done_ms ≥ 0`、exit 0、只派发一次）；`ctx.shutdown()` 自调用这条路径在 §3.7 的四次 run 里走了四遍（`sys.terminated` → `discardAndShutdown()` → `surface.shutdown()`），PASS 的三次有非信号的 resume 行、会话完整、进程先于 close 退出；shutdown 时正在跑的一轮也验了（#4 等工具跑完才退）。**仍缺**：print/json 模式（源码看是 143，未实测），以及被 5 s 硬上限切断的那次（#3）没有正常退出的证据 |
 | 一个忽略 abort signal 的工具不会被 pi 杀掉 | **未解决，接口边界**。硬变体：abort 后 3009 ms `idle_timeout`，工具自己 60 s 后返回，aborted settle 晚到 58 296 ms。adapter 的 `abort()` 3 s 后放弃并打 warn；`pg.abort` 对这类成员无法兑现“已切断”。`bash` 内置工具未验 |
 | `herdr agent start` 在真实 pane 里的行为 | **已验证**（第 4 级）：root 与 child 都由 `agent start` 起，返回 `interactive_ready:true`，pane 显示 `agent=pi`。**未验**的是失败后的 `pane send-text` 兜底路径 |
-| `pg_terminate` 关 pane 只覆盖“本适配器内存里记得的 pane” | 本轮补到三种死亡路径：`spawn()` 按成员 id 记住 pane，`terminate()`（自己删，含平台级联返回的每个 id）关；`pollOnce()`/settle 用 `GET /v1/members/{id}` 复核映射里的每个成员，`status:"gone"` 就关——所以**祖先直接删本适配器的直接子成员**（不经过本进程的 `terminate()`）也会在 TTL 内关掉；`pane_not_found` 视为已关，其他失败记 `pane_close_failed` 并保留映射等重试。**仍漏**：映射只在内存里，父适配器重启后丢失；子成员（孙子）由子适配器拉起，父/根删它时本进程没有映射。要补需持久化/共享 pane map，或平台协作 |
+| `pg_terminate` 关 pane 只覆盖“本适配器内存里记得的 pane” | 本轮补到三种死亡路径：`spawn()` 按成员 id 记住 pane，`terminate()`（自己删，含平台级联返回的每个 id）关；`pollOnce()`/settle 用 `GET /v1/members/{id}` 复核映射里的每个成员，`status:"gone"` 就关——所以**祖先直接删本适配器的直接子成员**（不经过本进程的 `terminate()`）也会在 TTL 内关掉；`pane_not_found` 视为已关，其他失败记 `pane_close_failed` 并保留映射等重试。**仍漏**：映射只在内存里，父适配器重启后丢失；子成员（孙子）由子适配器拉起，父/根删它时本进程没有映射。要补需持久化/共享 pane map，或平台协作。第六轮的 A 只改了关闭前的等待，没有动映射的生命周期 |
 | 模型侧没有 `pg_report` 工具 | **产品缺口，未决，但不再是第 4 级的判据**。规范只列 9 个工具；第 4 级原判据要求“根收到 `pg.report`”，这条已撤回并记账（§3.6）。适配器可自发 `blocked`/`exiting` 控制项，模型不能主动发 `done`/`progress`；模型侧的“汇报”现在定义为说话（`pg_say`）。要么加第 10 个工具并改 `docs/设计说明.md` §5.3，要么保持“汇报=说话” |
 | ~~删除后 `GET /v1/control?all=true` 500~~ | **平台侧已修（PiGroups `e03af1a`）**：`sys.terminated` 曾把裸成员 id 写进 `to_json`，而读侧统一 `JSON.parse`——删一个成员就把"解释这次删除的日志"打成 500。**旧库也要能读**：两个读侧改成容错解析（非 JSON 原样返回），`openDatabase` 开库时把非 JSON 的 `to_json` 一次性 `json_quote` 回填——否则 `?to=` 过滤（比较 JSON 形式）会静默漏掉旧行。两块各有测试：`test/legacy-control-target.test.ts` |
-| 删除后父的义务表残留 | **本轮已修到这些路径**（`d19a179` + 第五轮）：`terminate()` 丢弃平台级联返回的**每个**成员（不只是参数）的私聊义务；`say()` 收到 410 立刻丢；其余靠 `GET /v1/tree` 名册在 settle 时复核。名册读失败、或返回的不是名册（`{"nodes":[]}`、无 id、不含自己）时**一条不剪**；**债比名册快照年轻**（`since >= at`，即对端可能是在快照之后才创建的）也**不剪**——这两条是本轮补的，之前会误删真债。`test/obligation.test.ts` 守着。**仍漏**：进程启动后第一次 settle 之前，`reconcileObligations()` 仍可能把对端已死的 DM 重新标成欠回复；已剪掉的债可能被一条迟到的消息重新标上（只在下一次名册读成功时再剪）。第 4 级第一次 run 时观察到 `owed:["dm:…"]` 与 3 次 nudge |
+| 删除后父的义务表残留 | **已修到这些路径**（`d19a179` + 第五轮 + 第六轮）：`terminate()` 丢弃平台级联返回的**每个**成员（不只是参数）的私聊义务；`say()` 收到 410 立刻丢；其余靠 `GET /v1/tree` 名册在 settle 时复核。名册读失败、或返回的不是名册（`{"nodes":[]}`、无 id、不含自己）时**一条不剪**；**债比名册快照年轻**（`since >= at`，即对端可能是在快照之后才创建的）也**不剪**——这两条是第五轮补的，之前会误删真债。`test/obligation.test.ts` 守着。**第六轮再补两条**：`712db53` 在 `ready` 之前用一份**新读的**名册剪一次（startup 绕过 `since >= at`，因为历史读在这份名册之前），所以“启动后第一次 settle 之前”这段窗口关了；`6ce2789` 读失败保留上一份好快照、超时真的 `abort` 请求、失败退避 5 s。**仍漏**：启动剪完之后，如果死对端的消息还躺在 poll 队列里，第一次 poll 会把它投进来、重新标成欠回复（要等下一次 settle 再剪）；迟到的消息同理。第 4 级第一次 run 时观察到 `owed:["dm:…"]` 与 3 次 nudge |
 | 子成员消失后群会话从人类索引消失 | 平台按概念稿 §3.3 是正确的（群只在有子成员时存在）；但删完后 `GET /v1/conversations` 看不到那个群，只能按已知 `g:<parent>` 读历史。已知限制，未改 |
 | 子成员 `gone` 的遥测文案显示 `id（id）` | 小瑕疵，未修：`terminate()` 时 telemetry 没有该成员的名字，回退到 id。不影响状态判断 |
-| pane 关闭与子成员自己的 `sys.terminated` 退出竞争 | **已知，未改**：`DELETE` 提交后立刻 `herdr pane close`，可能抢在子 pi 消费完 `sys.terminated`、写完 session 之前把它杀掉。复跑里没有子成员的 receipt/transcript 作为“它先读完通知”的证据。不改的理由：删除已经提交，子成员在平台上已 gone；herdr 没有“等 agent 自己退出”的 wait，硬等一个卡住的 agent 会把 `pg_terminate` 拖到 180 s 命令超时。若要收紧，得先定“谁来证明子进程已退出”，那是设计决定 |
+| pane 关闭与子成员自己的 `sys.terminated` 退出竞争 | **部分修，仍开（真机 FAIL 一次）**。`7ae1adc`：`close()` 每 200 ms 读 `herdr pane list`，等 pane 的 agent 消失（没有 `agent` 或 `agent_status=unknown`）再 `pane close`，上限 `PANE_AGENT_EXIT_TIMEOUT_MS = 5000`。§3.7 四次真机：空闲 608 ms、删除时在一轮 turn 里 4626 ms、`sleep 6` 工具 3825 ms 都 PASS（pi 先退出，回滚有 resume 行）；`sleep 40` 那次 **FAIL**——5031 ms 到上限，close 时 `pane list` 仍报 `agent=pi working`，pi 在 close 后 9 ms 消失，herdr 记 `signal=Hangup`。**只是把竞态从 0 ms 推到 5 s，没有消除**；`pg_terminate` 仍返回 `pane_close_failed: []`，调用者看不出子成员被切断。**不覆盖**：herdr 不可达（`pane list` 失败时不等待，直接关）；pane 映射只在内存里（适配器重启就丢，见本表 `pg_terminate` 关 pane 那一行）；5 s 内跑不完的普通工具/长 turn（#2 的余量只有 374 ms） |
+| 名册读的三条旧洞（第五轮留档：失败无退避、`ROSTER_TIMEOUT_MS` 只是 race 不是取消、启动/`tick()` 不剪） | **已修（`712db53` + `6ce2789`）**：失败或答案不可信时保留上一份好快照、5 s 后重试；超时用 `withAbort()` 真的 `abort` 请求；启动在 `ready` 前剪一次。**仍漏**：退避固定 5 s，不随失败次数增长；半截响应只能靠“名册必须含自己”整次作废 |
 | 真机探针会继承用户的全局 pi 扩展 | 第一次第 4 级 run 踩过：root 通过 `pi-intercom` 把消息转进用户主会话，`pi-straw-boss` 还重排了用户 tab。`probe/README.md` 第 4 级与 §2.3 已要求 `-ne` + 只加载 `-e` 适配器；这是探针纪律，不是产品代码 |
 | 消息与 inbox 都没有清理策略 | 已知，无上限增长。规模上来再定 |
 | 催办三级的阈值（5 分钟窗口 / 3 次上限 / 30 分钟持续） | 全是拍的数字。第 4 级看到了“3 次后 blocked”真的发生，但没有负载样本校准 |
@@ -459,23 +509,26 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 
 ## 8. 怎么重跑一切
 
-**先确认你手里是哪一版。** 两个仓库都是 `0.2.0`，各有一个未签名 annotated 标签 `v0.2.0`（平台 `1d68dd4`、适配器 `f340f25`）；本文档描述的就是这一对。两个仓库的 `git describe --tags` 现在都会带后缀（`v0.2.0-N-g<hash>`），因为发版之后还有文档/元数据提交——**后缀不是新版本**，标签仍钉在发版提交上。
+**先确认你手里是哪一版。** 现在这一对是**平台 `0.2.0` + 适配器 `0.2.1`**：平台有未签名 annotated 标签 `v0.2.0`（`1d68dd4`），适配器有未签名 annotated 标签 `v0.2.1`（打在发版提交上，`git rev-parse v0.2.1^{}`）。这是本仓库第一次**单侧发版**：只有适配器动了，所以只有它进 patch 位，平台保持 `0.2.0`。发版提交之后如果还有文档/元数据提交，`git describe --tags` 会带后缀（平台现在就是 `v0.2.0-1-g210ed07`）——**后缀不是新版本**，标签仍钉在发版提交上；适配器的标签打在当时的 HEAD 上，`git describe --tags` 就是 `v0.2.1`。
 
-**号住在哪。** 平台只有一处：`package.json`；`src/version.ts` 直接 import 它，`/v1/health` 与每个响应的 `server_version` 都是这个数，没有第二个常量。适配器两处必须一致：`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`（`test/version.test.ts` 也会比对 lockfile）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。**平台的 `package-lock.json` 仍是 `0.1.0`**——生成文件没跟上，真值以 `package.json` 与标签为准，平台的版本守卫不查 lockfile。
+**号住在哪。** 平台只有一处：`package.json`；`src/version.ts` 直接 import 它，`/v1/health` 与每个响应的 `server_version` 都是这个数，没有第二个常量。适配器三处必须一致：`src/version.ts` 的 `ADAPTER_VERSION`、`package.json`、`package-lock.json`（`test/version.test.ts` 会比对 `package.json` 与 lockfile 的两处）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。两边的 lockfile 现在都跟上了各自的 `package.json`（平台在 `210ed07` 重新生成，并加了锁文件漂移测试）。
 
-**发一次版**（两个仓库同一个号，缺一不可）：
+**发一次版**（一次发布记一对号；两边都动才同号，只有一侧动就只动那一侧）：
 
 ```bash
-# 1) 两边的 package.json 改成同一个新号；适配器再 npm install --package-lock-only 让 lock 跟上
-# 2) 两边 CHANGELOG.md 各写一条，并写明按 0.x 口径这次是 patch 还是 minor
-# 3) 提交，然后各打一个未签名标签（annotated，不要 -s）
+# 1) 动的那个仓库改 package.json；适配器还要同步 src/version.ts，并 npm install --package-lock-only 让 lock 跟上
+# 2) 该仓库 CHANGELOG.md 写一条，并写明按 0.x 口径这次是 patch 还是 minor
+# 3) 提交，然后打一个未签名标签（annotated，不要 -s）；两边都动就两边各打同一个 v<号>
 git tag --no-sign -a v0.3.0 -m "v0.3.0: adapter 0.3.0 + platform 0.3.0, one release of the pair"
 git cat-file -p v0.3.0 | grep -c gpgsig     # 期望 0
 ```
 
-口径（`CHANGELOG.md` 里也写着）：0.x 阶段按本项目自己的定义，不按 semver 默认——patch（`0.x.N+1`）只修 bug，端点、字段、工具名都不变；minor（`0.X+1.0`）是契约变化：加/删字段、端点、工具，改已记录的行为，数据迁移，新增接口成员。两个仓库一起走到同一个号，标签记录这一对。
+单侧发版就是 `v0.2.1`：平台不动，适配器 `0.2.0 → 0.2.1`，
+`git tag --no-sign -a v0.2.1 -m "v0.2.1: adapter 0.2.1, platform 0.2.0"`。
 
-**本轮实测到、没修的问题**：平台的变异守卫清单里“只改 `package.json` 看测试变红”这一条按字面做不到（单源，改它不会红；把 `SERVER_VERSION` 写死成 `0.1.0` 才会红，实测 1 条失败），适配器那份按字面有效（`0.2.1` ≠ `0.2.0`，实测 1 条失败）；~~平台 `CHANGELOG.md` 那句“入队与唤醒都在同一事务”~~ 已改正为“在删除事务里入队，事务提交后再唤醒”（`210ed07`）；~~平台 `package-lock.json` 还写着 0.1.0~~ 同一次提交重新生成，并加了锁文件漂移测试（`test/version.test.ts`）。
+口径（`CHANGELOG.md` 里也写着）：0.x 阶段按本项目自己的定义，不按 semver 默认——patch（`0.x.N+1`）只修 bug，端点、字段、工具名都不变；minor（`0.X+1.0`）是契约变化：加/删字段、端点、工具，改已记录的行为，数据迁移，新增接口成员。两边都动时两个仓库一起走到同一个号；只动一侧时另一侧保持原号。标签记录的是这一对。
+
+**本轮实测到、没修的问题**：平台的变异守卫清单里“只改 `package.json` 看测试变红”这一条按字面做不到（单源，改它不会红；把 `SERVER_VERSION` 写死成 `0.1.0` 才会红，实测 1 条失败），适配器那份按字面有效（把 `ADAPTER_VERSION` 改成与 `package.json` 不同的号，实测 1 条失败）；~~平台 `CHANGELOG.md` 那句“入队与唤醒都在同一事务”~~ 已改正为“在删除事务里入队，事务提交后再唤醒”（`210ed07`）；~~平台 `package-lock.json` 还写着 0.1.0~~ 同一次提交重新生成，并加了锁文件漂移测试（`test/version.test.ts`）。
 
 **以人身份读全部内容，三步，别想当然**（第 4 级真机跑时踩过）：
 
@@ -495,11 +548,11 @@ curl -s 'localhost:7717/v1/messages?to=g:m_xxx&limit=50' -H "Authorization: Bear
 ```bash
 # 平台
 cd ~/Documents/PiGroups
-npm run typecheck && npm test          # 56 tests，约 2.3 秒
+npm run typecheck && npm test          # 57 tests，约 1.8 秒
 
 # 适配器（会自己拉起一个平台子进程）
 cd ~/Documents/pigroups-adapter
-npm run typecheck && npm test          # 78 tests，约 8.3 秒
+npm run typecheck && npm test          # 84 tests，约 7.6 秒
 PIGROUPS_PLATFORM_DIR=~/Documents/PiGroups   # 默认是 ../PiGroups
 
 # 手动起一个平台
@@ -513,10 +566,10 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 9. 接手的第一件事
 
-1. 跑一遍上面两个 `npm test`，确认 56 / 78 全绿（`v0.2.0` 的数）
+1. 跑一遍上面两个 `npm test`，确认 57 / 84 全绿（`v0.2.1` 这一对的数）
 2. 读 `pigroups-adapter/docs/设计说明.md` §2.1（`PiSurface`）和 §2.2（`Herdr`）——那是真机验证的靶子
 3. 重跑 `probe/run.sh`（对照组应 PASS）与 `PROBE_IGNORE_SIGNAL=1 probe/run.sh`（硬变体应 FAIL 在 P2.5/P2.7，这是 pi 的已知边界）
-4. 补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘；`pg.abort` 的 turn_end 已修，不要再动
+4. 补第 3 级剩下的 print/json 模式；`pg.abort` 的 turn_end 与 `ctx.shutdown()` 自调用都已验，不要再动
 5. 第 4 级主链路已在真机跑过（§3.6），整级是部分通过；补第 2 个子成员、重启/级联、以及判据改动后的完整场景。`pg_report` 不再是第 4 级的判据（§3.6），但“加不加第 10 个工具”仍是产品决定。不要因为主链路通了就勾第 4 级
 
 **不要**在真机之前改循环。接口假设错了，循环改多少遍都是白改。
@@ -525,15 +578,15 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 10. 交接清单
 
-- [x] 两个仓库 `git status` 干净；都在 `0.2.0`，都有未签名 annotated 标签 `v0.2.0`（平台 `1d68dd4`、适配器 `f340f25`，详见 §8）
-- [x] `PiGroups`: 56/56，typecheck 干净（2026-11-01 版本工作实测，约 2.3 s）
-- [x] `pigroups-adapter`: 78/78，typecheck 干净（2026-11-01 版本工作实测，约 8.3 s）
+- [x] 两个仓库 `git status` 干净；**这一对是平台 `0.2.0`（`v0.2.0`，`1d68dd4`）+ 适配器 `0.2.1`（`v0.2.1`，`git rev-parse v0.2.1^{}`）**，都是未签名 annotated 标签（详见 §8）。单侧发版：只有适配器进了 patch 位
+- [x] `PiGroups`: 57/57，typecheck 干净（2026-11-01 重测，约 1.8 s）
+- [x] `pigroups-adapter`: 84/84，typecheck 干净（2026-11-01 发版前重测，约 7.6 s）
 - [x] `grep -c 'pi-coding-agent' pigroups-adapter/src/loop.ts` = 0（实测 0）
 - [x] herdr 版本记下（本机 0.9.5，`herdr --version` 2026-11-01 复核），三个旗标形状与 §3.4 一致
 - [x] 第 1 级探针通过（2026-11-01，`probe/logs/run-20261101T1920-control/`；abort 后的 settle 也能起一轮）
 - [ ] 第 2 级探针**部分通过**（对照组 2 ms 切断；`PROBE_IGNORE_SIGNAL=1` 的硬变体 P2.5/P2.7 失败：pi 不杀忽略 signal 的工具；`bash sleep 60` 未验）
-- [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；`ctx.shutdown()` 自调用、print/json 模式、session 落盘、shutdown 正在跑的一轮都未验）
-- [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**只能记部分通过**：只跑了 1 个子成员，且两条判据事后在 `de48904` 里改过（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话，不在记录那次 run 的 `3919467` 里，见 §3.6）。`pg_report` 工具缺失是产品缺口（§7），不是这一级的判据；重启/级联未验）
+- [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；§3.7 又验了 `ctx.shutdown()` 自调用、session 落盘、shutdown 正在跑的一轮；print/json 模式仍未验）
+- [ ] 第 4 级端到端**部分通过**（2026-11-01：`probe/logs/level4-20261101T193132/` + `level4-fix-20261101T193945/`；根由 herdr 起、`pg_spawn` 建成员与 pane、简报进模型、子消息人可读、删除后成员/进程/pane 都没了。**只能记部分通过**：只跑了 1 个子成员，且两条判据事后在 `de48904` 里改过（2 个子成员 → 子成员；根收到 `pg.report` → 子成员说话，不在记录那次 run 的 `3919467` 里，见 §3.6）。`pg_report` 工具缺失是产品缺口（§7），不是这一级的判据；重启/级联未验。关 pane 的等待另在 §3.7 复验：3 PASS / 1 FAIL）
 
 ---
 
@@ -561,7 +614,7 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 修法都有“撤掉 src 就红”的证明：义务 19/19→18/19（三条各掉一条）、关 pane 失败 5/6、`pane_not_found` 2/2→1/2、pane 对账 5/6、`stop()` 3/3→2/3、投递计数 6/6→5/6；平台回填与容错 2/2→1/2。恢复后适配器 75/75、平台 55/55。改动清单在 §12。
 
-留给人做的是取证和产品决定，不是代码：关 pane 可能抢占子成员的 `sys.terminated` 与会话落盘，只做了文档化，要真机复跑抓子进程收据；pane 映射只在内存、也看不到子适配器自己起的孙成员；`pg_report` 仍是产品决定（已不是第 4 级判据）。其余已知限制见 §7。
+留给人做的是取证和产品决定，不是代码：关 pane 可能抢占子成员的 `sys.terminated` 与会话落盘，第五轮只做了文档化——**第六轮已复跑**，结论是 5 s 内成立、长工具下仍 FAIL，见 §3.7。pane 映射只在内存、也看不到子适配器自己起的孙成员；`pg_report` 仍是产品决定（已不是第 4 级判据）。其余已知限制见 §7。
 
 ---
 
@@ -580,3 +633,25 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 - `GET /v1/control` 两个读侧对 `to_json` 容错解析（不是 JSON 就原样返回）；`openDatabase` 开库时把非 JSON 的 `to_json` 用 `json_quote` 一次性回填，`?to=` 过滤因此也能看到旧行。回归测试：`test/legacy-control-target.test.ts`（旧行在开库前写入 → 回填生效；运行中写入 → 容错读取生效）。
 - `docs/设计说明.md` 的 `controls.to_json` 注释写明这段历史与修复。
+
+---
+
+## 13. 第六轮：A–D 修复与关 pane 的真机复跑（2026-11-01）
+
+这一轮修 §7 / §11 留档的几处，没有动接口（`PiSurface`、`Herdr` 的成员不变，`pg_terminate` 的返回形状也不变）。四条各一笔提交；每个行为修复都配一条“撤掉 src 就红”的测试。适配器 78 → 84，`typecheck` 干净，全绿后单独发 `v0.2.1`（平台仍是 `0.2.0`）。
+
+**A — 关 pane 前等窗格里的 agent 退出（`7ae1adc`）**
+`HerdrCli.close()` 每 200 ms 读 `herdr pane list`，等到 pane 消失、或它的条目没有 `agent` / `agent_status === 'unknown'`，再 `pane close`，上限 `PANE_AGENT_EXIT_TIMEOUT_MS = 5000`；`pane list` 读失败则不等待，直接走原来的关闭路径（失败时的行为不变）。测试 `close() waits for the pane agent to exit before it runs pane close`。撤 `src/herdr.ts` → 该文件 3 条里 1 条红（`pane close must happen after the wait, got ["pane close wE:pX"]`）；恢复 → 3/3。真机复跑见 §3.7：**3 PASS / 1 FAIL**，FAIL 是 `bash sleep 40`，5 s 到点仍切掉活 agent，所以 §7 那一行仍然开着。
+
+**B — 启动时先剪一次死对端的债（`712db53`）**
+`init()` 在 `replayJournal()` 之后、`ready` 之前读一份**新**名册剪一次；startup 这一条路径绕过 `since >= at`（历史读在这份名册之前，所以它比刚标上的债新），正常 settle 的守卫不变。测试 `a member that starts up owing a dead peer has no debt before the first settle`；撤 `src/loop.ts` → 该条红（`actual: ["dm:…"]`，期望 `[]`）；恢复 → 那个提交上 `obligation.test.ts` 20/20。**仍漏**：消息还躺在 poll 队列里时，第一次 poll 会把它投进来、重新标债，要等下一次 settle 再剪。
+
+**C — 名册读的保留、取消与退避（`6ce2789`）**
+`PgClient.tree(signal?)` 把 signal 传进请求与 `fetch`；`aliveIds()` 用新的 `withAbort()`，超时 `abort` 请求而不是只放弃 promise；读失败或答案不可信时保留上一份好快照并退避 5 s；启动强制新读。四条测试（坏名册保留快照、退避内不重读、超时真的中止、`tree()` 传 signal）；把 `src/loop.ts` + `src/pgclient.ts` 恢复到 `712db53` → 四条全红（快照被丢、退避内仍重读、超时路径没有 signal、`fetch` 没收到 signal）；恢复 → 4/4，全仓 84/84。`delivery` / `stop` 里原有的名册测试只改成“第一次读是健康的，settle 那一次是被押住的那次”，断言没有放松。
+
+**D — 注释与代码对齐（`e1fcf13`）**
+§4.1 的注释块在 `pruneUnanswerableDms` 上方、§4.3 的在 `nudgeOwed` 上方（这一处早在 `cdd01b9` 就修好了）；这一笔只改 A–C 弄错的注释：名册读现在也发生在启动、缓存的是上一份好快照而不是实时名册、读失败回退到快照而不是无条件保留每条债。纯注释，没有行为测试。
+
+**真机（`1a4c0fe`）**：四次 `paneclose-*` run + 分析器 + 说明，只动 `probe/`，没有 `src/` / `test/` 变更，所以不涉及变异证明。数字与 FAIL 的原始行在 §3.7。
+
+**没有做的**：§7 的行按实际覆盖范围收窄，没有把没修好的写成修好——A 那一行仍然开着（5 s 硬上限）；`pg_report`、pane 映射的生命周期、print/json 模式也都没动。

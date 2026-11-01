@@ -11,9 +11,24 @@
 | patch（`0.x.N+1`） | 修 bug，契约不变：端点、字段、工具名、文档化的行为都不动 |
 | minor（`0.X+1.0`） | 契约变化：字段/端点/工具增删、有文档的行为改变、数据迁移、接口新增成员 |
 
-- **适配器与平台同号发布。** 两个仓库当作一个系统开发，tag 记的是这一对：`v0.2.0` = 平台 `SERVER_VERSION` 0.2.0 + 适配器 `ADAPTER_VERSION` 0.2.0。
+- **一次发布记一对号。** 两个仓库当作一个系统开发，标签记的是**这一对**。两边都动就两边同号（`v0.2.0` = 平台 `SERVER_VERSION` 0.2.0 + 适配器 `ADAPTER_VERSION` 0.2.0）；只有一侧动时只动那一侧，另一侧保持原号——`v0.2.1` 是适配器单独一笔，与平台 0.2.0 配套。适配器的 `v<号>` 里永远是适配器自己的号。
 - **版本号只有一个来源**：`src/version.ts` 的 `ADAPTER_VERSION`。`package.json`（和 lockfile）必须与之一致；`test/version.test.ts` 在二者不一致时变红。不要再造第二个数字。
 - 0.1.0 只是脚手架留在 `package.json` 里的一个字符串：没有版本常量、没有 tag、没有任何地方报告它。本文件从 0.2.0 开始记账。
+
+---
+
+## v0.2.1（2026-11-01，与平台 0.2.0 配套）
+
+**一次只动适配器的 patch。** 端点、字段、工具名都没变，`PiSurface` 与 `Herdr` 的成员没变，`pg_terminate` 的返回形状也没变。四条都是 `docs/handoff.md` §7 里记着的洞（A–D），没有一条是契约变化。`Herdr.close()` 的契约仍然只是“关掉 pane；已经不在的 pane 算成功”；A 加的是实现里的有界等待，`docs/设计说明.md` §2.2 / §5.3 同步写清它等多久、以及 5 s 到点仍会切掉活 agent——那条原本记的是“已知缺口”，不是对调用者的承诺。
+
+- **关 pane 会先等窗格里的 agent 退出（`7ae1adc`）。** `HerdrCli.close()` 每 200 ms 读一次 `herdr pane list`，直到 pane 消失、或它的条目没有 `agent` / `agent_status === 'unknown'`，最多等 `PANE_AGENT_EXIT_TIMEOUT_MS = 5000`，然后才 `pane close`；`pane list` 读失败就落到原来的关闭路径，失败时的行为不变。**这条没有把竞态消掉，只是把它从 0 ms 推到 5 s**：真机上子成员卡在 `bash sleep 40` 里时，5 s 到点仍会关掉一个 `agent=pi working` 的活进程，`pg_terminate` 还是返回 `pane_close_failed: []`（四次 run 3 PASS / 1 FAIL，见 `docs/handoff.md` §3.7）。所以 §7 那一行还是开着的。测试：`close() waits for the pane agent to exit before it runs pane close`。
+- **启动时先剪一次死对端的债（`712db53`）。** `init()` 在 `replayJournal()` 之后、`ready` 之前用一份**新读的**名册剪一次。这一份名册比刚读到的历史新，所以 `reconcileObligations()` 刚标上的债也能被它判定；`since >= at` 的守卫只在正常 settle 里保留，startup 这唯一的路径上不适用。**仍漏**：如果死对端的消息还躺在 poll 队列里，第一次 poll 会把它投进来、重新标成欠回复，要等下一次 settle 才再剪。测试：`a member that starts up owing a dead peer has no debt before the first settle`。
+- **名册读保留上一份好快照、超时会中止请求、失败退避 5 s（`6ce2789`）。** `PgClient.tree(signal?)` 把 signal 传进请求与 `fetch`；`aliveIds()` 用新的 `withAbort()`，超时 `abort` 请求，不再只是放弃 promise；读失败或答案不是可信名册时保留上一份好快照，并在 5 s 内不再重读；启动仍然强制新读。测试 4 条：坏名册保留快照、退避内不重读、超时真的中止、`tree()` 把 signal 传进 `fetch`。
+- **注释回到与代码一致（`e1fcf13`）。** 只改注释：名册读现在也发生在启动、缓存的是上一份好快照而不是实时名册、读失败回退到快照而不是无条件保留每条债。
+
+**测试与变异证明。** 78 → 84 条。四条行为测试都做过“撤掉 src 就红”：A 撤 `src/herdr.ts` → 那条 0 pass / 1 fail；B 撤 `src/loop.ts` → `actual: ["dm:…"]`、期望 `[]`；C 撤 `src/loop.ts` + `src/pgclient.ts` 到 `712db53` → 四条全红（快照被丢、退避内仍重读、超时路径没有 signal、`fetch` 没收到 signal）。恢复后 84/84，typecheck 干净。
+
+**还没关的。** 关 pane 的 5 s 硬上限（§7，真机 FAIL 一次）；`ctx.shutdown()` 自调用已在真机上走过，print/json 模式仍未验；名册退避是固定 5 s，不随失败增长；掉队消息仍会重标已剪的债。
 
 ---
 
