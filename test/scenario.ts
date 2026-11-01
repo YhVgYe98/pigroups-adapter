@@ -98,7 +98,9 @@ export async function createLoop(
     },
     async settle(error) {
       surface.settle(error);
-      await delay(10);
+      // Wait for the reaction itself, not a guessed delay: it now asks the platform
+      // before it delivers, and a fixed sleep passes or fails depending on the machine.
+      await loop.settled();
       await loop.flush();
     },
     async timer(ms) {

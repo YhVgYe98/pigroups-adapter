@@ -2,8 +2,14 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { send } from './support.ts';
+import { AdapterLoop } from '../src/loop.ts';
+import { PgClient } from '../src/pgclient.ts';
+import type { PiSurface } from '../src/surface.ts';
+import { delay, send } from './support.ts';
 import { scenario } from './scenario.ts';
 
 test('a DM from the parent is delivered with the conversation id and the message seq', async (t) => {
@@ -111,4 +117,132 @@ test('a gap that skipped messages naming me is delivered as a hint with its anch
     `the hint must carry the re-read anchor (before=${anchor}): ${delivered}`,
   );
   assert.ok(s.loop.state().owed.includes(s.group), 'a gap that skipped a mention leaves the conversation owed');
+});
+
+// §2.3: one delivery per settle. The settle reaction now awaits the platform before it
+// decides, and another path (`ingest() → flush()`) can deliver inside that window. Its
+// own flush then answers `empty` because the queue was drained — which is not the same
+// as "nothing was delivered", and must not license a nudge on top of that delivery.
+test('a settle nudges only when nothing was delivered while it was asking the platform', async () => {
+  const SELF = 'm_aaaaaa';
+  const PEER = 'm_bbbbb1';
+  const dm = `dm:${SELF}_${PEER}`;
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-delivery-test-'));
+  const deliveries: Array<{ text: string; kind: string }> = [];
+  let fireSettled: (() => void) | undefined;
+  let releaseTree: ((tree: unknown) => void) | undefined;
+  let polls = 0;
+
+  // pi 1.4.0's contract: `sendMessage` is void, so `deliver` resolves before `isIdle()`
+  // has to have flipped. A fake that flips busy inside `deliver` would hide this race.
+  const surface: PiSurface = {
+    deliver: async (text, kind) => {
+      deliveries.push({ text, kind });
+    },
+    abort: async () => undefined,
+    isBusy: () => false,
+    onSettled: (cb) => {
+      fireSettled = cb;
+      return () => undefined;
+    },
+    onEvent: () => () => undefined,
+    shutdown: () => undefined,
+  };
+  const pg = {
+    whoami: async () => ({ member: { id: SELF, name: 'me', parent_id: null } }),
+    conversations: async () => ({ items: [{ to: dm }] }),
+    messages: async () => ({
+      items: [
+        {
+          to: dm,
+          seq: 7,
+          sender_id: PEER,
+          sender_kind: 'member',
+          sender_name: 'peer',
+          body: 'ping',
+          meta: null,
+          mentions: [],
+          created_at: 0,
+        },
+      ],
+      next: null,
+    }),
+    tree: () =>
+      new Promise((resolve) => {
+        releaseTree = resolve;
+      }),
+    poll: async () => {
+      polls += 1;
+      if (polls === 1) return { items: [], control_pending: 0 };
+      return {
+        items: [
+          {
+            kind: 'message',
+            to: dm,
+            seq: 8,
+            from_id: PEER,
+            from_name: 'peer',
+            preview: 'the message that wins the settle',
+            mentions_me: false,
+            from_parent: false,
+          },
+        ],
+        control_pending: 0,
+      };
+    },
+    getMember: async () => ({ status: 'alive' }),
+    sendMessage: async () => ({ to: '', seq: 0, recipients: [], created_at: 0 }),
+    sendControl: async () => ({ control_seq: 0, receipts: [] }),
+  };
+  const loop = new AdapterLoop({
+    pg: pg as unknown as PgClient,
+    surface,
+    herdr: {
+      spawn: async () => ({ pane: 'pane-x' }),
+      waitReady: async () => undefined,
+      read: async () => '',
+      close: async () => undefined,
+    },
+    config: {
+      url: 'http://127.0.0.1:1',
+      token: 't',
+      adapterDir: dir,
+      pollLimit: 20,
+      pollWait: 0,
+      attentionToolMs: 300_000,
+      remindWindowMs: 300_000,
+      nudgeMax: 3,
+      spawnCmd: 'pi',
+    },
+    now: () => 1_000_000,
+  });
+  try {
+    await loop.pollOnce(); // initialise: selfId + the DM debt, exactly as a real start would
+    assert.deepEqual(loop.state().owed, [dm], 'precondition: the reconciliation found the debt');
+
+    fireSettled?.(); // the settle under test starts and waits inside pruneUnanswerableDms()
+    await delay(20);
+    assert.equal(releaseTree !== undefined, true, 'precondition: the settle is waiting on the roster read');
+
+    // Meanwhile the poll path delivers its message and drains the queue.
+    await loop.pollOnce();
+    assert.deepEqual(
+      deliveries.map((d) => d.kind),
+      ['message'],
+      'precondition: the other path really delivered',
+    );
+
+    releaseTree?.({ nodes: [{ id: SELF }, { id: PEER }] }); // the peer is alive: no prune
+    await loop.settled();
+
+    assert.deepEqual(
+      deliveries.map((d) => d.kind),
+      ['message'],
+      "one settle may deliver once: the queued message that went out is the settle's delivery",
+    );
+    assert.deepEqual(loop.state().nudges, { [dm]: 0 }, 'the nudge budget must not be spent on a settle that delivered');
+  } finally {
+    await loop.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

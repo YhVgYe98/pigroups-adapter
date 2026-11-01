@@ -108,6 +108,25 @@ const STOP_TIMEOUT_MS = 3000;
 const ROSTER_TTL_MS = 30_000;
 /** A slow roster must delay a settle's delivery no further than this. */
 const ROSTER_TIMEOUT_MS = 2000;
+/**
+ * A pane check is the same kind of cost (§5.3): a live child costs at most one
+ * `GET /v1/members/{id}` per TTL, and a dead one is closed within that TTL.
+ */
+const PANE_CHECK_TTL_MS = 30_000;
+
+/** One roster read. `at` is what makes a snapshot safe to prune against (§4.1). */
+interface RosterSnapshot {
+  at: number;
+  ids: Set<string>;
+}
+
+/** What `terminate()` did: the delete, and any pane it could not take with it (§5.3). */
+export interface TerminateResult {
+  /** The platform's cascade answer (`DELETE /v1/members/{id}`). */
+  terminated: string[];
+  /** Panes whose close failed for a reason a retry may fix; the member is gone either way. */
+  pane_close_failed: Array<{ member: string; pane: string; error: string }>;
+}
 
 /** Hand one macrotask back to the event loop, so timers and sockets can run. */
 function yieldOnce(): Promise<void> {
@@ -176,8 +195,18 @@ export class AdapterLoop {
   private flushInFlight: Promise<FlushOutcome> | undefined;
   /** Every `surface.deliver` the surface has not answered yet, so `stop()` can wait (§2.3). */
   private readonly deliveries = new Set<Promise<unknown>>();
+  /**
+   * Every settle reaction still running. `stop()` waits for them (§2.3): the reaction
+   * awaits the platform before it delivers, so a `stop()` that only looked at
+   * `deliveries` could return while a delivery was still about to start.
+   */
+  private readonly settles = new Set<Promise<unknown>>();
+  /** Deliveries started so far. One settle may deliver once, whoever started it (§2.3). */
+  private deliveredCount = 0;
   /** The live roster (§4.4), cached: an obligation check must not cost a request per settle. */
-  private roster: { at: number; ids: Set<string> } | undefined;
+  private roster: RosterSnapshot | undefined;
+  /** When each mapped child's status was last confirmed with `GET /v1/members/{id}` (§5.3). */
+  private readonly paneCheckedAt = new Map<string, number>();
   /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
   private aborting = false;
   /** Ends an in-flight abort wait when `stop()` runs (§3.2). */
@@ -215,6 +244,14 @@ export class AdapterLoop {
     this.runPromise = this.run();
   }
 
+  /**
+   * Await the settle reactions in flight right now (§2.3). The same seam `stop()`
+   * uses, exposed so a test can wait for the reaction instead of guessing a delay.
+   */
+  async settled(): Promise<void> {
+    while (this.settles.size > 0) await Promise.all([...this.settles]);
+  }
+
   /** Stop and wait for in-flight work to finish (§2.3). */
   async stop(): Promise<void> {
     if (this.stopped) return;
@@ -241,6 +278,10 @@ export class AdapterLoop {
     if (run && !this.inLoop) work.push(run.catch(() => undefined));
     const flush = this.flushInFlight;
     if (flush) work.push(flush.catch(() => undefined));
+    // A settle that is still inside `pruneUnanswerableDms()`/`reconcilePanes()` has
+    // not started its delivery yet, so `deliveries` cannot see it. Wait for the whole
+    // reaction: it re-checks `stopped` after each await and will not deliver now.
+    for (const settle of this.settles) work.push(settle.catch(() => undefined));
     for (const delivery of this.deliveries) work.push(delivery.catch(() => undefined));
     if (work.length === 0) return;
     // Bounded at `STOP_TIMEOUT_MS` (§2.3). Giving up is not an error: the loops are
@@ -252,6 +293,10 @@ export class AdapterLoop {
   async pollOnce(): Promise<void> {
     try {
       await this.ensureReady();
+      // The poll loop keeps running while the member is idle, which makes it the one
+      // path that can notice an ancestor's delete between settles (§5.3). Bounded by
+      // `PANE_CHECK_TTL_MS`, and it returns at once when no pane is mapped.
+      await this.reconcilePanes();
       await this.flush();
 
       this.pollAbort ??= new AbortController();
@@ -376,8 +421,13 @@ export class AdapterLoop {
     return { conv: sent.to, seq: sent.seq };
   }
 
-  /** Drop every trace of a private conversation with a member that no longer exists. */
+  /**
+   * Drop every trace of a private conversation with a member that no longer exists.
+   * Also drops that member from the cached roster: both callers know the peer is gone
+   * from the platform's own answer, so the cache must not keep calling it alive (§4.1).
+   */
   private forgetDm(member: string): void {
+    this.roster?.ids.delete(member);
     if (this.selfId === undefined) return;
     const conv = dmConv(this.selfId, member);
     this.obligations.clear(conv);
@@ -402,6 +452,7 @@ export class AdapterLoop {
     };
     const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd });
     this.panes.set(id, pane);
+    this.paneCheckedAt.set(id, this.now());
     await this.herdr.waitReady(pane, SPAWN_READY_MS);
     return { id, name };
   }
@@ -441,15 +492,24 @@ export class AdapterLoop {
     return { owed: this.obligations.entries().map((entry) => entry.conv), nudges };
   }
 
-  /** `pg_terminate`: delete the subtree, close the panes it had spawned, and surface it in telemetry (§5.2). */
-  async terminate(member: string): Promise<string[]> {
+  /**
+   * `pg_terminate`: delete the subtree, close the panes it had spawned, and surface it
+   * in telemetry (§5.2).
+   *
+   * The platform answers with the whole cascade, not just `member`, so the debts and
+   * panes of every node it deleted are handled here too: a grandchild this adapter
+   * spawned (through the child) would otherwise keep its debt and its pane forever.
+   */
+  async terminate(member: string): Promise<TerminateResult> {
     const known = this.telemetry.snapshot().find((entry) => entry.child === member);
     const { terminated } = await this.pg.deleteMember(member);
-    // The member is gone as of this line, so its private debts are unpayable. Prune
-    // them now rather than at the next roster read: nobody should be nudged once more
-    // for a member this call just deleted.
-    this.forgetDm(member);
-    this.roster?.ids.delete(member);
+    // The delete has committed as of this line. Everything below is cleanup of a fact:
+    // it must not be able to turn a successful `pg_terminate` into a tool error.
+    //
+    // The members are gone, so their private debts are unpayable. Prune them now rather
+    // than at the next roster read: nobody should be nudged once more for a member this
+    // call just deleted. `member` is included even if the platform's answer is odd.
+    for (const id of new Set([member, ...terminated])) this.forgetDm(id);
     const now = this.now();
     for (const id of terminated) {
       this.telemetry.apply(
@@ -457,15 +517,70 @@ export class AdapterLoop {
         now,
       );
     }
-    // The delete is what stops the member; closing the pane is what removes the
-    // shell it leaves behind. Keep the mapping on failure so a retry can close it.
-    for (const id of terminated) {
-      const pane = this.panes.get(id);
-      if (pane === undefined) continue;
-      await this.herdr.close(pane);
-      this.panes.delete(id);
+    const pane_close_failed: TerminateResult['pane_close_failed'] = [];
+    for (const id of new Set([member, ...terminated])) {
+      const failure = await this.closePane(id);
+      if (failure !== undefined) pane_close_failed.push(failure);
     }
-    return terminated;
+    return { terminated, pane_close_failed };
+  }
+
+  /**
+   * Close the pane of a member that is already gone, and keep the mapping only while a
+   * retry could still succeed (§5.3).
+   *
+   * A `pane_not_found` is success: the shell the child left behind is already gone, or
+   * someone closed it by hand. Any other failure (herdr down, a timeout) leaves the
+   * mapping in place so the next `terminate()`/settle tries again, and is reported as
+   * `pane_close_failed` instead of failing the committed delete.
+   */
+  private async closePane(member: string): Promise<{ member: string; pane: string; error: string } | undefined> {
+    const pane = this.panes.get(member);
+    if (pane === undefined) return undefined;
+    try {
+      await this.herdr.close(pane);
+    } catch (err) {
+      return { member, pane, error: (err as Error)?.message ?? String(err) };
+    }
+    this.panes.delete(member);
+    this.paneCheckedAt.delete(member);
+    return undefined;
+  }
+
+  /**
+   * Confirm the members this adapter spawned are still alive and close the panes of the
+   * ones that are not (§5.3).
+   *
+   * `terminate()` only sees deletes this adapter issued. A grandparent deleting this
+   * adapter's direct child is a legal `DELETE` that never reaches this process, so the
+   * map would keep the pane — and the shell in it — forever. `GET /v1/tree` cannot
+   * answer this: it is a 30 s snapshot, and absence from a stale snapshot is exactly
+   * the false-prune this file now guards against. Ask about each member directly; only
+   * an explicit `status:'gone'` closes a pane, so a failed read keeps everything.
+   */
+  private async reconcilePanes(): Promise<void> {
+    if (this.panes.size === 0) return;
+    const now = this.now();
+    for (const member of [...this.panes.keys()]) {
+      const checkedAt = this.paneCheckedAt.get(member);
+      if (checkedAt !== undefined && now >= checkedAt && now - checkedAt < PANE_CHECK_TTL_MS) continue;
+      try {
+        // Bounded like the roster read: a platform that does not answer must not turn
+        // the poll/settle path into an unbounded wait.
+        const detail = await withTimeout(this.pg.getMember(member), ROSTER_TIMEOUT_MS);
+        if (detail.status === 'gone') {
+          const failure = await this.closePane(member);
+          if (failure !== undefined) {
+            console.warn(`[pigroups] could not close the pane of gone member ${member}: ${failure.error}`);
+          }
+          continue;
+        }
+        this.paneCheckedAt.set(member, now);
+      } catch {
+        // Unreachable platform, 404, our own 410: keep the pane and ask again later.
+        // A wrong close removes the shell of a living child; a late close loses nothing.
+      }
+    }
   }
 
   // ---- startup -----------------------------------------------------------
@@ -822,6 +937,7 @@ export class AdapterLoop {
    * single-flight of its own, so this set is the only thing that knows about it.
    */
   private trackDelivery<T>(delivery: Promise<T>): Promise<T> {
+    this.deliveredCount += 1;
     this.deliveries.add(delivery);
     const settle = (): void => {
       this.deliveries.delete(delivery);
@@ -860,7 +976,16 @@ export class AdapterLoop {
   private subscribeSettled(): void {
     if (this.settleUnsub !== undefined) return;
     this.settleUnsub = this.surface.onSettled(() => {
-      void this.onSettled();
+      const reaction = this.onSettled().catch((err: unknown) => {
+        // A reaction is fire-and-forget: an unhandled rejection here would crash the
+        // process instead of failing one settle.
+        console.warn(`[pigroups] settle reaction failed: ${(err as Error)?.message ?? String(err)}`);
+      });
+      this.settles.add(reaction);
+      const done = (): void => {
+        this.settles.delete(reaction);
+      };
+      void reaction.then(done, done);
     });
   }
 
@@ -882,9 +1007,20 @@ export class AdapterLoop {
    */
   private async onSettled(): Promise<void> {
     if (this.stopped) return;
+    // The awaits below are windows, not pauses: `ingest() → flush()` runs on its own
+    // path and can deliver while this reaction is still asking the platform. Count
+    // deliveries, not just this call's outcome — `flushOutcome()` answering `empty`
+    // because the other path just drained `pending` is not "nothing was delivered",
+    // and nudging then would spend a second delivery on one settle (§2.3).
+    const deliveriesBefore = this.deliveredCount;
     // Before `tick()`: a debt whose peer no longer exists must not reach the reminder
     // or the nudge. Cached, so this is free in the common case.
     await this.pruneUnanswerableDms();
+    // `stop()` waits for this reaction, but it sets `stopped` before it waits: do not
+    // deliver into a loop that is on its way down.
+    if (this.stopped) return;
+    await this.reconcilePanes();
+    if (this.stopped) return;
     this.tick();
     // Only "nothing was pending" leaves this settle's single delivery to a nudge
     // (§2.3). After a delivery the surface is busy; after a busy surface — including
@@ -894,20 +1030,10 @@ export class AdapterLoop {
     // was not meant to carry it and spend this settle's one delivery on the wrong
     // thing.
     if ((await this.flushOutcome()) !== 'empty') return;
+    if (this.deliveredCount !== deliveriesBefore) return;
     await this.nudgeOwed();
   }
 
-  /**
-   * §4.3: one coalesced `deliver(…, 'nudge')` per settle, covering every owed
-   * conversation — never one delivery per conversation. A settle allows a single
-   * delivery (§2.3), so a second nudge would land mid-turn: pi 1.4.0 steers it into
-   * the running turn rather than dropping it, which is exactly the uncontrolled input
-   * the one-delivery rule exists to avoid. And a nudge exists to wake the model once
-   * to look at all of its debts, so one wake-up must show all of them. Not folded into the injection batch either, whose kind and
-   * batching (§3.4) belong to polled messages.
-   *
-   * Only called when the settle delivered nothing (§2.3).
-   */
   /**
    * §4.1: a one-to-one conversation owes a reply only while its peer can receive one.
    * A terminated member answers 410 `member_gone` to every send, so the debt can never
@@ -915,19 +1041,26 @@ export class AdapterLoop {
    * for the life of the surviving member: found on a real run, where a child was deleted
    * and its parent kept being told to answer a conversation with nobody on the other end.
    *
-   * The roster (`GET /v1/tree`) lists exactly the living members. Failing to read it
-   * keeps every debt: a wrong prune loses a real obligation, a late prune loses nothing.
+   * The roster (`GET /v1/tree`) lists exactly the living members. Failing to read it —
+   * or reading something that is not a roster — keeps every debt: a wrong prune loses a
+   * real obligation, a late prune loses nothing.
+   *
+   * ``since`` guards the other direction. The roster is cached, so a peer created after
+   * the read is absent from a list that was true when it was taken. A debt that became
+   * owed at or after the snapshot's `at` therefore proves nothing about that peer's
+   * existence; only an older debt can be judged by that snapshot.
    */
   private async pruneUnanswerableDms(): Promise<void> {
     const dms = this.obligations.entries().filter((entry) => isDmConv(entry.conv));
     if (dms.length === 0) return;
-    const alive = await this.aliveIds();
-    if (!alive) return;
+    const roster = await this.aliveIds();
+    if (!roster) return;
 
     let changed = false;
     for (const entry of dms) {
+      if (entry.since >= roster.at) continue;
       const peer = dmPeer(entry.conv, this.selfId);
-      if (peer === undefined || alive.has(peer)) continue;
+      if (peer === undefined || roster.ids.has(peer)) continue;
       this.obligations.clear(entry.conv);
       // The `blocked` episode also ends here: the parent was told this member cannot
       // answer, and that stopped being true the moment the conversation did.
@@ -937,25 +1070,63 @@ export class AdapterLoop {
     if (changed) this.evaluateAttention(this.now());
   }
 
-  private async aliveIds(): Promise<Set<string> | null> {
+  /**
+   * The roster, with the instant it describes. Returns the cached snapshot while it is
+   * fresh, and `null` when no trustworthy snapshot exists — a failed read, a body that
+   * is not a roster, or one that does not contain this member.
+   *
+   * Validation is not paranoia: `{"nodes":[]}` is a 200 with a truthy body, and treating
+   * it as "everyone is gone" clears every DM debt. An answer that does not contain the
+   * caller cannot come from a healthy roster, so it prunes nothing.
+   */
+  private async aliveIds(): Promise<RosterSnapshot | null> {
     const now = this.now();
-    if (this.roster && now - this.roster.at < ROSTER_TTL_MS) return this.roster.ids;
+    // `now >= at` rules out a backwards clock step pinning a stale snapshot forever.
+    if (this.roster && now >= this.roster.at && now - this.roster.at < ROSTER_TTL_MS) return this.roster;
     try {
-      const tree = await withTimeout(this.pg.tree(), ROSTER_TIMEOUT_MS);
-      const ids = new Set(tree.nodes.map((node) => node.id));
+      const tree: unknown = await withTimeout(this.pg.tree(), ROSTER_TIMEOUT_MS);
+      const nodes = (tree as { nodes?: unknown } | null | undefined)?.nodes;
+      if (!Array.isArray(nodes)) {
+        this.roster = undefined;
+        return null;
+      }
+      const ids = new Set<string>();
+      for (const node of nodes) {
+        const id = (node as { id?: unknown } | null | undefined)?.id;
+        if (typeof id !== 'string' || id === '') {
+          this.roster = undefined;
+          return null;
+        }
+        ids.add(id);
+      }
+      if (this.selfId === undefined || !ids.has(this.selfId)) {
+        this.roster = undefined;
+        return null;
+      }
       this.roster = { at: now, ids };
-      return ids;
+      return this.roster;
     } catch {
       this.roster = undefined;
       return null;
     }
   }
 
+  /**
+   * §4.3: one coalesced `deliver(…, 'nudge')` per settle, covering every owed
+   * conversation — never one delivery per conversation. A settle allows a single
+   * delivery (§2.3), so a second nudge would land mid-turn: pi 1.4.0 steers it into
+   * the running turn rather than dropping it, which is exactly the uncontrolled input
+   * the one-delivery rule exists to avoid. And a nudge exists to wake the model once
+   * to look at all of its debts, so one wake-up must show all of them. Not folded into
+   * the injection batch either, whose kind and batching (§3.4) belong to polled messages.
+   *
+   * Only called when the settle delivered nothing (§2.3).
+   */
   private async nudgeOwed(): Promise<void> {
     // §3.2: an abort is cutting the turn, so starting a nudge now would be the very
     // turn `surface.abort` then waits for. `onSettled` already refuses when the abort
     // began before the settle; this covers a nudge that reaches here by another path.
-    if (this.aborting) return;
+    if (this.aborting || this.stopped) return;
     const owed = this.obligations.entries();
     if (owed.length === 0) return;
 

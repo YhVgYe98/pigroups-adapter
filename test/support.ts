@@ -501,11 +501,16 @@ export interface SpawnRecord {
 export class FakeHerdr implements Herdr {
   readonly spawns: SpawnRecord[] = [];
   readonly waits: Array<{ pane: string; timeoutMs: number }> = [];
+  /** Panes close() actually returned successfully for. */
   readonly closed: string[] = [];
   readonly reads: Array<{ pane: string; lines: number }> = [];
   paneText = '';
   /** When set, `waitReady` rejects after recording the call (the timeout path). */
   failWait = false;
+  /** When set, `close` rejects with this after recording the attempt (herdr down / a timeout). */
+  failClose: Error | undefined;
+  /** Runs before a close is recorded: lets a test read platform state at that exact moment. */
+  onClose: ((pane: string) => Promise<void> | void) | undefined;
 
   async spawn(opts: { label: string; env: Record<string, string>; cwd?: string }): Promise<{ pane: string }> {
     this.spawns.push(opts);
@@ -523,6 +528,8 @@ export class FakeHerdr implements Herdr {
   }
 
   async close(pane: string): Promise<void> {
+    if (this.onClose !== undefined) await this.onClose(pane);
+    if (this.failClose !== undefined) throw this.failClose;
     this.closed.push(pane);
   }
 }

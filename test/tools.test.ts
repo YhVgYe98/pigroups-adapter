@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { command, delay, dmId, history, member, poll, send, whoami, type ControlItem } from './support.ts';
+import { command, delay, dmId, history, member, poll, removeMember, send, whoami, type ControlItem } from './support.ts';
 import { driveUntil, pollUntil, scenario, type Scenario } from './scenario.ts';
 
 /** The parent's control queue, scanned for the `pg.inspect_result` that answers `request`. */
@@ -118,15 +118,66 @@ test('pg_spawn creates a member, DMs the brief, and starts one pane with the chi
 // 概念稿 §5.1: deleting a member is how a stuck pane is stopped. The platform marks
 // it gone and tells its pi to exit; the shell the pane falls back to is still there,
 // so the adapter that spawned it has to close that pane.
-test('pg_terminate closes the pane of the child it spawned', async (t) => {
+test('pg_terminate closes the pane of the child it spawned, and only after the delete committed', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
 
   const child = await s.loop.spawnMember({ name: 'runner', brief: 'implement Y' });
   assert.deepEqual(s.herdr.closed, [], 'nothing may be closed while the child is alive');
 
-  const terminated = await s.loop.terminate(child.id);
+  // Read the platform exactly when herdr is asked to close: the pane may only go after
+  // the row says `gone`, never before.
+  let statusAtClose: string | undefined;
+  s.herdr.onClose = async () => {
+    statusAtClose = (await member(s.platform, s.me.token, child.id)).status;
+  };
 
-  assert.deepEqual(terminated, [child.id], 'the platform deleted exactly the child');
+  const result = await s.loop.terminate(child.id);
+
+  assert.deepEqual(result.terminated, [child.id], 'the platform deleted exactly the child');
+  assert.deepEqual(result.pane_close_failed, [], 'the pane close succeeded');
+  assert.equal(statusAtClose, 'gone', 'the delete must be committed before herdr closes the pane');
   assert.deepEqual(s.herdr.closed, ['pane-1'], 'the pane of the terminated child must be closed');
+});
+
+// §5.3: the delete is the fact; closing the pane is cleanup. A herdr that is down must
+// not turn a committed delete into a tool error, and must not lose the mapping either.
+test('a failed pane close is reported without failing the committed delete, and a retry closes it', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  const child = await s.loop.spawnMember({ name: 'runner', brief: 'implement Y' });
+  s.herdr.failClose = new Error('herdr: daemon unreachable');
+
+  const first = await s.loop.terminate(child.id);
+  assert.deepEqual(first.terminated, [child.id], 'the delete committed and is reported as such');
+  assert.deepEqual(
+    first.pane_close_failed.map((entry) => entry.member),
+    [child.id],
+    'the pane that could not be closed is named in the same answer',
+  );
+  assert.deepEqual(s.herdr.closed, [], 'nothing was actually closed');
+
+  s.herdr.failClose = undefined;
+  const second = await s.loop.terminate(child.id);
+  assert.deepEqual(second.pane_close_failed, [], 'the retry succeeds');
+  assert.deepEqual(s.herdr.closed, ['pane-1'], 'the mapping survived the failure, so the retry could close it');
+});
+
+// §5.3: a grandparent's DELETE is legal and never reaches this adapter, so nothing here
+// calls terminate(). The pane map has to be reconciled against the platform instead.
+test('a child deleted by an ancestor has its pane closed on a later poll', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  const child = await s.loop.spawnMember({ name: 'runner', brief: 'implement Y' });
+  assert.deepEqual(s.herdr.closed, [], 'nothing may be closed while the child is alive');
+
+  await removeMember(s.platform, s.parent!.token, child.id);
+  await s.cycle();
+  assert.deepEqual(s.herdr.closed, [], 'the pane check is cached, so the next poll is inside the TTL');
+
+  s.clock.advance(31_000);
+  await s.cycle();
+  assert.deepEqual(s.herdr.closed, ['pane-1'], 'the poll confirms the child is gone and closes its pane');
 });

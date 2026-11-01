@@ -14,7 +14,7 @@ export interface Herdr {
   waitReady(pane: string, timeoutMs: number): Promise<void>;
   /** Read the raw text of that pane (diagnostics and reporting only). */
   read(pane: string, lines: number): Promise<string>;
-  /** Close the pane. */
+  /** Close the pane. A pane that is already gone is a success, not an error. */
   close(pane: string): Promise<void>;
 }
 
@@ -71,7 +71,16 @@ export class HerdrCli implements Herdr {
   }
 
   async close(pane: string): Promise<void> {
-    await this.run(['pane', 'close', pane]);
+    try {
+      await this.run(['pane', 'close', pane]);
+    } catch (err) {
+      // The pane is the shell the child left behind. If it is already gone — closed by
+      // hand, or its shell exited — the outcome close() wants is already true. This is
+      // a delivered fact, not a failure: it must not turn a committed delete into an
+      // error the caller retries forever (loop.ts §5.3).
+      if (err instanceof HerdrCommandError && err.code === 'pane_not_found') return;
+      throw err;
+    }
   }
 
   private async splitPane(opts: { env: Record<string, string>; cwd?: string }): Promise<string> {
@@ -110,13 +119,36 @@ export class HerdrCli implements Herdr {
         this.command,
         args,
         { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
-        (error, out) => {
-          if (error) reject(error);
-          else resolve(out);
+        (error, out, errOut) => {
+          if (error) {
+            // herdr writes its error envelope to stderr and exits non-zero (`herdr
+            // pane close <missing>` → `{"error":{"code":"pane_not_found",…}}`,
+            // exit 1). Keep the code typed so `close()` can recognise the one
+            // failure that is really a success.
+            const envelope = parseEnvelope(errOut) ?? parseEnvelope(out);
+            const detail = asRecord(envelope?.error);
+            const code = typeof detail?.code === 'string' ? detail.code : undefined;
+            const message = typeof detail?.message === 'string' ? detail.message : error.message;
+            reject(new HerdrCommandError(message, code, errOut || out));
+            return;
+          }
+          resolve(out);
         },
       );
     });
     return parseEnvelope(stdout);
+  }
+}
+
+/** Non-zero exit from `herdr`, with the `code` from its error envelope when it printed one. */
+export class HerdrCommandError extends Error {
+  readonly code: string | undefined;
+  readonly output: string;
+  constructor(message: string, code: string | undefined, output: string) {
+    super(message);
+    this.name = 'HerdrCommandError';
+    this.code = code;
+    this.output = output;
   }
 }
 

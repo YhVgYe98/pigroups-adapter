@@ -2,8 +2,13 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { removeMember, send, waitFor } from './support.ts';
+import { AdapterLoop } from '../src/loop.ts';
+import { PgGone, type PgClient } from '../src/pgclient.ts';
+import { FakeClock, FakeSurface, createMember, dmId, removeMember, send, waitFor } from './support.ts';
 import { payloads, scenario } from './scenario.ts';
 
 test('an owed reply is nudged when the turn settles; after replying it is not', async (t) => {
@@ -429,17 +434,253 @@ test('a debt to a member that was deleted is dropped, not nudged forever', async
   assert.deepEqual(s.loop.state().owed, [], 'the marker is gone, not merely skipped');
 });
 
-test('a deleted peer does not reach the reminder that a settle would deliver', async (t) => {
+test('a deleted peer is not nudged by the settle that follows', async (t) => {
   const s = await scenario({ siblings: 1 });
   t.after(() => s.close());
   const sibling = s.siblings[0];
 
   await send(s.platform, sibling.token, s.me.id, 'ping');
   await s.cycle();
+  const peerDm = dmId(s.me.id, sibling.id);
+  assert.ok(s.loop.state().owed.includes(peerDm), 'precondition: a living peer leaves a real debt');
+
   await removeMember(s.platform, s.parent!.token, sibling.id);
-  await s.timer(31_000);
+  await s.timer(31_000); // let the roster snapshot go stale
 
   await s.settle();
-  const reminders = s.surface.deliveries.filter((d) => d.text.includes('未回复'));
-  assert.equal(reminders.length, 0, `no reminder may carry a conversation with nobody in it: ${JSON.stringify(s.surface.texts)}`);
+  assert.deepEqual(s.loop.state().owed, [], 'the pruned debt is gone, not merely unreported');
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(
+    nudges.filter((text) => text.includes(peerDm)).length,
+    0,
+    `no nudge may name a conversation with nobody in it: ${JSON.stringify(s.surface.texts())}`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// §4.1 "the peer must still be alive": the two ways that condition can be read
+// wrong. A stale-but-true snapshot (the peer was created after the read) and a
+// 200 body that is not a roster at all.
+// ---------------------------------------------------------------------------
+
+test('a peer created after the cached roster read keeps its debt', async (t) => {
+  const s = await scenario({ siblings: 1 });
+  t.after(() => s.close());
+  const sibling = s.siblings[0];
+
+  // T: a DM debt exists, so the settle reads the roster and caches it at T.
+  await send(s.platform, sibling.token, s.me.id, 'ping');
+  await s.cycle();
+  await s.settle();
+  assert.ok(
+    s.loop.state().owed.includes(dmId(s.me.id, sibling.id)),
+    'precondition: the debt exists and the roster is cached',
+  );
+
+  // Pay it: the next settle has no DM debt, so it does not read the roster again.
+  await s.loop.say(sibling.id, 'on it');
+  await s.settle();
+
+  // T+5s: a member that did not exist at T arrives through `pg_spawn` and writes to me.
+  const fresh = await s.loop.spawnMember({ name: 'late', brief: 'implement Z' });
+  const freshToken = s.herdr.spawns[s.herdr.spawns.length - 1].env.PIGROUPS_TOKEN;
+  s.clock.advance(5_000);
+  await send(s.platform, freshToken, s.me.id, 'hi, I just started');
+  await s.cycle();
+
+  const freshDm = dmId(s.me.id, fresh.id);
+  assert.ok(s.loop.state().owed.includes(freshDm), 'the fresh peer wrote to me: this is a real debt');
+  const nudgesBefore = s.surface.textsOfKind('nudge').length;
+
+  // The settle 5 s later still sees the roster read at T, where the fresh peer did not exist.
+  await s.settle();
+  assert.ok(
+    s.loop.state().owed.includes(freshDm),
+    `a debt younger than the roster snapshot must not be pruned as unanswerable: ${JSON.stringify(s.loop.state().owed)}`,
+  );
+  assert.equal(
+    s.surface.textsOfKind('nudge').length,
+    nudgesBefore + 1,
+    'and the living peer must be nudged like any other debt',
+  );
+});
+
+test('a debt older than the snapshot to a peer missing from it is still pruned', async (t) => {
+  const s = await scenario({ siblings: 1 });
+  t.after(() => s.close());
+  const sibling = s.siblings[0];
+
+  await send(s.platform, sibling.token, s.me.id, 'ping');
+  await s.cycle();
+  await s.settle(); // caches the roster at T, with the sibling alive
+  assert.deepEqual(s.loop.state().owed, [dmId(s.me.id, sibling.id)]);
+  await s.settle(); // still owed: the peer is alive and I have not answered
+
+  await removeMember(s.platform, s.parent!.token, sibling.id);
+  s.clock.advance(31_000); // the snapshot is now stale, so the next settle reads a new one
+  await s.settle();
+  assert.deepEqual(s.loop.state().owed, [], 'the older debt is judged against a fresh snapshot, and pruned');
+});
+
+/** A loop wired only to a fake platform: the real AdapterLoop, a fake roster read. */
+const SELF_ID = 'm_aaaaaa';
+const PEER_ID = 'm_bbbbb1';
+const PEER_DM = `dm:${SELF_ID}_${PEER_ID}`;
+
+interface FakeLoop {
+  loop: AdapterLoop;
+  surface: FakeSurface;
+  clock: FakeClock;
+  dir: string;
+}
+
+/**
+ * `pollOnce()` initialises the loop the way a real start does: `whoami`, then one
+ * conversation that owes a reply. Draining the clock afterwards makes the debt older
+ * than the snapshot the settle takes, so only the roster's content can decide it.
+ */
+async function makeLoop(tree: () => Promise<unknown>): Promise<FakeLoop> {
+  const surface = new FakeSurface();
+  const clock = new FakeClock(1_000_000);
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-roster-'));
+  const pg = {
+    whoami: async () => ({ member: { id: SELF_ID, name: 'me', parent_id: null } }),
+    conversations: async () => ({ items: [{ to: PEER_DM }] }),
+    messages: async () => ({
+      items: [
+        {
+          to: PEER_DM,
+          seq: 7,
+          sender_id: PEER_ID,
+          sender_kind: 'member',
+          sender_name: 'peer',
+          body: 'ping',
+          meta: null,
+          mentions: [],
+          created_at: 0,
+        },
+      ],
+      next: null,
+    }),
+    tree,
+    poll: async () => ({ items: [], control_pending: 0 }),
+    getMember: async () => ({ status: 'alive' }),
+    sendMessage: async () => ({ to: '', seq: 0, recipients: [], created_at: 0 }),
+    sendControl: async () => ({ control_seq: 0, receipts: [] }),
+  };
+  const loop = new AdapterLoop({
+    pg: pg as unknown as PgClient,
+    surface,
+    herdr: {
+      spawn: async () => ({ pane: 'pane-x' }),
+      waitReady: async () => undefined,
+      read: async () => '',
+      close: async () => undefined,
+    },
+    config: {
+      url: 'http://127.0.0.1:1',
+      token: 't',
+      adapterDir: dir,
+      pollLimit: 20,
+      pollWait: 0,
+      attentionToolMs: 300_000,
+      remindWindowMs: 300_000,
+      nudgeMax: 3,
+      spawnCmd: 'pi',
+    },
+    now: clock.now,
+  });
+  return { loop, surface, clock, dir };
+}
+
+async function settleWithRoster(tree: () => Promise<unknown>): Promise<{ owed: string[]; surface: FakeSurface }> {
+  const { loop, surface, clock, dir } = await makeLoop(tree);
+  await loop.pollOnce(); // initialise: selfId + the DM debt, exactly as a real start would
+  assert.deepEqual(loop.state().owed, [PEER_DM], 'precondition: the reconciliation found the debt');
+  // Move past the instant the debt was marked, so the snapshot's age is not what saves it.
+  clock.advance(60_000);
+  surface.settle();
+  await loop.settled();
+  const owed = loop.state().owed;
+  await loop.stop();
+  await rm(dir, { recursive: true, force: true });
+  return { owed, surface };
+}
+
+test('a roster that is not a roster prunes nothing', async () => {
+  const notRosters: Array<[string, unknown]> = [
+    ['an empty nodes array', { nodes: [] }],
+    ['a body without nodes', { ok: true }],
+    ['nodes without ids', { nodes: [{}] }],
+    ['non-string ids', { nodes: [{ id: 42 }] }],
+    ['a roster that does not contain this member', { nodes: [{ id: PEER_ID }] }],
+    ['null', null],
+    ['a JSON array', []],
+  ];
+  for (const [name, body] of notRosters) {
+    const { owed, surface } = await settleWithRoster(async () => body);
+    assert.deepEqual(owed, [PEER_DM], `${name} must not clear a real debt`);
+    assert.equal(surface.textsOfKind('nudge').length, 1, `${name} must leave the debt nudgeable`);
+  }
+});
+
+test('a failed roster read keeps every debt', async () => {
+  const { owed, surface } = await settleWithRoster(async () => {
+    throw new Error('platform down');
+  });
+  assert.deepEqual(owed, [PEER_DM], 'a read that failed proves nothing about the peer');
+  assert.equal(surface.textsOfKind('nudge').length, 1, 'and the debt is still owed to a living peer');
+});
+
+test('a healthy roster missing the peer prunes the debt', async () => {
+  const { owed, surface } = await settleWithRoster(async () => ({ nodes: [{ id: SELF_ID }] }));
+  assert.deepEqual(owed, [], 'this is the case the prune exists for');
+  assert.equal(surface.textsOfKind('nudge').length, 0, 'a pruned debt is not nudged');
+});
+
+// §4.1: terminate() sees the whole cascade the platform deleted, not just its argument.
+test('terminate drops the debts of every member the platform cascaded', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  const child = await s.loop.spawnMember({ name: 'child', brief: 'implement Y' });
+  const childToken = s.herdr.spawns[s.herdr.spawns.length - 1].env.PIGROUPS_TOKEN;
+  const grandchild = await createMember(s.platform, { ...child, token: childToken }, 'grandchild');
+
+  // The grandchild writes to me privately: a debt I can only pay in that conversation.
+  await send(s.platform, grandchild.token, s.me.id, 'ping from the grandchild');
+  await s.cycle();
+  const grandchildDm = dmId(s.me.id, grandchild.id);
+  assert.ok(s.loop.state().owed.includes(grandchildDm), 'precondition: the grandchild debt exists');
+
+  const result = await s.loop.terminate(child.id);
+  assert.deepEqual(
+    [...result.terminated].sort(),
+    [child.id, grandchild.id].sort(),
+    'the platform deleted the whole subtree',
+  );
+  assert.deepEqual(
+    s.loop.state().owed,
+    [],
+    'the cascade debts must go with the cascade, not just the argument of terminate()',
+  );
+});
+
+// §4.1: the other fast path — a send that answers 410 means the peer is gone now.
+test('say() answering 410 forgets the conversation the peer can no longer answer', async (t) => {
+  const s = await scenario({ siblings: 1 });
+  t.after(() => s.close());
+  const sibling = s.siblings[0];
+
+  await send(s.platform, sibling.token, s.me.id, 'ping');
+  await s.cycle();
+  assert.ok(s.loop.state().owed.includes(dmId(s.me.id, sibling.id)), 'precondition: the debt exists');
+
+  await removeMember(s.platform, s.parent!.token, sibling.id);
+  await assert.rejects(
+    () => s.loop.say(sibling.id, 'reply'),
+    (err: unknown) => err instanceof PgGone,
+    'the platform must answer 410 for a deleted member',
+  );
+  assert.deepEqual(s.loop.state().owed, [], 'the 410 pruned the unpayable conversation immediately');
 });

@@ -248,8 +248,11 @@ function buildTools(
         additionalProperties: false,
       },
       execute: async (_id, params) => {
-        const terminated = await requireLoop().terminate(String(params.member));
-        return text(JSON.stringify({ terminated }));
+        const result = await requireLoop().terminate(String(params.member));
+        // The delete is committed either way. `pane_close_failed` is the cleanup that
+        // did not happen yet (herdr down, a timeout); reporting it in the same answer
+        // keeps the tool honest without pretending the delete failed (§5.3).
+        return text(JSON.stringify(result));
       },
     },
     {
