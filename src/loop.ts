@@ -842,7 +842,10 @@ export class AdapterLoop {
     // Only "nothing was pending" leaves this settle's single delivery to a nudge
     // (§2.3). After a delivery the surface is busy; after a busy surface — including
     // one held for an abort — or a failed delivery there is still something to
-    // deliver, and a nudge would land in a running turn and be refused silently.
+    // deliver, and a nudge would land in a running turn. pi 1.4.0 steers or follows
+    // such a message up by default (it is not refused), but it would enter a turn that
+    // was not meant to carry it and spend this settle's one delivery on the wrong
+    // thing.
     if ((await this.flushOutcome()) !== 'empty') return;
     await this.nudgeOwed();
   }
@@ -850,9 +853,10 @@ export class AdapterLoop {
   /**
    * §4.3: one coalesced `deliver(…, 'nudge')` per settle, covering every owed
    * conversation — never one delivery per conversation. A settle allows a single
-   * delivery (§2.3), so a second nudge would land mid-turn and be lost; and a nudge
-   * exists to wake the model once to look at all of its debts, so one wake-up must
-   * show all of them. Not folded into the injection batch either, whose kind and
+   * delivery (§2.3), so a second nudge would land mid-turn: pi 1.4.0 steers it into
+   * the running turn rather than dropping it, which is exactly the uncontrolled input
+   * the one-delivery rule exists to avoid. And a nudge exists to wake the model once
+   * to look at all of its debts, so one wake-up must show all of them. Not folded into the injection batch either, whose kind and
    * batching (§3.4) belong to polled messages.
    *
    * Only called when the settle delivered nothing (§2.3).
