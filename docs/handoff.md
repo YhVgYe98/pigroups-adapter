@@ -459,7 +459,7 @@ herdr 0.9.5 / deepseek-flash，一次性平台与临时数据目录。第一次�
 
 ## 8. 怎么重跑一切
 
-**先确认你手里是哪一版。** 两个仓库都是 `0.2.0`，各有一个未签名 annotated 标签 `v0.2.0`（平台 `1d68dd4`、适配器 `f340f25`）；本文档描述的就是这一对。`git describe --tags` 在平台仍输出 `v0.2.0`，在适配器输出 `v0.2.0-1-gf5f4536`——标签钉在发版提交上，之后的文档提交只加后缀，不算新版本。
+**先确认你手里是哪一版。** 两个仓库都是 `0.2.0`，各有一个未签名 annotated 标签 `v0.2.0`（平台 `1d68dd4`、适配器 `f340f25`）；本文档描述的就是这一对。`git describe --tags` 在平台仍输出 `v0.2.0`；适配器会在标签后带后缀（`v0.2.0-N-g<hash>`），因为本文档的提交在发版之后——后缀不是新版本。
 
 **号住在哪。** 平台只有一处：`package.json`；`src/version.ts` 直接 import 它，`/v1/health` 与每个响应的 `server_version` 都是这个数，没有第二个常量。适配器两处必须一致：`src/version.ts` 的 `ADAPTER_VERSION` 与 `package.json`（`test/version.test.ts` 也会比对 lockfile）；`pg_whoami` 的 `adapter_version` 与启动那一行日志都报它。**平台的 `package-lock.json` 仍是 `0.1.0`**——生成文件没跟上，真值以 `package.json` 与标签为准，平台的版本守卫不查 lockfile。
 
