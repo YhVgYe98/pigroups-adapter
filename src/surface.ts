@@ -118,7 +118,8 @@ export class PiSurfaceAdapter implements PiSurface {
     this.pi = pi;
 
     // pi event → PiEvent (设计说明 §2.1). `agent_before_settle` carries the run
-    // outcome, so it is the turn_end source; `agent_settled` only means idle.
+    // outcome and is the normal turn_end source; `agent_settled` closes the turn when
+    // the run was aborted, because that path skips before_settle entirely.
     pi.on('agent_start', () => this.publish({ type: 'turn_start' }));
     pi.on('tool_execution_start', (event) =>
       this.publish({ type: 'tool_start', name: event.toolName, argsPreview: previewArgs(event.args) }),
@@ -132,7 +133,16 @@ export class PiSurfaceAdapter implements PiSurface {
         error: event.outcome === 'completed' ? undefined : { message: `turn ended: ${event.outcome}` },
       }),
     );
-    pi.on('agent_settled', () => {
+    pi.on('agent_settled', (event) => {
+      // An aborted run never reaches `agent_before_settle`: pi breaks out of the run
+      // before the settle boundary, so the handler above never fires. Verified on a
+      // live session (probe/, 2026-11-01): abort inside a running tool produced
+      // `assistant_end stopReason=error` then `agent_settled aborted=true`, and no
+      // before_settle at all. Without this line the loop keeps the turn open forever
+      // after a `pg.abort` and the parent never hears that the turn was cut.
+      if (event.aborted) {
+        this.publish({ type: 'turn_end', error: { message: 'turn ended: aborted' } });
+      }
       for (const listener of this.settleListeners) listener();
     });
   }
