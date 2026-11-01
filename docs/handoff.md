@@ -348,6 +348,19 @@ session 落盘、以及 shutdown 正在跑的一轮。
 
 ## 8. 怎么重跑一切
 
+**以人身份读全部内容，三步，别想当然**（第 4 级真机跑时踩过）：
+
+```bash
+# 1. 管理员 token 只用来换一个人 token；它不是任何读接口的凭据
+curl -sX POST localhost:7717/v1/humans -H 'Authorization: Bearer adm' \
+  -H 'content-type: application/json' -d '{"name":"me"}'      # -> {human:{id}, token}
+# 2. 人的"全部指令"视图是 `all` 参数，且只有 /v1/control 有
+curl -s 'localhost:7717/v1/control?all=true&limit=50' -H "Authorization: Bearer <human token>"
+# 3. 消息没有全量视图：先列会话，再逐个读。`GET /v1/messages` 永远要求 `to`
+curl -s localhost:7717/v1/conversations -H "Authorization: Bearer <human token>"
+curl -s 'localhost:7717/v1/messages?to=g:m_xxx&limit=50' -H "Authorization: Bearer <human token>"
+```
+
 ```bash
 # 平台
 cd ~/Documents/PiGroups
