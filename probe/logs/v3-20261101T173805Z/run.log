@@ -1,0 +1,30 @@
+[2026-11-01T17:42:08.297Z] platform pid 378076 on http://127.0.0.1:33283, data=/tmp/pigroups-v3-data.J9VNQ0, adir=/tmp/pigroups-v3-adir.IPSylx, scratch=/tmp/pigroups-v3-scratch.dte5Qy
+[2026-11-01T17:42:08.326Z] bootstrapped root=m_28c0c8, human=h_2767eb
+[2026-11-01T17:42:08.326Z] === CASE A: delivery while a long tool runs ===
+[2026-11-01T17:42:12.247Z] v3a-174208 ready in pane wE:p31
+[2026-11-01T17:42:12.247Z] prompt v3a-174208: Call the bash tool exactly once with this exact command and no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction in your context. If there is none, reply exactly READY and stop.
+[2026-11-01T17:42:14.351Z] A tool_start at 2026-11-01T17:42:13.949Z (sleep 60; echo SLEEPDONE)
+[2026-11-01T17:42:14.354Z] A DM sent at 2026-11-01T17:42:14.351Z -> {"to":"dm:m_28c0c8_m_9ab09c","seq":1,"recipients":["m_9ab09c"],"created_at":1793554934353,"server_version":"0.2.0"}
+[2026-11-01T17:42:23.671Z] A adapter delivery observed at 2026-11-01T17:42:23.592Z (9241 ms after the DM)
+[2026-11-01T17:43:15.195Z] A verdict PASS: delivery 2026-11-01T17:42:23.592Z was 50363 ms before the tool result (2026-11-01T17:43:13.955Z); custom_message at 2026-11-01T17:43:13.956Z (1 ms after result); mention 2026-11-01T17:43:14.739Z
+[2026-11-01T17:43:15.703Z] === CASE B: abort after a queued steer ===
+[2026-11-01T17:43:19.624Z] v3b-174208 ready in pane wE:p32
+[2026-11-01T17:43:19.624Z] prompt v3b-174208: Call the bash tool exactly once with this exact command and no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction in your context. If there is none, reply exactly READY and stop.
+[2026-11-01T17:43:21.226Z] B tool_start at 2026-11-01T17:43:21.028Z
+[2026-11-01T17:43:21.228Z] B DM sent at 2026-11-01T17:43:21.226Z -> {"to":"dm:m_1f66a4_m_28c0c8","seq":1,"recipients":["m_1f66a4"],"created_at":1793555001227,"server_version":"0.2.0"}
+[2026-11-01T17:43:31.147Z] B adapter delivery observed at 2026-11-01T17:43:31.050Z (9824 ms after the DM, tool still running)
+[2026-11-01T17:43:32.151Z] B pg.abort posted at 2026-11-01T17:43:32.148Z -> {"control_seq":2,"receipts":[{"to_id":"m_1f66a4","state":"pending"}],"server_version":"0.2.0"}
+[2026-11-01T17:43:35.653Z] B verdict PASS: custom_message after abort=1, assistant mention after abort=1, first=2026-11-01T17:43:32.203Z
+[2026-11-01T17:43:36.176Z] === CASE C: pg_members + pg_schedule on a live platform ===
+[2026-11-01T17:43:40.099Z] v3c-174208 ready in pane wE:p33
+[2026-11-01T17:43:40.099Z] prompt v3c-174208: Call the pg_members tool exactly once with no query. Then reply with exactly ROSTER-DONE and stop. Do not call any other tool.
+[2026-11-01T17:43:41.202Z] C pg_members: total=6 matched=6 rows=6 self=self parent=parent child=child sibling=sibling
+[2026-11-01T17:43:41.202Z] prompt v3c-174208: Call the pg_schedule tool exactly once with after_seconds 10 and note "SCHED-MARK-v3c-20261101T174208Z: reply with exactly SCHED-MARK-v3c-20261101T174208Z and stop". Then reply with exactly SCHED-DONE and stop. Do not call any other tool.
+[2026-11-01T17:43:43.006Z] C pg_schedule returned at 2026-11-01T17:43:42.559Z: {"due_at":1793555032558,"pending":1}
+[2026-11-01T17:44:03.542Z] C verdict PASS: rosterOk=true scheduleOk=true fired=2026-11-01T17:44:01.475Z
+[2026-11-01T17:44:04.096Z] === CASE D: pi -e <package dir> lists the two skills ===
+[2026-11-01T17:44:13.287Z] D verdict PASS: [Skills] council-mode, pi-intercom, pi-subagents, pigroups-message, pigroups-org, workflow-authoring, workflow-patterns
+[2026-11-01T17:44:13.762Z] all cases done
+[2026-11-01T17:44:13.762Z] cleanup: closing platform and removing temp dirs
+[2026-11-01T17:44:13.767Z] cleanup: final panes=wD:p1E wE:p1 wE:p12 wE:p2Q; extra=none; platformAlive=false
+[2026-11-01T17:44:13.885Z] wrote README.md

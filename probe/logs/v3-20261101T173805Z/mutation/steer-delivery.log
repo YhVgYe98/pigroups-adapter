@@ -1,0 +1,43 @@
+✔ a turn maps to turn_start, tool events map to tool_start/tool_end (0.824942ms)
+✔ before_settle closes the turn, and only a non-completed outcome carries an error (0.117406ms)
+✔ an aborted run closes the turn from agent_settled, because it skips before_settle (0.149999ms)
+✔ a completed run's settle closes nothing (0.094292ms)
+✔ an abort that lands after before_settle does not close the turn twice (0.069394ms)
+✔ an orphan aborted settle does not invent a turn that never started (0.052681ms)
+✔ a turn reopened by a new agent_start is closed by its own abort (0.051339ms)
+✔ the settle callback runs for every run, aborted or not, and the turn_end precedes it (0.078892ms)
+✖ deliver sends a custom message that asks pi to start a turn, as a steer (0.545192ms)
+✔ message_end keeps the last assistant text, and only assistant text (0.184647ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.934267
+
+✖ failing tests:
+
+test at test/surface.test.ts:183:1
+✖ deliver sends a custom message that asks pi to start a turn, as a steer (0.545192ms)
+  AssertionError [ERR_ASSERTION]: 概念稿 §8.1: a busy member is steered, not refused
+  + actual - expected
+  
+  + undefined
+  - 'steer'
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/steer-delivery/test/surface.test.ts:195:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'steer',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

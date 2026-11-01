@@ -1,0 +1,36 @@
+{
+  "member": {
+    "id": "m_344e7f",
+    "name": "v3c-20261101T174208Z",
+    "parent_id": "m_28c0c8",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_28c0c8",
+        "owner": "m_28c0c8"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793555016177
+  },
+  "worker": {
+    "id": "m_b7fc60",
+    "name": "v3c-worker-20261101T174208Z",
+    "parent_id": "m_344e7f",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_344e7f",
+        "owner": "m_344e7f"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793555016179
+  },
+  "model": "deepseek/deepseek-flash",
+  "windowMs": 5000
+}

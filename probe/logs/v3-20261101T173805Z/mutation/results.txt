@@ -1,0 +1,47 @@
+### window-trigger (exit 1, passed 2)
+  RED: a batch delivered into an aborted turn is put back and delivered again; a clean end clears it
+  RED: a batch delivered into a provider-error turn is kept; the next aborted end re-sends it
+  RED: a busy member still receives the window batch: delivery is a steer, not a wait for idle
+  RED: a DM from the parent waits for its window, then arrives with the conversation id and the message seq
+  RED: a group message that mentions me is delivered; one that does not is not delivered and starts no turn
+  RED: a settle is no longer a delivery trigger; the window is
+  RED: items that arrive inside one window share a single delivery, in arrival order
+  RED: the batch cap is a size valve, not a trigger: a full window sends ten and the rest waits for the next
+
+### no-busy-gate (exit 1, passed 8)
+  RED: a busy member still receives the window batch: delivery is a steer, not a wait for idle
+  RED: the batch cap is a size valve, not a trigger: a full window sends ten and the rest waits for the next
+
+### steer-delivery (exit 1, passed 9)
+  RED: deliver sends a custom message that asks pi to start a turn, as a steer
+
+### abort-closes-window (exit 1, passed 7)
+  RED: a message that arrives after the abort is delivered without waiting for a fresh window
+  RED: pg.abort cuts, then closes the window and delivers the steer queued behind it at once
+  RED: pg.abort delivers what is pending without waiting for the window
+
+### requeue-on-abort (exit 1, passed 8)
+  RED: a batch delivered into an aborted turn is put back and delivered again; a clean end clears it
+  RED: a batch delivered into a provider-error turn is kept; the next aborted end re-sends it
+
+### members-relation (exit 1, passed 2)
+  RED: pg_members lists the live roster with each member’s relation, parent name and child count
+
+### schedule-lower-bound (exit 1, passed 2)
+  RED: schedule() takes 5 s to 24 h and at most eight pending wakes
+
+### schedule-upper-bound (exit 1, passed 2)
+  RED: schedule() takes 5 s to 24 h and at most eight pending wakes
+
+### schedule-limit (exit 1, passed 2)
+  RED: schedule() takes 5 s to 24 h and at most eight pending wakes
+
+### schedule-window (exit 1, passed 2)
+  RED: a due wake enters the queue as `[scheduled]`, waits for the delivery window, and fires once
+
+### members-query-case (exit 1, passed 2)
+  RED: a query filters by name, case-insensitively, and total still tells the model the roster size
+
+### last-assistant-text (exit 1, passed 9)
+  RED: message_end keeps the last assistant text, and only assistant text
+

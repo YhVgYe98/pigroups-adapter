@@ -1,0 +1,9 @@
+# Repro: two batches delivered into the same still-running turn; abort; only the last is requeued.
+# Run against HEAD 8d21f37 (no src change), using test/scenario.ts + test/support.ts.
+$ node probe/logs/v3-20261101T173805Z/extra-multibatch-loss.ts
+deliveries after batch one: 1
+deliveries after batch two: 2
+deliveries after abort: 3
+0 "[dm:m_464071_m_84660b#1] root: batch one"
+1 "[dm:m_464071_m_84660b#2] root: batch two"
+2 "[dm:m_464071_m_84660b#2] root: batch two"

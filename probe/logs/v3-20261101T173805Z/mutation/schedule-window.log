@@ -1,0 +1,30 @@
+✔ schedule() takes 5 s to 24 h and at most eight pending wakes (96.059825ms)
+✖ a due wake enters the queue as `[scheduled]`, waits for the delivery window, and fires once (79.889568ms)
+✔ a restart drops pending wakes: the schedule is memory only (82.553368ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3313.643655
+
+✖ failing tests:
+
+test at test/schedule.test.ts:27:1
+✖ a due wake enters the queue as `[scheduled]`, waits for the delivery window, and fires once (79.889568ms)
+  AssertionError [ERR_ASSERTION]: due, but it enters the window like any other item (概念稿 §8.4)
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/schedule-window/test/schedule.test.ts:41:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

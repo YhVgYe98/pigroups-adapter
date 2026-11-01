@@ -1,0 +1,12 @@
+{
+  "case": "B-negative-control-no-requeue",
+  "marker": "NEG-MARK-v3-20261101T174453Z",
+  "toolStartAt": "2026-11-01T17:44:59.076Z",
+  "dmSentAt": "2026-11-01T17:44:59.241Z",
+  "abortAt": "2026-11-01T17:45:10.167Z",
+  "customMessages": [],
+  "mentions": [],
+  "verdict": "LOST",
+  "expectation": "LOST, matching probe/logs/steer-20261101T170244Z/e2-native-steer-platform-abort",
+  "mutatedLoopSha256": "19628f46de85467ae67a9c4ad5111eed83e1c73d5e2bd52d1a58f53dae9164bf"
+}

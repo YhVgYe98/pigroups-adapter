@@ -1,0 +1,10 @@
+{
+  "case": "D-skills-banner",
+  "verdict": "PASS",
+  "skillsSection": "council-mode, pi-intercom, pi-subagents, pigroups-message, pigroups-org, workflow-authoring, workflow-patterns",
+  "hasOrg": true,
+  "hasMessage": true,
+  "packageDir": "/home/yang/Documents/pigroups-adapter",
+  "invocation": "pi -ne -e /home/yang/Documents/pigroups-adapter -np -nc --no-mcp --session-dir ... --model deepseek/deepseek-flash",
+  "extensionSection": "extension.ts"
+}

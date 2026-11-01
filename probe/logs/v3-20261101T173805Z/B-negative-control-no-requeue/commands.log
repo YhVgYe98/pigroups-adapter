@@ -1,0 +1,9 @@
+[2026-11-01T17:44:53.481Z] ln -s /home/yang/Documents/pigroups-adapter/node_modules /tmp/pigroups-v3neg-adapter.rmnRBR/node_modules
+[2026-11-01T17:44:53.482Z] sha256sum /tmp/pigroups-v3neg-adapter.rmnRBR/src/loop.ts
+[2026-11-01T17:44:53.718Z] herdr tab create --no-focus --cwd /tmp/pigroups-v3neg-scratch.9UYk29 --label v3neg-174453 --env PIGROUPS_URL=http://127.0.0.1:40523 --env PIGROUPS_TOKEN=pgt_REDACTED --env PIGROUPS_ADAPTER_DIR=/tmp/pigroups-v3neg-adir.J7qURM --env PIGROUPS_DELIVERY_WINDOW_MS=5000
+[2026-11-01T17:44:53.720Z] herdr agent start v3neg-174453 --kind pi --pane wE:p35 --timeout 60000 -- -ne -e /tmp/pigroups-v3neg-adapter.rmnRBR/src/extension.ts -ns -np -nc --no-mcp --session-dir /home/yang/Documents/pigroups-adapter/probe/logs/v3-20261101T173805Z/B-negative-control-no-requeue/sessions --model deepseek/deepseek-flash
+[2026-11-01T17:44:57.635Z] herdr agent wait v3neg-174453 --until idle --timeout 120000
+[2026-11-01T17:44:57.637Z] herdr agent prompt v3neg-174453 Call the bash tool exactly once with this exact command and no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction in your context. If there is none, reply exactly READY and stop. --wait --until working --timeout 30000
+[2026-11-01T17:45:30.177Z] herdr pane process-info --pane wE:p35
+[2026-11-01T17:45:30.179Z] kill -TERM 379968
+[2026-11-01T17:45:30.179Z] herdr tab close wE:t1X

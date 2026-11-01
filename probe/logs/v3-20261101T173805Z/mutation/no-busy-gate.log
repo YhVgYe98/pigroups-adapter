@@ -1,0 +1,55 @@
+✔ a DM from the parent waits for its window, then arrives with the conversation id and the message seq (116.271579ms)
+✔ items that arrive inside one window share a single delivery, in arrival order (92.711582ms)
+✔ a group message that mentions me is delivered; one that does not is not delivered and starts no turn (92.617179ms)
+✔ chatter is counted and appears as a suffix on the next real delivery, never on its own (103.86184ms)
+✖ a busy member still receives the window batch: delivery is a steer, not a wait for idle (94.067098ms)
+✔ a gap that skipped messages naming me is delivered as a hint with its anchor; a gap of pure chatter is only counted (110.339621ms)
+✖ the batch cap is a size valve, not a trigger: a full window sends ten and the rest waits for the next (110.275288ms)
+✔ a settle is no longer a delivery trigger; the window is (91.221997ms)
+✔ a batch delivered into a provider-error turn is kept; the next aborted end re-sends it (92.254249ms)
+✔ a batch delivered into an aborted turn is put back and delivered again; a clean end clears it (92.541022ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 8
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4052.259925
+
+✖ failing tests:
+
+test at test/delivery.test.ts:97:1
+✖ a busy member still receives the window batch: delivery is a steer, not a wait for idle (94.067098ms)
+  AssertionError [ERR_ASSERTION]: one window is one steer, got:
+  
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/no-busy-gate/test/delivery.test.ts:114:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:156:1
+✖ the batch cap is a size valve, not a trigger: a full window sends ten and the rest waits for the next (110.275288ms)
+  AssertionError [ERR_ASSERTION]: the remainder goes out when the next window closes
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/no-busy-gate/test/delivery.test.ts:173:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

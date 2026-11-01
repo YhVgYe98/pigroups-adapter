@@ -1,0 +1,3 @@
+{"index":5,"type":"message","timestamp":"2026-11-01T17:44:59.076Z","role":"assistant","durationMs":1130,"stopReason":"toolUse","text":"\n"}
+{"index":6,"type":"message","timestamp":"2026-11-01T17:45:10.173Z","role":"toolResult","toolName":"bash","isError":true,"durationMs":11095,"text":"Command aborted"}
+{"index":7,"type":"message","timestamp":"2026-11-01T17:45:10.174Z","role":"assistant","durationMs":0,"stopReason":"error","errorMessage":"This operation was aborted","text":""}

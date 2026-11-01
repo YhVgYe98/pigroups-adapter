@@ -1,0 +1,56 @@
+✔ a DM from the parent waits for its window, then arrives with the conversation id and the message seq (117.59304ms)
+✔ items that arrive inside one window share a single delivery, in arrival order (93.598494ms)
+✔ a group message that mentions me is delivered; one that does not is not delivered and starts no turn (91.882191ms)
+✔ chatter is counted and appears as a suffix on the next real delivery, never on its own (104.160507ms)
+✔ a busy member still receives the window batch: delivery is a steer, not a wait for idle (91.409639ms)
+✔ a gap that skipped messages naming me is delivered as a hint with its anchor; a gap of pure chatter is only counted (109.534338ms)
+✔ the batch cap is a size valve, not a trigger: a full window sends ten and the rest waits for the next (108.505632ms)
+✔ a settle is no longer a delivery trigger; the window is (91.367789ms)
+✖ a batch delivered into a provider-error turn is kept; the next aborted end re-sends it (91.019346ms)
+✖ a batch delivered into an aborted turn is put back and delivered again; a clean end clears it (95.392105ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 8
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4051.730471
+
+✖ failing tests:
+
+test at test/delivery.test.ts:199:1
+✖ a batch delivered into a provider-error turn is kept; the next aborted end re-sends it (91.019346ms)
+  AssertionError [ERR_ASSERTION]: the kept copy is re-sent when an abort takes the turn
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/requeue-on-abort/test/delivery.test.ts:218:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:222:1
+✖ a batch delivered into an aborted turn is put back and delivered again; a clean end clears it (95.392105ms)
+  AssertionError [ERR_ASSERTION]: the aborted turn must hand the batch back
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/requeue-on-abort/test/delivery.test.ts:238:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

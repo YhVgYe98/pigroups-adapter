@@ -1,0 +1,20 @@
+{
+  "member": {
+    "id": "m_9ab09c",
+    "name": "v3a-20261101T174208Z",
+    "parent_id": "m_28c0c8",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_28c0c8",
+        "owner": "m_28c0c8"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793554928327
+  },
+  "model": "deepseek/deepseek-flash",
+  "windowMs": 5000
+}

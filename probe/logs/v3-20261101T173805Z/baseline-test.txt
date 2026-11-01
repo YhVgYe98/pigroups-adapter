@@ -1,0 +1,12 @@
+✔ the injection watermark is per member: one member advancing it must not drop the other member's copy (136.221474ms)
+✔ an already-injected message is not injected again after a restart on the same adapter directory (1207.966271ms)
+✔ a fresh adapter directory has no watermark, so the same message is injected again (1190.631794ms)
+✔ a gap does not advance the injection watermark: the message at seq === gap.before is still injected (104.700676ms)
+ℹ tests 122
+ℹ suites 0
+ℹ pass 122
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7716.986491

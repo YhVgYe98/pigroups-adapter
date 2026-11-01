@@ -1,0 +1,31 @@
+✔ pg_members lists the live roster with each member’s relation, parent name and child count (112.697053ms)
+✖ a query filters by name, case-insensitively, and total still tells the model the roster size (81.780968ms)
+✔ last_seen_at records the last authentication — null before the first one, a number after (79.708268ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3330.628437
+
+✖ failing tests:
+
+test at test/members.test.ts:48:1
+✖ a query filters by name, case-insensitively, and total still tells the model the roster size (81.780968ms)
+  AssertionError [ERR_ASSERTION]: a case-insensitive substring over the name
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/members-query-case/test/members.test.ts:54:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

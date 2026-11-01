@@ -1,0 +1,54 @@
+                                                                                                                                          ┃
+ ▀▀█  v1.4.0                                                                                                                              ┃
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                                     ┃
+ Press ctrl+o to show full startup help and loaded resources.                                                                             ┃
+                                                                                                                                          ┃
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                                    │
+                                                                                                                                          │
+[Extensions]                                                                                                                              │
+  extension.ts, steer-probe.ts
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Package Updates Available
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-web-access
+ - pi-subagents
+ - @juicesharp/rpiv-ask-user-question
+ - @juicesharp/rpiv-todo
+ - @quintinshaw/pi-dynamic-workflows
+ - pi-straw-boss
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+ Call the bash tool exactly once with this exact command and no other tool: sleep 60; echo SLEEPDONE. Do not shorten the sleep. After the
+ bash result comes back, follow the newest instruction in your context. If there is none, reply exactly READY and stop.
+
+
+ Thinking...
+
+
+ $ sleep 60; echo SLEEPDONE (timeout 120s)
+
+ SLEEPDONE
+
+ Took 1m 0s
+
+
+
+ [pigroups]
+
+ [dm:m_28c0c8_m_9ab09c#1] root: STEER-MARK-v3a-20261101T174208Z: when you next see this marker, reply with exactly
+ "STEER-MARK-v3a-20261101T174208Z" and then stop. Do not call any tool.
+
+
+ Thinking...
+
+ STEER-MARK-v3a-20261101T174208Z
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pigroups-v3-scratch.dte5Qy
+↑2.8k ↓202 R3.6k CH92.7% $0.001 0.3%/1.0M (auto)                                                            (deepseek) deepseek-flash • max

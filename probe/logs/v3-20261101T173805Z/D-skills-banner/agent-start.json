@@ -1,0 +1,36 @@
+{
+  "id": "cli:agent:start",
+  "result": {
+    "agent": {
+      "agent": "pi",
+      "agent_status": "idle",
+      "cwd": "/tmp/pigroups-v3-scratch.dte5Qy",
+      "focused": false,
+      "foreground_cwd": "/tmp/pigroups-v3-scratch.dte5Qy",
+      "interactive_ready": true,
+      "name": "v3d-174208",
+      "pane_id": "wE:p34",
+      "revision": 3,
+      "state_change_seq": 463,
+      "tab_id": "wE:t1W",
+      "terminal_id": "term_65f3a9349dea45e",
+      "terminal_title": "π - pigroups-v3-scratch.dte5Qy",
+      "terminal_title_stripped": "π - pigroups-v3-scratch.dte5Qy",
+      "workspace_id": "wE"
+    },
+    "argv": [
+      "pi",
+      "-ne",
+      "-e",
+      "/home/yang/Documents/pigroups-adapter",
+      "-np",
+      "-nc",
+      "--no-mcp",
+      "--session-dir",
+      "/home/yang/Documents/pigroups-adapter/probe/logs/v3-20261101T173805Z/D-skills-banner/sessions",
+      "--model",
+      "deepseek/deepseek-flash"
+    ],
+    "type": "agent_started"
+  }
+}

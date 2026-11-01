@@ -1,0 +1,21 @@
+{
+  "member": {
+    "id": "m_ce5743",
+    "name": "v3neg-20261101T174453Z",
+    "parent_id": "m_8b07a1",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_8b07a1",
+        "owner": "m_8b07a1"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793555093716
+  },
+  "model": "deepseek/deepseek-flash",
+  "windowMs": 5000,
+  "adapter": "/tmp/pigroups-v3neg-adapter.rmnRBR"
+}

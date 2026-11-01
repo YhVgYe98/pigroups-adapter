@@ -1,0 +1,33 @@
+{
+  "case": "A-steer-midtool",
+  "member": {
+    "id": "m_9ab09c",
+    "name": "v3a-20261101T174208Z",
+    "parent_id": "m_28c0c8",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_28c0c8",
+        "owner": "m_28c0c8"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793554928327
+  },
+  "marker": "STEER-MARK-v3a-20261101T174208Z",
+  "verdict": "PASS",
+  "toolStartAt": "2026-11-01T17:42:13.949Z",
+  "dmSentAt": "2026-11-01T17:42:14.351Z",
+  "adapterDeliveryAt": "2026-11-01T17:42:23.592Z",
+  "adapterDeliveryBeforeToolResultByMs": 50363,
+  "deliveryToToolStartMs": 9643,
+  "toolResultAt": "2026-11-01T17:43:13.955Z",
+  "toolResultDurationMs": 60004,
+  "persistedCustomMessageAt": "2026-11-01T17:43:13.956Z",
+  "customMinusToolResultMs": 1,
+  "assistantMentionAt": "2026-11-01T17:43:14.739Z",
+  "customMessageContent": "[dm:m_28c0c8_m_9ab09c#1] root: STEER-MARK-v3a-20261101T174208Z: when you next see this marker, reply with exactly \"STEER-MARK-v3a-20261101T174208Z\" and then stop. Do not call any tool.",
+  "assistantText": "The newest instruction in context is this DM: reply with exactly that marker and stop, no tool.\nSTEER-MARK-v3a-20261101T174208Z"
+}

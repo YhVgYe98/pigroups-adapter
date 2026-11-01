@@ -1,0 +1,9 @@
+export EVID=/home/yang/Documents/pigroups-adapter/probe/logs/v3-20261101T173805Z
+export PORT=33283
+export PIGROUPS_URL=http://127.0.0.1:33283
+export PIGROUPS_DATA=/tmp/pigroups-v3-data.J9VNQ0
+export ADIR=/tmp/pigroups-v3-adir.IPSylx
+export SCRATCH=/tmp/pigroups-v3-scratch.dte5Qy
+export MODEL=deepseek/deepseek-flash
+export PI_VERSION=1.4.0
+export HEAD=8d21f37c8dd1543b315a9be80e0b6fc24a1cf31d

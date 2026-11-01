@@ -1,0 +1,43 @@
+✔ a turn maps to turn_start, tool events map to tool_start/tool_end (1.112247ms)
+✔ before_settle closes the turn, and only a non-completed outcome carries an error (0.121985ms)
+✔ an aborted run closes the turn from agent_settled, because it skips before_settle (0.161111ms)
+✔ a completed run's settle closes nothing (0.072801ms)
+✔ an abort that lands after before_settle does not close the turn twice (0.067411ms)
+✔ an orphan aborted settle does not invent a turn that never started (0.05181ms)
+✔ a turn reopened by a new agent_start is closed by its own abort (0.050577ms)
+✔ the settle callback runs for every run, aborted or not, and the turn_end precedes it (0.076828ms)
+✔ deliver sends a custom message that asks pi to start a turn, as a steer (0.1192ms)
+✖ message_end keeps the last assistant text, and only assistant text (0.576983ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 53.575123
+
+✖ failing tests:
+
+test at test/surface.test.ts:198:1
+✖ message_end keeps the last assistant text, and only assistant text (0.576983ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + undefined
+  - 'first answer'
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/last-assistant-text/test/surface.test.ts:205:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'first answer',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

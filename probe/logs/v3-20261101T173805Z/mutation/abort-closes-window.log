@@ -1,0 +1,66 @@
+✖ pg.abort cuts, then closes the window and delivers the steer queued behind it at once (110.545559ms)
+✖ pg.abort delivers what is pending without waiting for the window (83.75142ms)
+✖ a message that arrives after the abort is delivered without waiting for a fresh window (81.289568ms)
+✔ pg.steer no longer cuts a busy member; it is delivered into the turn like any message (90.375764ms)
+[pigroups] ignored pg.steer from m_3420c7: only the direct parent or a human may control this member
+✔ pg.steer from a sibling is ignored and does not call abort() (90.074022ms)
+✔ sys.terminated stops the member: shutdown() is called and nothing further is delivered (102.933248ms)
+✔ sys.terminated cuts the running turn before discarding the journal and shutting down (101.915413ms)
+✔ sys.terminated reaches shutdown at the abort bound when the surface abort never returns (3082.380798ms)
+✔ a poll answered 410 member_gone stops the member (100.927417ms)
+✔ an unknown cmd and a pg.* payload with v:2 are injected, not dropped (91.060025ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 7
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6992.790039
+
+✖ failing tests:
+
+test at test/control.test.ts:11:1
+✖ pg.abort cuts, then closes the window and delivers the steer queued behind it at once (110.545559ms)
+  AssertionError [ERR_ASSERTION]: the queued steer must be delivered once the abort resolved
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/abort-closes-window/test/control.test.ts:30:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/control.test.ts:43:1
+✖ pg.abort delivers what is pending without waiting for the window (83.75142ms)
+  AssertionError [ERR_ASSERTION]: the abort must close the window: 
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/abort-closes-window/test/control.test.ts:59:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at test/control.test.ts:64:1
+✖ a message that arrives after the abort is delivered without waiting for a fresh window (81.289568ms)
+  AssertionError [ERR_ASSERTION]: the post-abort message waited for a window: 
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/abort-closes-window/test/control.test.ts:79:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

@@ -1,0 +1,58 @@
+{
+  "case": "C-members-schedule",
+  "member": {
+    "id": "m_344e7f",
+    "name": "v3c-20261101T174208Z",
+    "parent_id": "m_28c0c8",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_28c0c8",
+        "owner": "m_28c0c8"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793555016177
+  },
+  "worker": {
+    "id": "m_b7fc60",
+    "name": "v3c-worker-20261101T174208Z",
+    "parent_id": "m_344e7f",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_344e7f",
+        "owner": "m_344e7f"
+      }
+    ],
+    "last_seen_at": null,
+    "created_at": 1793555016179
+  },
+  "marker": "SCHED-MARK-v3c-20261101T174208Z",
+  "verdict": "PASS",
+  "rosterToolResultAt": "2026-11-01T17:43:40.982Z",
+  "rosterText": "{\n  \"self\": \"m_344e7f\",\n  \"total\": 6,\n  \"matched\": 6,\n  \"members\": [\n    {\n      \"id\": \"m_28c0c8\",\n      \"name\": \"root\",\n      \"parent_id\": null,\n      \"parent_name\": null,\n      \"relation\": \"parent\",\n      \"child_count\": 4,\n      \"last_seen_at\": 1793555016180\n    },\n    {\n      \"id\": \"m_9ab09c\",\n      \"name\": \"v3a-20261101T174208Z\",\n      \"parent_id\": \"m_28c0c8\",\n      \"parent_name\": \"root\",\n      \"relation\": \"sibling\",\n      \"child_count\": 0,\n      \"last_seen_at\": 1793554995500\n    },\n    {\n      \"id\": \"m_1f66a4\",\n      \"name\": \"v3b-20261101T174208Z\",\n      \"parent_id\": \"m_28c0c8\",\n      \"parent_name\": \"root\",\n      \"relation\": \"sibling\",\n      \"child_count\": 0,\n      \"last_seen_at\": 1793555015972\n    },\n    {\n      \"id\": \"m_344e7f\",\n      \"name\": \"v3c-20261101T174208Z\",\n      \"parent_id\": \"m_28c0c8\",\n      \"parent_name\": \"root\",\n      \"relation\": \"self\",\n      \"child_count\": 1,\n      \"last_seen_at\": 1793555020980\n    },\n    {\n      \"id\": \"m_b7fc60\",\n      \"name\": \"v3c-worker-20261101T174208Z\",\n      \"parent_id\": \"m_344e7f\",\n      \"parent_name\": \"v3c-20261101T174208Z\",\n      \"relation\": \"child\",\n      \"child_count\": 0,\n      \"last_seen_at\": null\n    },\n    {\n      \"id\": \"m_28df88\",\n      \"name\": \"v3c-sibling-20261101T174208Z\",\n      \"parent_id\": \"m_28c0c8\",\n      \"parent_name\": \"root\",\n      \"relation\": \"sibling\",\n      \"child_count\": 0,\n      \"last_seen_at\": null\n    }\n  ]\n}",
+  "rosterSelf": "m_344e7f",
+  "rosterTotal": 6,
+  "rosterMatched": 6,
+  "rosterRowCount": 6,
+  "selfRelation": "self",
+  "parentRelation": "parent",
+  "childRelation": "child",
+  "siblingRelation": "sibling",
+  "childParentName": "v3c-20261101T174208Z",
+  "childLastSeenAt": null,
+  "scheduleToolResultAt": "2026-11-01T17:43:42.559Z",
+  "scheduleToolText": "{\"due_at\":1793555032558,\"pending\":1}",
+  "scheduledDeliveredAt": "2026-11-01T17:44:01.475Z",
+  "scheduledContent": "[scheduled] SCHED-MARK-v3c-20261101T174208Z: reply with exactly SCHED-MARK-v3c-20261101T174208Z and stop",
+  "scheduledFireDelayMs": 18916,
+  "scheduledMentionAt": "2026-11-01T17:44:02.392Z",
+  "scheduledAssistantText": "SCHED-MARK-v3c-20261101T174208Z",
+  "rosterOk": true,
+  "scheduleOk": true
+}

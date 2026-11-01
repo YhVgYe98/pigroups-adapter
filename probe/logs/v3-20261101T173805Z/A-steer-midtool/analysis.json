@@ -1,0 +1,132 @@
+{
+  "sessionPath": "/home/yang/Documents/pigroups-adapter/probe/logs/v3-20261101T173805Z/A-steer-midtool/session.jsonl",
+  "entryCount": 9,
+  "firstTimestamp": "2026-11-01T17:42:08.526Z",
+  "lastTimestamp": "2026-11-01T17:43:14.739Z",
+  "sleepCalls": [
+    {
+      "index": 5,
+      "id": "call_00_grhVcAExIDBP0hsNGqD91821",
+      "name": "bash",
+      "args": {
+        "command": "sleep 60; echo SLEEPDONE",
+        "timeout": 120
+      },
+      "timestamp": "2026-11-01T17:42:13.949Z",
+      "result": {
+        "index": 6,
+        "toolCallId": "call_00_grhVcAExIDBP0hsNGqD91821",
+        "toolName": "bash",
+        "isError": false,
+        "durationMs": 60004,
+        "timestamp": "2026-11-01T17:43:13.955Z",
+        "text": "SLEEPDONE\n"
+      }
+    }
+  ],
+  "toolCalls": [
+    {
+      "index": 5,
+      "id": "call_00_grhVcAExIDBP0hsNGqD91821",
+      "name": "bash",
+      "args": {
+        "command": "sleep 60; echo SLEEPDONE",
+        "timeout": 120
+      },
+      "timestamp": "2026-11-01T17:42:13.949Z"
+    }
+  ],
+  "toolResults": [
+    {
+      "index": 6,
+      "toolCallId": "call_00_grhVcAExIDBP0hsNGqD91821",
+      "toolName": "bash",
+      "isError": false,
+      "durationMs": 60004,
+      "timestamp": "2026-11-01T17:43:13.955Z",
+      "text": "SLEEPDONE\n"
+    }
+  ],
+  "customMessages": [
+    {
+      "index": 7,
+      "timestamp": "2026-11-01T17:43:13.956Z",
+      "customType": "pigroups",
+      "content": "[dm:m_28c0c8_m_9ab09c#1] root: STEER-MARK-v3a-20261101T174208Z: when you next see this marker, reply with exactly \"STEER-MARK-v3a-20261101T174208Z\" and then stop. Do not call any tool."
+    }
+  ],
+  "markers": {
+    "STEER-MARK-v3a-20261101T174208Z": {
+      "customMessages": [
+        {
+          "index": 7,
+          "timestamp": "2026-11-01T17:43:13.956Z",
+          "customType": "pigroups",
+          "content": "[dm:m_28c0c8_m_9ab09c#1] root: STEER-MARK-v3a-20261101T174208Z: when you next see this marker, reply with exactly \"STEER-MARK-v3a-20261101T174208Z\" and then stop. Do not call any tool."
+        }
+      ],
+      "assistantMentions": [
+        {
+          "index": 8,
+          "timestamp": "2026-11-01T17:43:14.739Z",
+          "stopReason": "stop",
+          "text": "The newest instruction in context is this DM: reply with exactly that marker and stop, no tool.\nSTEER-MARK-v3a-20261101T174208Z"
+        }
+      ],
+      "allMentions": [
+        {
+          "index": 7,
+          "type": "custom_message",
+          "timestamp": "2026-11-01T17:43:13.956Z",
+          "text": "[dm:m_28c0c8_m_9ab09c#1] root: STEER-MARK-v3a-20261101T174208Z: when you next see this marker, reply with exactly \"STEER-MARK-v3a-20261101T174208Z\" and then stop. Do not call any tool."
+        },
+        {
+          "index": 8,
+          "type": "message",
+          "role": "assistant",
+          "timestamp": "2026-11-01T17:43:14.739Z",
+          "stopReason": "stop",
+          "text": "The newest instruction in context is this DM: reply with exactly that marker and stop, no tool.\nSTEER-MARK-v3a-20261101T174208Z"
+        }
+      ]
+    }
+  },
+  "relevant": [
+    {
+      "index": 5,
+      "type": "message",
+      "timestamp": "2026-11-01T17:42:13.949Z",
+      "role": "assistant",
+      "durationMs": 1391,
+      "stopReason": "toolUse",
+      "toolCalls": [
+        {
+          "id": "call_00_grhVcAExIDBP0hsNGqD91821",
+          "name": "bash",
+          "args": {
+            "command": "sleep 60; echo SLEEPDONE",
+            "timeout": 120
+          }
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "type": "message",
+      "timestamp": "2026-11-01T17:43:13.955Z",
+      "role": "toolResult",
+      "toolName": "bash",
+      "toolCallId": "call_00_grhVcAExIDBP0hsNGqD91821",
+      "isError": false,
+      "durationMs": 60004,
+      "text": "SLEEPDONE\n"
+    },
+    {
+      "index": 7,
+      "type": "custom_message",
+      "timestamp": "2026-11-01T17:43:13.956Z",
+      "customType": "pigroups",
+      "content": "[dm:m_28c0c8_m_9ab09c#1] root: STEER-MARK-v3a-20261101T174208Z: when you next see this marker, reply with exactly \"STEER-MARK-v3a-20261101T174208Z\" and then stop. Do not call any tool."
+    }
+  ]
+}

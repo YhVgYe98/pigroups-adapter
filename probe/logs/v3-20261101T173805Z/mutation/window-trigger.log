@@ -1,0 +1,158 @@
+✖ a DM from the parent waits for its window, then arrives with the conversation id and the message seq (105.600485ms)
+✖ items that arrive inside one window share a single delivery, in arrival order (81.916328ms)
+✖ a group message that mentions me is delivered; one that does not is not delivered and starts no turn (81.499674ms)
+✔ chatter is counted and appears as a suffix on the next real delivery, never on its own (105.716139ms)
+✖ a busy member still receives the window batch: delivery is a steer, not a wait for idle (80.828158ms)
+✔ a gap that skipped messages naming me is delivered as a hint with its anchor; a gap of pure chatter is only counted (113.168721ms)
+✖ the batch cap is a size valve, not a trigger: a full window sends ten and the rest waits for the next (91.862803ms)
+✖ a settle is no longer a delivery trigger; the window is (81.515464ms)
+✖ a batch delivered into a provider-error turn is kept; the next aborted end re-sends it (93.923029ms)
+✖ a batch delivered into an aborted turn is put back and delivered again; a clean end clears it (92.445418ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 2
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3987.814338
+
+✖ failing tests:
+
+test at test/delivery.test.ts:12:1
+✖ a DM from the parent waits for its window, then arrives with the conversation id and the message seq (105.600485ms)
+  AssertionError [ERR_ASSERTION]: the first item opens the window; nothing goes out yet
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/window-trigger/test/delivery.test.ts:22:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:34:1
+✖ items that arrive inside one window share a single delivery, in arrival order (81.916328ms)
+  AssertionError [ERR_ASSERTION]: precondition: the window is open
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/window-trigger/test/delivery.test.ts:41:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:55:1
+✖ a group message that mentions me is delivered; one that does not is not delivered and starts no turn (81.499674ms)
+  AssertionError [ERR_ASSERTION]: the window is open; the unmentioned message is not queued
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/window-trigger/test/delivery.test.ts:65:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:97:1
+✖ a busy member still receives the window batch: delivery is a steer, not a wait for idle (80.828158ms)
+  AssertionError [ERR_ASSERTION]: the window, not the busy flag, decides when
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/window-trigger/test/delivery.test.ts:108:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:156:1
+✖ the batch cap is a size valve, not a trigger: a full window sends ten and the rest waits for the next (91.862803ms)
+  AssertionError [ERR_ASSERTION]: precondition: one window, nothing out yet
+  
+  2 !== 0
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/window-trigger/test/delivery.test.ts:163:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:178:1
+✖ a settle is no longer a delivery trigger; the window is (81.515464ms)
+  AssertionError [ERR_ASSERTION]: a settle must not deliver; it only lets the tick look
+  
+  2 !== 0
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/window-trigger/test/delivery.test.ts:190:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:199:1
+✖ a batch delivered into a provider-error turn is kept; the next aborted end re-sends it (93.923029ms)
+  AssertionError [ERR_ASSERTION]: an errored end neither clears nor re-sends
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/window-trigger/test/delivery.test.ts:213:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at test/delivery.test.ts:222:1
+✖ a batch delivered into an aborted turn is put back and delivered again; a clean end clears it (92.445418ms)
+  AssertionError [ERR_ASSERTION]: a clean end clears the copy
+  
+  3 !== 2
+  
+      at TestContext.<anonymous> (file:///tmp/v3mut.CwJQEy/window-trigger/test/delivery.test.ts:247:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 3,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
