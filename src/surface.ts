@@ -113,6 +113,8 @@ export class PiSurfaceAdapter implements PiSurface {
   private readonly settleListeners = new Set<() => void>();
   private readonly eventListeners = new Set<(event: PiEvent) => void>();
   private context: PiContext | undefined;
+  /** Whether `agent_start` opened a turn that `agent_before_settle` has not closed. */
+  private turnOpen = false;
 
   constructor(pi: PiLike) {
     this.pi = pi;
@@ -120,19 +122,23 @@ export class PiSurfaceAdapter implements PiSurface {
     // pi event → PiEvent (设计说明 §2.1). `agent_before_settle` carries the run
     // outcome and is the normal turn_end source; `agent_settled` closes the turn when
     // the run was aborted, because that path skips before_settle entirely.
-    pi.on('agent_start', () => this.publish({ type: 'turn_start' }));
+    pi.on('agent_start', () => {
+      this.turnOpen = true;
+      this.publish({ type: 'turn_start' });
+    });
     pi.on('tool_execution_start', (event) =>
       this.publish({ type: 'tool_start', name: event.toolName, argsPreview: previewArgs(event.args) }),
     );
     pi.on('tool_execution_end', (event) =>
       this.publish({ type: 'tool_end', name: event.toolName, ok: !event.isError }),
     );
-    pi.on('agent_before_settle', (event) =>
+    pi.on('agent_before_settle', (event) => {
+      this.turnOpen = false;
       this.publish({
         type: 'turn_end',
         error: event.outcome === 'completed' ? undefined : { message: `turn ended: ${event.outcome}` },
-      }),
-    );
+      });
+    });
     pi.on('agent_settled', (event) => {
       // An aborted run never reaches `agent_before_settle`: pi breaks out of the run
       // before the settle boundary, so the handler above never fires. Verified on a
@@ -140,7 +146,13 @@ export class PiSurfaceAdapter implements PiSurface {
       // `assistant_end stopReason=error` then `agent_settled aborted=true`, and no
       // before_settle at all. Without this line the loop keeps the turn open forever
       // after a `pg.abort` and the parent never hears that the turn was cut.
-      if (event.aborted) {
+      //
+      // `turnOpen` keeps a *normal* close from being followed by a second turn_end:
+      // an abort can land in another extension's async boundary after before_settle,
+      // and pi then reports the settled run as aborted. Only a turn that no
+      // before_settle closed is ours to close here.
+      if (event.aborted && this.turnOpen) {
+        this.turnOpen = false;
         this.publish({ type: 'turn_end', error: { message: 'turn ended: aborted' } });
       }
       for (const listener of this.settleListeners) listener();

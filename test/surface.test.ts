@@ -101,7 +101,7 @@ test('an aborted run closes the turn from agent_settled, because it skips before
   assert.match(ends[0].error!.message, /abort/i);
 });
 
-test('a normal settle closes nothing twice', () => {
+test('a completed run\'s settle closes nothing', () => {
   const { pi, fire } = fakePi();
   const surface = new PiSurfaceAdapter(pi);
   const events = collect(surface);
@@ -115,6 +115,47 @@ test('a normal settle closes nothing twice', () => {
     1,
     'a turn that already ended must not get a second turn_end from the settle callback',
   );
+});
+
+test('an abort that lands after before_settle does not close the turn twice', () => {
+  const { pi, fire } = fakePi();
+  const surface = new PiSurfaceAdapter(pi);
+  const events = collect(surface);
+
+  fire('agent_start');
+  fire('agent_before_settle', { outcome: 'completed' });
+  // Another extension aborted in its async boundary after the settle decision was
+  // made: pi reports the run as aborted even though before_settle already closed it.
+  fire('agent_settled', { aborted: true });
+
+  const ends = events.filter((event) => event.type === 'turn_end');
+  assert.equal(ends.length, 1, 'one turn has one end, whatever the abort race does');
+  assert.equal(ends[0].error, undefined, 'the close that happened first is the one that counts');
+});
+
+test('an orphan aborted settle does not invent a turn that never started', () => {
+  const { pi, fire } = fakePi();
+  const surface = new PiSurfaceAdapter(pi);
+  const events = collect(surface);
+
+  // No agent_start: the adapter attached after the run had already begun, or pi
+  // settled a run whose start this listener never saw.
+  fire('agent_settled', { aborted: true });
+
+  assert.deepEqual(events, [], 'without an open turn there is nothing to close');
+});
+
+test('a turn reopened by a new agent_start is closed by its own abort', () => {
+  const { pi, fire } = fakePi();
+  const surface = new PiSurfaceAdapter(pi);
+  const events = collect(surface);
+
+  fire('agent_start');
+  fire('agent_settled', { aborted: true });
+  fire('agent_start');
+  fire('agent_settled', { aborted: true });
+
+  assert.equal(events.filter((event) => event.type === 'turn_end').length, 2, 'each run gets one end');
 });
 
 test('the settle callback runs for every run, aborted or not, and the turn_end precedes it', () => {
