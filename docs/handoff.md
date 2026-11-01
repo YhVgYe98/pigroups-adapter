@@ -1,6 +1,6 @@
 # 交接文档
 
-> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果，改写 §4 / §7 / §10；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await）。
+> 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果，改写 §4 / §7 / §10；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第四轮审阅的留痕见 §11）。
 > 两个人（或一个人隔几天回来）之间交接用。
 > 面向：接手「把 PiGroups 在 herdr + pi 上真机跑起来」这件事的人。
 
@@ -8,7 +8,7 @@
 
 ## 1. 一句话现状
 
-**两个仓库都已建成、全绿、经过三轮独立评审和变异测试；三条 pi 接口假设已于 2026-11-01 在真机（pi 1.4.0 / herdr 0.9.5）上验过：第 1 级通过；第 2 级只对“配合的工具”通过（pi 不会杀一个忽略 abort signal 的工具）；第 3 级只过了 SIGTERM/tui 这一条路径，且这次用 3 s 异步体 + `process.on('exit')` 证明了处理器确实被 await。** 抓到的真偏离（`pg.abort` 之后没有 turn_end）已由 `abecc76` / `fff2418` 修掉。
+**两个仓库都已建成、全绿、经过四轮独立评审和变异测试（第四轮见 §11）；三条 pi 接口假设已于 2026-11-01 在真机（pi 1.4.0 / herdr 0.9.5）上验过：第 1 级通过；第 2 级只对“配合的工具”通过（pi 不会杀一个忽略 abort signal 的工具）；第 3 级只过了 SIGTERM/tui 这一条路径，且这次用 3 s 异步体 + `process.on('exit')` 证明了处理器确实被 await。** 抓到的真偏离（`pg.abort` 之后没有 turn_end）已由 `abecc76` / `fff2418` 修掉。
 
 下一步：**补第 3 级剩下的 `ctx.shutdown()` 自调用、print/json 模式、session 落盘**；第 4 级端到端还没碰。第 2 级的“不配合工具”是 pi 的接口边界，不要再改循环去追。
 
@@ -44,7 +44,7 @@
 | 文档 | `docs/概念稿.md`（**权威**）、`docs/设计说明.md`（含 `PiSurface`、`Herdr`、循环、journal、`pg.*` 契约） |
 | 代码 | `src/` 2677 行，8 个模块（见下），**无运行时依赖**（只用 `node:*` 和 `fetch`） |
 | 测试 | `test/` 2567 行，59 个测试，跑真平台（子进程）+ 假 `PiSurface` + 假 `Herdr` + 假时钟 |
-| 提交 | 38 个，`master` |
+| 提交 | 39 个，`master` |
 
 ```
 src/extension.ts   Pi 扩展入口：注册 9 个 pg_* 工具，挂 session_start / session_shutdown
@@ -89,11 +89,12 @@ src/state.ts       义务表、遥测表、合并窗口
 ### 3.3 适配器侧的具体数字
 
 - 59 个测试：真平台子进程 + 假 `PiSurface` + 假 `Herdr` + **注入的假时钟**（所以催办窗口和 stalled 阈值不用 sleep）
-- 新补的 15 条：`test/surface.test.ts` 9 条（pi 事件映射 + abort 后补 turn_end 的幂等门）、
+- 新补的 15 条（44 → 59）：`test/surface.test.ts` 新增 3 条（幂等门；该文件共 9 条）、
   `test/surface.abort.test.ts` 10 条（abort/isBusy/shutdown/退订/preview，含 3 s 放弃分支）、
-  以及两条 `nudgeOwed` 的 abort 竞态（`test/obligation.test.ts`）；后两组都做过撤掉源码再跑红的验证
+  `test/obligation.test.ts` 新增 2 条（`nudgeOwed` 的 abort 竞态）；三组都做过撤掉源码再跑红的验证
 - 变异测试 17 个，抓 12 个；存活 5 个里 3 个已被后补测试覆盖，剩 2 个（水位按成员、`flush()` 返回值）已补并有变异证明
-- 两轮独立评审：源码侧 3 blocking + 9 should-fix 全部修完；测试侧 11 条覆盖缺口补了 9 条（2 条判定为文档信息不足，明确跳过）
+- 本轮另做 3 个反向变异，全被抓：撤 `turnOpen` 门 → `surface.test.ts` 9 条里 2 条红；撤 `abort()` 放弃时的 warn → `surface.abort.test.ts` 1 条红；撤 `nudgeOwed` 的两处 `aborting` 检查 → `obligation.test.ts` 2 条红。恢复后全绿
+- 此前的两轮独立评审：源码侧 3 blocking + 9 should-fix 全部修完；测试侧 11 条覆盖缺口补了 9 条（2 条判定为文档信息不足，明确跳过）
 
 ### 3.4 herdr CLI（零成本，已对实机帮助核过）
 
@@ -127,9 +128,9 @@ P3，检查退出码与 pane 清理。
 
 | 运行 | 目录 | run.sh 退出码 | 结论 |
 |---|---|---|---|
-| 对照组：工具从自己的 abort 监听器返回 | `run-20261101T1920-control` | 0 | 27 项全过 |
-| 硬变体：`PROBE_IGNORE_SIGNAL=1`，工具忽略 abort signal | `run-20261101T1920-ignore-signal` | 1 | **P2.5、P2.7 失败** |
-| 负对照：故意用不存在的模型 | `run-20261101T1920-negative-control` | 1 | 16 项失败，验证 runner 会报错并留下产物 |
+| 对照组：工具从自己的 abort 监听器返回 | `run-20261101T1920-control` | 0 | 27 PASS / 0 FAIL（P2.8 是 WARN） |
+| 硬变体：`PROBE_IGNORE_SIGNAL=1`，工具忽略 abort signal | `run-20261101T1920-ignore-signal` | 1 | **P2.5、P2.7 失败**（25 PASS / 2 FAIL） |
+| 负对照：故意用不存在的模型 | `run-20261101T1920-negative-control` | 1 | 9 FAIL / 16 PASS，验证 runner 会报错并留下产物 |
 
 **P1（起一轮）—— 成立（两组都通过）。** 处理器内 `isIdle` 已是 `true`，`sendMessage` 同步返回，
 新 run 是 `custom` run（A3 假通过陷阱被显式排除），全部发生在同一毫秒：
@@ -159,7 +160,14 @@ adapter 的 `abort()` 在 `ABORT_IDLE_TIMEOUT_MS = 3000` 处放弃时，那一�
 不是循环能修的。`src/surface.ts` 的放弃分支现在会打 warn；第 2 级在 `docs/设计说明.md` 与
 本文里都降为**部分通过**。`bash sleep 60` 未验（探针带 `--no-builtin-tools`）。
 
-**P3（关停处理器被 await）—— 成立，这次是判别性的。** 处理器里的异步体从 250 ms 改成
+**18:51 那次的 P2 报 PASS 是假通过。** 那时 `probe_sleep` 从自己的 signal 监听器 resolve（日志顺序
+`abort_seen → tool_return → abort_called`），`pane.sh` 又带 `--no-builtin-tools`，`bash sleep 60`
+从未加载。它只证明 pi 把 `AbortSignal` 递给了工具、工具自己返回后那一轮会 settle；
+不证明 pi 会切断一个不理会它的工具。现在的
+对照组保留为“配合的工具”，`PROBE_IGNORE_SIGNAL=1` 的硬变体才是边界；判据也补了
+`tool_enter < abort_seen < abort_called`，并把界从 20 s 收到 3000 ms（与 `ABORT_IDLE_TIMEOUT_MS` 同一个数）。
+
+**P3（关停处理器被 await）—— 在 SIGTERM/tui 这一条路径上成立，这次是判别性的。** 处理器里的异步体从 250 ms 改成
 3000 ms，并用 `process.on('exit')` 记录退出时刻：
 
 ```
@@ -170,19 +178,23 @@ adapter 的 `abort()` 在 `ABORT_IDLE_TIMEOUT_MS = 3000` 处放弃时，那一�
 
 `waited_ms ≥ 2500` 证明 3 s 的异步体真的跑完；`process_exit` 在 `shutdown_done` 之后 54 ms 才写，
 `exit 0`，SIGTERM→退出 3130 ms，只派发一次。旧的 251 ms 版本做不到这个区分：一个没被 await 的
-`setTimeout` 也能让进程活到 357 ms。**仍然没验**：`ctx.shutdown()` 自调用、print/json 模式、
+`setTimeout` 也能让进程活过 `shutdown_done`；那次的 `exit_code` 与 runner 输出没归档，只剩一份末行是
+`shutdown_done` 的 JSONL，所以它证明不了 await。19:20 的归档运行才同时有 `exit_code`、
+`run_exit_code` 和 `process_exit`。**仍然没验**：`ctx.shutdown()` 自调用、print/json 模式、
 session 落盘、以及 shutdown 正在跑的一轮。
 
 **abort 后的 settle 仍能起一轮 —— 成立（对照组与硬变体都通过）。** 这是 P1 没覆盖的路径
 （P1 只证明正常 settle）：`settled_3(aborted)` 的处理器里 `sendMessage` 被接受，日志出现
 `delivered stage=p3` → `turn_start run=4` → `settled_4`。硬变体在工具超时、run 真正 abort 之后
-也通过了这条。
+也通过了这条。这条走的是探针直接调 `pi.sendMessage`，没经过 `surface.deliver`；它证明 pi 接受
+这次投递，adapter 的 flush 由 FakeSurface 测试守着。
 
 **18:51 的第一次运行**（提交 `ee9d819`，日志 `probe/logs/run-20261101T185102.jsonl`，31 行）
 是 P1 的第一份证据，也第一次看到 **被 abort 的 run 不发 `agent_before_settle`**：
 它给的是 `assistant_end stopReason:"error"` + `pi_turn_end outcome=error`
 （`errorMessage: "This operation was aborted"`）+ `agent_settled.aborted=true`。
-那次的 P3 只有 251 ms，不能证明 await；上面 19:20 的运行取代了它在这一条上的证据力。
+那次的 P3 只有 251 ms，不能证明 await；它的 P2 报 PASS 也是假通过（见上）。
+上面 19:20 的运行取代了它在这两条上的证据力。
 `abecc76` 因此让 `surface.ts` 在 `agent_settled.aborted === true` 时补发 `turn_end{error}`；
 `fff2418` 又加了 `turnOpen` 门，避免 `before_settle` 已经关过的一轮被补第二次。
 现在探针的 `P2.8` 对缺失的 `before_settle` 只打 WARN：它描述 pi 的边界，不再是 adapter 的洞。
@@ -228,12 +240,13 @@ session 落盘、以及 shutdown 正在跑的一轮。
    把 `turnOpen` 门撤掉，2 条变红。
 3. **`shutdown()` 干净 —— 只验证了一条路径，但这回证明了 await。**
    通过行是 `shutdown_start`（`reason:"quit", mode:"tui"`）→ `shutdown_done`
-   （`waited_ms:3001`）→ `process_exit`（`after_shutdown_done_ms:53`, `code:0`），
+   （`waited_ms:3000`）→ `process_exit`（`after_shutdown_done_ms:54`, `code:0`），
    SIGTERM→退出 3130 ms、只派发一次。**缺的部分**：`ctx.shutdown()` 自调用、
    print/json 模式、session 落盘、以及 shutdown 正在跑的一轮；探针都没碰。
    （print 模式下 `SIGTERM` 会 `process.exit(143)`，这是读 pi 1.4.0
    `dist/modes/print-mode.js:40` 得到的，**未实测**。）`extension.ts` 的
-   「先清 `loop` 再 await」顺序本身是对的，且这一次没有双派发。
+   「先清 `loop` 再 await」与 pi 1.4.0 源码的 `await emitSessionShutdownEvent` 一致，
+   这一次也没有双派发。
 
 写修复时会想知道的三条实测细节（对照组日志）：
 
@@ -241,7 +254,7 @@ session 落盘、以及 shutdown 正在跑的一轮。
   …→`abort_called`→`tool_return`：`ctx.abort()` 同步触发了工具自己的 signal 监听器，
   promise 在 `abort()` 返回前就 resolve 了（`abort_sync_ms:0–1`）。所以不要去断言
   “先调用后返回”。忽略 signal 的工具里，`tool_return` 要等它自己的 60 s 计时器。
-- **`tool_execution_end.isError` 是 `false`**（对照组 `durationMs:1608`，硬变体 `60001`）：
+- **`tool_execution_end.isError` 是 `false`**（对照组 `durationMs:1713`，硬变体 `60001`）：
   pi 没有替换工具结果。别把 `isError=true` 当作 abort 的证据。
 - **`turnIndex` 是每条 run 内部的计数**，不是全局：run 1 → 0，run 2 → 0，run 3 → 0 然后 1。
   任何拿 `turnIndex` 当全局回合号的实现都会错。
@@ -319,8 +332,9 @@ session 落盘、以及 shutdown 正在跑的一轮。
 
 | 风险 | 状态 |
 |---|---|
-| ~~`pg.abort` 之后没有 turn_end~~ | **已修（`abecc76`）**：`agent_settled.aborted === true` 时补发 `turn_end{error}`（`fff2418` 起只在没有 `before_settle` 关过这一轮时补，避免一轮两个 `turn_end`），`test/surface.test.ts` 守着。但**`surface.ts` 的 pi 事件映射整体此前零测试**，是这次才发现的盲区——以后改这个文件，先看那个测试文件 |
-| `deliver()` 只确认"pi 收下了"，不确认"run 起来了" | 丢失窗口：`pi.sendMessage` 是 void，pi 吞掉启动失败，而水位与 journal 在 `deliver()` resolve 后立刻推进（`docs/设计说明.md §3.4`）。消息会被记成已注入但那一轮没起来。要收紧只能给 `PiSurface` 加"下一次 `agent_start`"的确认，属于接口设计决定，未做 |
+| `deliver()` 只确认"pi 收下了"，不确认"run 起来了" | 丢失窗口仍在：`pi.sendMessage` 是 void，pi 吞掉启动失败，而水位与 journal 在 `deliver()` resolve 后立刻推进（`docs/设计说明.md §3.4`）。消息会被记成已注入但那一轮没起来。本轮只把契约写准（`PiSurface` 注释、§3.4、本节都写了"收下 ≠ 起来"），没有加 ack；要收紧只能给 `PiSurface` 加"下一次 `agent_start`"的确认，属于接口设计决定 |
+| `details.kind` 写了没人读 | `src/surface.ts` 把它塞进 `pi.sendMessage` 的 `details`，`test/surface.test.ts` 也断言了，但仓库里没有任何读取方。要么定为 UI 契约写进 `docs/设计说明.md`，要么删——产品决定，未做 |
+| 投递排队分支没有真实样本 | 留存日志里 `hasPendingMessages` 恒为 `false`：两笔投递同时排队、以及 turn 中途再投都没观测过；`hasPendingMessages` 在 `src/` 里也一次没读。一次 settle 只投一次的规则不覆盖这个场景 |
 | `ctx.shutdown()` 自调用、print/json 模式下的退出 | 未验证。外部 `SIGTERM` 的 tui 路径已证明 await（3 s 异步体、`process_exit.after_shutdown_done_ms ≥ 0`、exit 0、只派发一次）；`ctx.shutdown()` 自调用、print/json、session 落盘、shutdown 正在跑的一轮都没验。print 模式据源码是 143（未实测） |
 | 一个忽略 abort signal 的工具不会被 pi 杀掉 | **未解决，接口边界**。硬变体：abort 后 3009 ms `idle_timeout`，工具自己 60 s 后返回，aborted settle 晚到 58 296 ms。adapter 的 `abort()` 3 s 后放弃并打 warn；`pg.abort` 对这类成员无法兑现“已切断”。`bash` 内置工具未验 |
 | `herdr agent start` 在真实 pane 里的行为 | 命令行形状已核，**行为未验**；探针是在 pane 里直接跑 `bash pane.sh` 起 pi，没走 `agent start` |
@@ -367,7 +381,7 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 
 ## 10. 交接清单
 
-- [x] 两个仓库 `git status` 干净（2026-11-01：adapter 本轮 6 个提交，HEAD 见 `git log`；PiGroups `8e886ca`）
+- [x] 两个仓库 `git status` 干净（2026-11-01：adapter 本轮 7 个提交，HEAD 见 `git log`；PiGroups `8e886ca`）
 - [ ] `PiGroups`: 52/52，typecheck 干净（本轮没跑，留待确认）
 - [x] `pigroups-adapter`: 59/59，typecheck 干净（2026-11-01 实测，约 7.5 s）
 - [x] `grep -c 'pi-coding-agent' pigroups-adapter/src/loop.ts` = 0（实测 0）
@@ -376,3 +390,17 @@ PIGROUPS_ADMIN_TOKEN=adm PIGROUPS_DATA=$(mktemp -d) PORT=7717 npm run serve
 - [ ] 第 2 级探针**部分通过**（对照组 2 ms 切断；`PROBE_IGNORE_SIGNAL=1` 的硬变体 P2.5/P2.7 失败：pi 不杀忽略 signal 的工具；`bash sleep 60` 未验）
 - [ ] 第 3 级探针**部分通过**（SIGTERM/tui 已证明 await 与 exit 0；`ctx.shutdown()` 自调用、print/json 模式、session 落盘、shutdown 正在跑的一轮都未验）
 - [ ] 第 4 级端到端跑通，录一份日志
+
+---
+
+## 11. 审阅留痕
+
+2026-11-01 第四轮审阅，三个视角，18 条，逐条判过：
+
+| 视角 | 它问什么 | 条数 | 判决 |
+|---|---|---|---|
+| 阻断 | 哪条“通过”其实不成立 | 2 | **2/2 成立**。P2 是假通过（工具从自己的 signal 监听器返回，`--no-builtin-tools` 又让 `bash sleep` 从未加载）；P3 的 251 ms 体不区分 await。现在用 `PROBE_IGNORE_SIGNAL=1` 硬变体（P2.5 在 3009 ms 记到 `idle_timeout`，P2.7 的 settle 晚到 58 296 ms）和 3 s 异步体 + `process.on('exit')`（`after_shutdown_done_ms=54`）补成真证据 |
+| 应修 | 代码、测试、探针哪里不硬 | 10 | **10/10 成立，全部改完**：`turn_end` 幂等门、`nudgeOwed` 的 abort 竞态、`deliver()` 契约措辞、`surface.abort.test.ts` 10 条、P2 的界对齐 3000 ms、4 项装饰性检查改成真断言、归档正/负对照、abort 后 settle 的投递补进探针、mid-turn 投递的措辞（pi 会 steer，不是静默拒绝）、陈旧文本 |
+| 备忘 | 这条指控站不站得住 | 6 | **3 条撤回**（“A 循环论证”“26 ms 可当精确值”“新 run 会让 abort 期间的 `isIdle` 为真”），**3 条留档**（`details.kind` 无用例、`hasPendingMessages` 恒为 false、第 3 级残余缺口） |
+
+净结果：没有一条要求改接口。P2 的边界是 pi 的，不是 adapter 的；P3 的实现本来是对的，缺的是证据。每条修法都做了反向变异或真机重跑，数字在 §3.3 与 §3.5。
