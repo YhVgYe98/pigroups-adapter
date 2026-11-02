@@ -1,0 +1,17 @@
+[org-start] 2026-11-02T15:07:04.364Z == 0. baseline ==
+[org-start] 2026-11-02T15:07:04.553Z baseline panes: wD:p1E wE:p36 wE:p1 wE:p12 wE:p2Q wE:p3B wF:p2 wF:p4 
+[org-start] 2026-11-02T15:07:04.555Z commit 71c6951, platform 210ed07
+[org-start] 2026-11-02T15:07:04.555Z temp work dir /tmp/pgorg-probe.LSOwmi
+[org-start] 2026-11-02T15:07:04.556Z isolated settings: /tmp/pgorg-probe.LSOwmi/agent/settings.json names the same package as ~/.pi/agent/settings.json
+[org-start] 2026-11-02T15:07:04.557Z == 1. unconfigured root pane ==
+[org-start] 2026-11-02T15:07:04.594Z tab wE:t24, root pane wE:p3C (not focused)
+[org-start] 2026-11-02T15:07:08.515Z root agent start: {"id":"cli:agent:start","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgorg-probe.LSOwmi/scratch","focused":false,"foreground_cwd":"/tmp/pgorg-probe.LSOwmi/scratch","interactive_ready":true,"name":"probe-root","pane_id":
+[org-start] 2026-11-02T15:07:08.517Z root idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgorg-probe.LSOwmi/scratch","focused":false,"foreground_cwd":"/tmp/pgor
+[org-start] 2026-11-02T15:07:38.695Z FATAL: root session file not found
+[org-start] 2026-11-02T15:07:38.696Z == cleanup ==
+[org-start] 2026-11-02T15:07:38.720Z closed pane wE:p3C (exit 0)
+[org-start] 2026-11-02T15:07:38.722Z closed tab wE:t24 (exit 1)
+[org-start] 2026-11-02T15:07:38.751Z final platform instances: 
+pane diff: added=[] missing=[]
+[org-start] 2026-11-02T15:07:38.768Z temp work dir /tmp/pgorg-probe.LSOwmi kept for inspection? yes
+[org-start] 2026-11-02T15:07:38.769Z driver exit 2

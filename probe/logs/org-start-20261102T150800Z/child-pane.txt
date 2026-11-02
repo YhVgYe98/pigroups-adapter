@@ -1,0 +1,44 @@
+                                                                                                                                        ┃
+ ▀▀█  v1.4.0                                                                                                                            ┃
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                                   ┃
+ Press ctrl+o to show full startup help and loaded resources.                                                                           ┃
+                                                                                                                                        ┃
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                                  │
+                                                                                                                                        ┃
+[Skills]                                                                                                                                ┃
+  council-mode, pi-intercom, pi-subagents, pigroups-message, pigroups-org, workflow-authoring, workflow-patterns                        ┃
+                                                                                                                                        ┃
+[Prompts]                                                                                                                               ┃
+  /council, /gather-context-and-clarify, /parallel-cleanup, /parallel-research, /parallel-review, /review-loop                          ┃
+                                                                                                                                        │
+[Extensions]                                                                                                                            │
+  extension.ts                                                                                                                          │
+                                                                                                                                        │
+                                                                                                                                        │
+                                                                                                                                        ┃
+ [pigroups]                                                                                                                             ┃
+                                                                                                                                        ┃
+ [dm:m_629162_m_94c01b#1] probe-root: You are probe-child, a member of this PiGroups organisation. Call pg_say exactly once with        │
+ to="g:m_94c01b" and text="probe-child joined the same platform and answered". Then stop.                                               │
+                                                                                                                                        │
+                                                                                                                                        │
+ Thinking...
+
+
+ pg_say to="g:m_94c01b" text="probe-child joined the same platform and answered"
+ {"conv":"g:m_94c01b","seq":1}
+
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available
+ New version 1.5.0 is available. Run pi update
+ Changelog: https://pi.dev/changelog
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Done — posted once to g:m_94c01b (seq 1).
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[pigroups] adapter 0.6.0+platform.0.2.0 starting against http://127.0.0.1:45307
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pgorg-probe.IoX2Vt/scratch • probe-child
+↑2.8k ↓198 R5.4k CH94.9% $0.001 0.4%/1.0M (auto)                                                          (deepseek) deepseek-flash • max

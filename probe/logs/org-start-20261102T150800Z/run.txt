@@ -1,0 +1,60 @@
+[org-start] 2026-11-02T15:10:45.794Z == 0. baseline ==
+[org-start] 2026-11-02T15:10:45.988Z baseline panes: wD:p1E wE:p36 wE:p1 wE:p12 wE:p2Q wE:p3B wF:p2 wF:p4 
+[org-start] 2026-11-02T15:10:45.990Z commit 71c6951, platform 210ed07
+[org-start] 2026-11-02T15:10:45.990Z temp work dir /tmp/pgorg-probe.IoX2Vt
+[org-start] 2026-11-02T15:10:45.991Z isolated settings: /tmp/pgorg-probe.IoX2Vt/agent/settings.json names the same package as ~/.pi/agent/settings.json
+[org-start] 2026-11-02T15:10:45.992Z == 1. unconfigured root pane ==
+[org-start] 2026-11-02T15:10:46.030Z tab wE:t27, root pane wE:p3J (not focused)
+[org-start] 2026-11-02T15:10:49.951Z root agent start: {"id":"cli:agent:start","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","focused":false,"foreground_cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","interactive_ready":true,"name":"probe-root","pane_id":
+[org-start] 2026-11-02T15:10:49.953Z root idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","focused":false,"foreground_cwd":"/tmp/pgor
+[org-start] 2026-11-02T15:10:49.973Z pg tools visible before the call: 'pg_org_start'
+[org-start] 2026-11-02T15:10:49.974Z PASS  1.0 unconfigured session has only pg_org_start
+[org-start] 2026-11-02T15:10:49.993Z PASS  1.0b root pane has no PIGROUPS_URL/PIGROUPS_TOKEN
+[org-start] 2026-11-02T15:10:50.263Z == 1a. call pg_org_start ==
+[org-start] 2026-11-02T15:10:50.263Z prompt: Call the pg_org_start tool exactly once with name="probe-root". Do not pass platform_dir or any other argument. Do not call any other tool. Then report its JSON result verbatim and stop.
+[org-start] 2026-11-02T15:10:54.769Z org-start turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":544,"cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","focused":false,"foreground_cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","interactive_ready":true,"name":"
+[org-start] 2026-11-02T15:10:54.891Z org.json: url=http://127.0.0.1:45307 pid=650523 data_dir=/tmp/pgorg-probe.IoX2Vt/adapter/platform-data root=m_94c01b
+[org-start] 2026-11-02T15:10:54.895Z PASS  1.1 platform answers /v1/health
+[org-start] 2026-11-02T15:10:54.896Z PASS  1.2 detached platform writes /tmp/pgorg-probe.IoX2Vt/adapter/platform-data/platform.log
+[org-start] 2026-11-02T15:10:54.897Z PASS  1.2b org.json is 0600
+[org-start] 2026-11-02T15:10:54.922Z PASS  1.3 tool answer names the URL and reattached=false
+[org-start] 2026-11-02T15:10:54.939Z PASS  1.4 session is the root
+[org-start] 2026-11-02T15:10:55.272Z == 1b. tools after success ==
+[org-start] 2026-11-02T15:10:55.289Z pi's active pg tools after the call: 'pg_abort,pg_children,pg_inspect,pg_members,pg_org_start,pg_read,pg_say,pg_schedule,pg_spawn,pg_terminate,pg_whoami'
+[org-start] 2026-11-02T15:10:57.416Z model says pg tools now: pg_abort, pg_children, pg_inspect, pg_members, pg_org_start, pg_read, pg_say, pg_schedule, pg_spawn, pg_terminate, pg_whoami 
+[org-start] 2026-11-02T15:10:57.417Z == 2. root spawns one child ==
+[org-start] 2026-11-02T15:10:57.419Z prompt: Call pg_spawn exactly once with name="probe-child" and this brief: "You are probe-child, a member of this PiGroups organisation. Call pg_say exactly once with to="g:m_94c01b" and text="probe-child joined the same platform and answered". Then stop." Do not call any other tool before pg_spawn. After it returns, report the member id and stop.
+[org-start] 2026-11-02T15:11:04.627Z spawn turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":549,"cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","focused":false,"foreground_cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","interactive_ready":true,"name":"
+[org-start] 2026-11-02T15:11:04.650Z child member m_629162
+[org-start] 2026-11-02T15:11:04.651Z PASS  2.1 pg_spawn created a child under the root
+[org-start] 2026-11-02T15:11:04.686Z child pane wE:p3K, pid 650880
+[org-start] 2026-11-02T15:11:05.049Z PASS  2.2 child called pg_say and got a successful result
+[org-start] 2026-11-02T15:11:05.109Z PASS  2.3 the child's answer is visible in the group
+[org-start] 2026-11-02T15:11:05.110Z == 3. the organisation outlives the root session ==
+[org-start] 2026-11-02T15:11:05.150Z root pi pid 650346; child last_seen_at before kill 1793632260997
+[org-start] 2026-11-02T15:11:05.252Z PASS  3.1 root pi process is gone
+[org-start] 2026-11-02T15:11:08.257Z PASS  3.2 platform still answers after the root session died
+[org-start] 2026-11-02T15:11:24.483Z PASS  3.3 child's last_seen_at advanced after the root died: 1793632260997 -> 1793632284427
+[org-start] 2026-11-02T15:11:24.487Z == 4. a later unconfigured session reattaches ==
+[org-start] 2026-11-02T15:11:28.447Z reattach session pg tools before call: 'pg_org_start'
+[org-start] 2026-11-02T15:11:28.448Z PASS  4.1 later session starts with only pg_org_start
+[org-start] 2026-11-02T15:11:28.475Z platform instances before reattach: 650523 /usr/bin/node /home/yang/Documents/PiGroups/src/main.ts 
+[org-start] 2026-11-02T15:11:32.282Z reattach turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":553,"cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","focused":false,"foreground_cwd":"/tmp/pgorg-probe.IoX2Vt/scratch","interactive_ready":true,"name":"
+[org-start] 2026-11-02T15:11:32.390Z platform instances after reattach: 650523 /usr/bin/node /home/yang/Documents/PiGroups/src/main.ts 
+[org-start] 2026-11-02T15:11:32.391Z PASS  4.2 tool says reattached=true
+[org-start] 2026-11-02T15:11:32.392Z PASS  4.3 URL unchanged (http://127.0.0.1:45307)
+[org-start] 2026-11-02T15:11:32.393Z PASS  4.4 platform pid unchanged (650523)
+[org-start] 2026-11-02T15:11:32.393Z PASS  4.5 exactly one platform process for the data dir
+[org-start] 2026-11-02T15:11:32.411Z reattach pi pid 651843
+[org-start] 2026-11-02T15:11:32.680Z == 5. cleanup starts (trap) ==
+[org-start] 2026-11-02T15:11:32.681Z SUMMARY failed=0
+[org-start] 2026-11-02T15:11:32.681Z == cleanup ==
+[org-start] 2026-11-02T15:11:32.706Z closed pane wE:p3K (exit 0)
+[org-start] 2026-11-02T15:11:32.732Z closed pane wE:p3M (exit 0)
+[org-start] 2026-11-02T15:11:32.737Z closed pane wE:p3J (exit 0)
+[org-start] 2026-11-02T15:11:32.738Z closed tab wE:t27 (exit 1)
+[org-start] 2026-11-02T15:11:32.869Z platform pid 650523 stopped
+[org-start] 2026-11-02T15:11:32.897Z final platform instances: 
+pane diff: added=[] missing=[]
+[org-start] 2026-11-02T15:11:32.915Z temp work dir /tmp/pgorg-probe.IoX2Vt kept for inspection? yes
+[org-start] 2026-11-02T15:11:32.916Z driver exit 0

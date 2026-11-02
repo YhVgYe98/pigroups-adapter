@@ -1,0 +1,4 @@
+baseline: wD:p1E wE:p1 wE:p12 wE:p2Q wE:p36 wE:p3B wF:p2 wF:p4
+final:    wD:p1E wE:p1 wE:p12 wE:p2Q wE:p36 wE:p3B wF:p2 wF:p4
+added:    
+missing:  

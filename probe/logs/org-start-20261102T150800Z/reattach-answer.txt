@@ -1,0 +1,11 @@
+{
+  "already_member": false,
+  "reattached": true,
+  "url": "http://127.0.0.1:45307",
+  "root": {
+    "id": "m_94c01b",
+    "name": "probe-root"
+  },
+  "data_dir": "/tmp/pgorg-probe.IoX2Vt/adapter/platform-data",
+  "pid": 650523
+}

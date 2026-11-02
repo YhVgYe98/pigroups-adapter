@@ -1,0 +1,58 @@
+[org-start] 2026-11-02T15:07:51.388Z == 0. baseline ==
+[org-start] 2026-11-02T15:07:51.570Z baseline panes: wD:p1E wE:p36 wE:p1 wE:p12 wE:p2Q wE:p3B wF:p2 wF:p4 
+[org-start] 2026-11-02T15:07:51.573Z commit 71c6951, platform 210ed07
+[org-start] 2026-11-02T15:07:51.574Z temp work dir /tmp/pgorg-probe.rJvEWI
+[org-start] 2026-11-02T15:07:51.574Z isolated settings: /tmp/pgorg-probe.rJvEWI/agent/settings.json names the same package as ~/.pi/agent/settings.json
+[org-start] 2026-11-02T15:07:51.575Z == 1. unconfigured root pane ==
+[org-start] 2026-11-02T15:07:51.609Z tab wE:t25, root pane wE:p3D (not focused)
+[org-start] 2026-11-02T15:07:55.530Z root agent start: {"id":"cli:agent:start","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgorg-probe.rJvEWI/scratch","focused":false,"foreground_cwd":"/tmp/pgorg-probe.rJvEWI/scratch","interactive_ready":true,"name":"probe-root","pane_id":
+[org-start] 2026-11-02T15:07:55.532Z root idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgorg-probe.rJvEWI/scratch","focused":false,"foreground_cwd":"/tmp/pgor
+[org-start] 2026-11-02T15:07:55.562Z pg tools visible before the call: ''
+[org-start] 2026-11-02T15:07:55.562Z FAIL  1.0 expected only pg_org_start, saw ''
+[org-start] 2026-11-02T15:07:55.580Z PASS  1.0b root pane has no PIGROUPS_URL/PIGROUPS_TOKEN
+[org-start] 2026-11-02T15:07:55.849Z == 1a. call pg_org_start ==
+[org-start] 2026-11-02T15:07:55.850Z prompt: Call the pg_org_start tool exactly once with name="probe-root". Do not pass platform_dir or any other argument. Do not call any other tool. Then report its JSON result verbatim and stop.
+[org-start] 2026-11-02T15:08:00.956Z org-start turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":518,"cwd":"/tmp/pgorg-probe.rJvEWI/scratch","focused":false,"foreground_cwd":"/tmp/pgorg-probe.rJvEWI/scratch","interactive_ready":true,"name":"
+[org-start] 2026-11-02T15:08:01.056Z org.json: url=http://127.0.0.1:37669 pid=645514 data_dir=/tmp/pgorg-probe.rJvEWI/adapter/platform-data root=m_6cab9d
+[org-start] 2026-11-02T15:08:01.060Z PASS  1.1 platform answers /v1/health
+[org-start] 2026-11-02T15:08:01.060Z PASS  1.2 detached platform writes /tmp/pgorg-probe.rJvEWI/adapter/platform-data/platform.log
+[org-start] 2026-11-02T15:08:01.062Z PASS  1.2b org.json is 0600
+[org-start] 2026-11-02T15:08:01.084Z PASS  1.3 tool answer names the URL and reattached=false
+[org-start] 2026-11-02T15:08:01.100Z PASS  1.4 session is the root
+[org-start] 2026-11-02T15:08:01.435Z == 1b. tools after success ==
+[org-start] 2026-11-02T15:08:01.467Z pi's active pg tools after the call: ''
+[org-start] 2026-11-02T15:08:01.468Z FAIL  1.5 pg_say is not active after success
+[org-start] 2026-11-02T15:08:01.469Z FAIL  1.5 pg_members is not active after success
+[org-start] 2026-11-02T15:08:01.470Z FAIL  1.5 pg_spawn is not active after success
+[org-start] 2026-11-02T15:08:01.471Z FAIL  1.5 pg_terminate is not active after success
+[org-start] 2026-11-02T15:08:01.472Z FAIL  1.5 pg_children is not active after success
+[org-start] 2026-11-02T15:08:01.473Z FAIL  1.5 pg_inspect is not active after success
+[org-start] 2026-11-02T15:08:01.474Z FAIL  1.5 pg_whoami is not active after success
+[org-start] 2026-11-02T15:08:01.475Z FAIL  1.5 pg_abort is not active after success
+[org-start] 2026-11-02T15:08:01.476Z FAIL  1.5 pg_schedule is not active after success
+[org-start] 2026-11-02T15:08:01.477Z FAIL  1.5 pg_read is not active after success
+[org-start] 2026-11-02T15:08:05.799Z model says pg tools now: pg_org_start, pg_members, pg_say, pg_children, pg_inspect, pg_abort, pg_schedule, pg_read, pg_spawn, pg_terminate, pg_whoami 
+[org-start] 2026-11-02T15:08:05.799Z == 2. root spawns one child ==
+[org-start] 2026-11-02T15:08:05.801Z prompt: Call pg_spawn exactly once with name="probe-child" and this brief: "You are probe-child, a member of this PiGroups organisation. Call pg_say exactly once with to="g:m_6cab9d" and text="probe-child joined the same platform and answered". Then stop." Do not call any other tool before pg_spawn. After it returns, report the member id and stop.
+[org-start] 2026-11-02T15:08:14.210Z spawn turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":523,"cwd":"/tmp/pgorg-probe.rJvEWI/scratch","focused":false,"foreground_cwd":"/tmp/pgorg-probe.rJvEWI/scratch","interactive_ready":true,"name":"
+[org-start] 2026-11-02T15:08:14.230Z child member m_50e638
+[org-start] 2026-11-02T15:08:14.231Z PASS  2.1 pg_spawn created a child under the root
+[org-start] 2026-11-02T15:08:14.264Z child pane wE:p3E, pid 645884
+[org-start] 2026-11-02T15:08:14.613Z PASS  2.2 child called pg_say
+[org-start] 2026-11-02T15:08:14.677Z PASS  2.3 the child's answer is visible in the group
+[org-start] 2026-11-02T15:08:14.677Z == 3. the organisation outlives the root session ==
+[org-start] 2026-11-02T15:08:14.715Z root pi pid 645337; child last_seen_at before kill 1793632091269
+[org-start] 2026-11-02T15:08:14.816Z PASS  3.1 root pi process is gone
+[org-start] 2026-11-02T15:08:17.821Z PASS  3.2 platform still answers after the root session died
+[org-start] 2026-11-02T15:08:33.999Z PASS  3.3 child's last_seen_at advanced after the root died: 1793632091269 -> 1793632113695
+[org-start] 2026-11-02T15:08:34.003Z == 4. a later unconfigured session reattaches ==
+[org-start] 2026-11-02T15:08:34.023Z FATAL: reattach pane split returned no pane id: 
+[org-start] 2026-11-02T15:08:34.024Z == cleanup ==
+[org-start] 2026-11-02T15:08:34.050Z closed pane wE:p3E (exit 0)
+[org-start] 2026-11-02T15:08:34.055Z closed pane wE:p3D (exit 0)
+[org-start] 2026-11-02T15:08:34.057Z closed tab wE:t25 (exit 1)
+[org-start] 2026-11-02T15:08:34.183Z platform pid 645514 stopped
+[org-start] 2026-11-02T15:08:34.211Z final platform instances: 
+pane diff: added=[] missing=[]
+[org-start] 2026-11-02T15:08:34.228Z temp work dir /tmp/pgorg-probe.rJvEWI kept for inspection? yes
+[org-start] 2026-11-02T15:08:34.228Z driver exit 2

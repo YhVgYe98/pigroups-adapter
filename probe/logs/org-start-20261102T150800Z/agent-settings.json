@@ -1,0 +1,8 @@
+{
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek-flash",
+  "packages": [
+    "/home/yang/Documents/pigroups-adapter"
+  ],
+  "lastChangelogVersion": "1.4.0"
+}

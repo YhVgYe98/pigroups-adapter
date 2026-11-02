@@ -1,0 +1,7 @@
+commit: 71c695169bc730c535aa4bd944d839480ddf03fe
+version: 0.6.0+platform.0.2.0
+pi: 1.4.0
+herdr: herdr 0.9.5
+platform: 210ed07e4d2b3f7dce61d26b45a656636938b2a4
+setting package entry: ../../Documents/pigroups-adapter
+?? probe/logs/org-start-20261102T150800Z/

@@ -1,0 +1,17 @@
+User packages:
+  npm:pi-web-access
+    /home/yang/.pi/agent/npm/node_modules/pi-web-access
+  npm:pi-subagents
+    /home/yang/.pi/agent/npm/node_modules/pi-subagents
+  npm:@juicesharp/rpiv-ask-user-question
+    /home/yang/.pi/agent/npm/node_modules/@juicesharp/rpiv-ask-user-question
+  npm:@juicesharp/rpiv-todo
+    /home/yang/.pi/agent/npm/node_modules/@juicesharp/rpiv-todo
+  npm:pi-intercom
+    /home/yang/.pi/agent/npm/node_modules/pi-intercom
+  npm:@quintinshaw/pi-dynamic-workflows
+    /home/yang/.pi/agent/npm/node_modules/@quintinshaw/pi-dynamic-workflows
+  npm:pi-straw-boss
+    /home/yang/.pi/agent/npm/node_modules/pi-straw-boss
+  ../../Documents/pigroups-adapter
+    /home/yang/Documents/pigroups-adapter

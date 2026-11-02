@@ -1,0 +1,16 @@
+JSON result verbatim:
+
+```json
+{
+  "already_member": false,
+  "reattached": false,
+  "url": "http://127.0.0.1:45307",
+  "root": {
+    "id": "m_94c01b",
+    "name": "probe-root"
+  },
+  "data_dir": "/tmp/pgorg-probe.IoX2Vt/adapter/platform-data",
+  "platform_dir": "/home/yang/Documents/PiGroups",
+  "pid": 650523
+}
+```
