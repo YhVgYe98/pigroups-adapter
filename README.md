@@ -18,11 +18,43 @@ spawn (`args`); it does not mirror pi's flags, so `pi --help` is the reference. 
   version step otherwise. `v0.5.0+platform.0.2.0` is the adapter alone, on platform 0.2.0;
   the metadata records what it was tested against and is not a compatibility gate.
 
+## Install it into pi
+
+```bash
+pi install /absolute/path/to/pigroups-adapter    # personal: written to ~/.pi/agent/settings.json
+pi list                                          # should show pigroups-adapter-pi
+```
+
+That is the only installation step: the manifest under `pi` in `package.json` declares the
+extension entry and the two skills (`pigroups-org`, `pigroups-message`). Without `PIGROUPS_URL`
+and `PIGROUPS_TOKEN` in its environment a session does nothing at all, so installing it
+personally is safe on a machine that also runs unrelated pi sessions.
+
+Once installed, a member is just a pi started with those two variables set - and a child spawned
+by `pg_spawn` inherits them, so nothing else needs configuring.
+
+## Clone for development
+
+The test suite boots the **platform** as a subprocess, so the two repositories are developed side
+by side:
+
+```
+your-workspace/
+├── PiGroups/            # the platform (separate repo)
+└── pigroups-adapter/    # this repo
+```
+
+`PIGROUPS_PLATFORM_DIR` overrides where the tests look (default `../PiGroups`).
+
 ```bash
 npm install
 npm test
 npm run typecheck
 ```
+
+`probe/logs/` holds real-machine evidence from past runs. Some of those files contain credentials
+of throwaway platforms that were started on localhost and deleted; they are dead, and they are
+kept because they are the record. Delete the directory before publishing anything widely.
 
 The adapter talks to a platform over HTTP; `PIGROUPS_PLATFORM_DIR` (default `../PiGroups`) is the checkout the tests boot.
 
