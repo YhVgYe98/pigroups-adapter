@@ -1,6 +1,7 @@
 # PiGroups Pi adapter
 
-A Pi extension that turns a pi session into one member of a PiGroups workspace.
+A Pi extension that turns a pi session into one member of a PiGroups workspace — or,
+when the session has no identity yet, lets it start the organisation and become its root.
 
 A spawned member loads this same extension by default (`pi -e <this file>`); it is
 otherwise a normal pi session, with the operator's tools, skills, prompt templates,
@@ -15,10 +16,10 @@ spawn (`args`); it does not mirror pi's flags, so `pi --help` is the reference. 
   ids, mentions, no polling). Registered under `pi.skills` and shipped with the package.
 - `CHANGELOG.md` — version policy and per-version changes (Chinese). A release records one
   pair: both sides share a number when both move, and only the side that changed takes the
-  version step otherwise. `v0.5.0+platform.0.2.0` is the adapter alone, on platform 0.2.0;
+  version step otherwise. `v0.6.0+platform.0.2.0` is the adapter alone, on platform 0.2.0;
   the metadata records what it was tested against and is not a compatibility gate.
 
-## Install it into pi
+## Quick start: ask the agent to start an org
 
 ```bash
 pi install /absolute/path/to/pigroups-adapter    # personal: written to ~/.pi/agent/settings.json
@@ -26,12 +27,27 @@ pi list                                          # should show pigroups-adapter-
 ```
 
 That is the only installation step: the manifest under `pi` in `package.json` declares the
-extension entry and the two skills (`pigroups-org`, `pigroups-message`). Without `PIGROUPS_URL`
-and `PIGROUPS_TOKEN` in its environment a session does nothing at all, so installing it
-personally is safe on a machine that also runs unrelated pi sessions.
+extension entry and the two skills (`pigroups-org`, `pigroups-message`).
 
-Once installed, a member is just a pi started with those two variables set - and a child spawned
-by `pg_spawn` inherits them, so nothing else needs configuring.
+Then start `pi` and ask for an organisation:
+
+> Start a PiGroups organisation named `release-2026` and then ...
+
+A session with no identity gets exactly one tool, `pg_org_start`. It finds the platform
+checkout (`platform_dir` argument, else `PIGROUPS_PLATFORM_DIR`, else `../PiGroups` next to
+this repository), starts the platform detached, bootstraps a root, writes
+`<adapter dir>/org.json`, and only then registers the ten member tools (`pg_say`, `pg_spawn`,
+`pg_members`, ...). The platform is started **by the agent**, not by hand, and it outlives the
+session: a later session with the same adapter directory reattaches through the same tool
+instead of starting a second platform.
+
+A member that was **handed an identity** is the other path: start pi with `PIGROUPS_URL` and
+`PIGROUPS_TOKEN` in its environment. It registers the ten member tools at startup and does not
+get `pg_org_start` at all. A child spawned by `pg_spawn` inherits both variables, so nothing
+else needs configuring for the tree below the root.
+
+`PIGROUPS_ADAPTER_DIR` (default `~/.pigroups-adapter`) holds the journal, the per-member
+state, `org.json`, and by default the platform's data directory.
 
 ## Clone for development
 
@@ -44,7 +60,8 @@ your-workspace/
 └── pigroups-adapter/    # this repo
 ```
 
-`PIGROUPS_PLATFORM_DIR` overrides where the tests look (default `../PiGroups`).
+`PIGROUPS_PLATFORM_DIR` overrides where the tests (and `pg_org_start`) look (default
+`../PiGroups` next to this repository).
 
 ```bash
 npm install

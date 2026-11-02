@@ -39,6 +39,11 @@ export interface CreatedMember {
   token?: string;
 }
 
+export interface BootstrappedRoot {
+  member: MemberRecord;
+  token: string;
+}
+
 export interface Conversation {
   to: string;
   kind: 'group' | 'dm';
@@ -209,6 +214,15 @@ export class PgClient {
 
   async whoami(): Promise<WhoamiMember> {
     return this.request<WhoamiMember>('GET', '/v1/whoami');
+  }
+
+  /**
+   * Claim the root seat of a fresh platform (`POST /v1/bootstrap`, platform §10.2).
+   * Auth is not required by the platform, but the caller passes the admin token as
+   * the bearer so that a platform which starts checking it keeps working.
+   */
+  async bootstrap(input: { name?: string } = {}): Promise<BootstrappedRoot> {
+    return this.request<BootstrappedRoot>('POST', '/v1/bootstrap', { body: input });
   }
 
   async createMember(input: { name?: string; request_id: string }): Promise<CreatedMember> {

@@ -1,3 +1,62 @@
+## v0.6.0+platform.0.2.0（2026-11-02，与平台 0.2.0 配套）
+
+**适配器的 minor。** `0.5.2 → 0.6.0`，平台不动（仍是 `0.2.0`）。工具面新增一员，所以按本文件
+的版本策略升 minor。
+
+**问题（真机试用 + 上级否决）。** 以前根必须由人装配：人起平台、`POST /v1/bootstrap`、再带
+`PIGROUPS_URL` / `PIGROUPS_TOKEN` 启动 pi。没有这两个变量的会话**一个工具都没有**——skill
+装着、模型却只能退回 `subagent`，而且没有人当场发现。上一版只加了 skill 守卫（"明说你不是
+成员"），这一版把"自己把组织开出来"变成工具。
+
+**新增 `pg_org_start(name?, port?, data_dir?, platform_dir?)`。**
+
+- **只在没有身份的会话里注册。** 有 `PIGROUPS_URL` + `PIGROUPS_TOKEN` 的会话**不注册**它：
+  一个已经是成员的会话若能再开一个平台，就会出现两个 poll 抢同一个 token（平台对同成员的
+  并发 poll 回 409），或者把原来的组织丢在没有会话可达的地方。这个决定写进了工具描述。
+- 没有身份时它是**唯一**的工具：不轮询、不联网、不注册别的工具，直到它被调用。
+- 幂等：`<adapterDir>/org.json` 记录 `{url, token, admin_token, pid, data_dir}`；平台还健康、
+  token 还能认证就**重接**，不启动第二个平台。并发调用用 `<adapterDir>/org.lock` 串行化。
+- 找平台代码：`platform_dir` → `PIGROUPS_PLATFORM_DIR` → 适配器仓库旁的 `../PiGroups` →
+  `../../PiGroups`；判据是 `src/main.ts`。全找不到时错误列出每一个候选路径与来源。
+- 起平台：`node <platform>/src/main.ts`，detached + unref，stdout/stderr 进
+  `<data_dir>/platform.log`，env 带 `PORT`、`PIGROUPS_DATA`、生成的 `PIGROUPS_ADMIN_TOKEN`。
+  **平台比根 session 活得久**：`session_shutdown` 只停循环，不碰平台。
+- 失败清理：bootstrap 失败（或 health 超时）会停掉刚起的平台，不写 `org.json`，错误里带 pid
+  与日志路径。记录里的 pid 仍然活着但不答 health 时，先确认它确实是本平台再停；确认不了就
+  报错拒绝在同一个数据目录上起第二个进程。
+- 成功后构造与普通成员相同的 `PiSurface` / `PgClient` / `Herdr` / `AdapterLoop`，注册其余
+  十个工具，并当场启动循环。
+
+**接口变化。**
+
+| 接口 | 变化 |
+|---|---|
+| 工具面 | 新增 `pg_org_start`；**只在无身份会话**里出现，成员会话仍是十个工具 |
+| `PgClient` | 新增 `bootstrap({name?})`（`POST /v1/bootstrap`，平台 §10.2） |
+| `src/org.ts` | 新模块：`startOrg`、`findPlatformDir`、`platformCandidates`、`readOrgState`、`OrgStartError`；不依赖 pi |
+| `src/extension.ts` | 工厂从"无配置直接 return"改成两条路：有身份 → 十个成员工具 + `session_start` 启动；无身份 → 只注册 `pg_org_start`，成功后补注册并启动 |
+
+**测试。** 125 → 132 条，`npm run typecheck` 干净，`npm test` 132/132。新增七条，全部在旧
+`src` 上真红过（每次只改一处 `src`，跑 `test/orgstart.test.ts`）：
+
+| 守的行为 | 只回退哪一处 | 红在哪 |
+|---|---|---|
+| 无身份会话只有 `pg_org_start` | 工厂恢复成无配置 `return` | "the extension must register pg_org_start" / 工具列表为空 |
+| 有身份会话没有 `pg_org_start` | 注册成员工具时不注册 | "the configured surface is still the ten member tools" |
+| 开组织后成为根、工具补齐、循环在跑 | 不构造 `AdapterLoop` / 不 `start()` | "the adapter state exists, so start() ran" |
+| 第二个会话重接同一个平台 | 跳过 `org.json` 的 health+whoami 分支 | "the URL did not move: no second platform was started" |
+| 找不到平台时列全候选 | 错误只报第一个候选 | "the message lists /tmp/…" |
+| bootstrap 失败杀掉刚起的平台 | 去掉 catch 里的 `stopChild` | "the platform at http://… is still answering" |
+| 记录里的 pid 不是本平台时绝不发信号 | `looksLikePlatformProcess` 直接返回 true | 测试进程自己收到 SIGTERM，整份文件 "test failed" |
+
+**文档与 skill。** `docs/概念稿.md` 把"开组织"写成与"拿环境变量入会"并列的入会路径，并重写
+§7.4（开组织不是注册成员）；`docs/设计说明.md` 新增 `pg_org_start` 的步骤、`org.json`、生命周期
+与失败模式（§8.2–8.5）；README 的 quick start 改成"装包、起 pi、让 agent 开一个组织"；两个
+skill 的守卫改成三态（成员 / 只有 `pg_org_start` / 一个都没有），`pigroups-org` 增加 §0
+"根的第一件事"。
+
+---
+
 ## v0.5.2（2026-11-02，与平台 0.2.0 配套）
 
 补丁。修一次真实试用暴露的问题：**skill 被加载了，而 `pg_*` 工具没有**（那个会话启动时没有

@@ -6,17 +6,17 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { shellQuote } from './command.ts';
 import { AdapterLoop } from './loop.ts';
 import type { LoopConfig } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
+import { defaultAdapterDir, startOrg } from './org.ts';
+import type { OrgHandle } from './org.ts';
 import { PgClient } from './pgclient.ts';
 import { PiSurfaceAdapter } from './surface.ts';
-import type { PiLike, PiToolDefinition } from './surface.ts';
+import type { PiContext, PiLike, PiToolDefinition } from './surface.ts';
 import { ADAPTER_VERSION } from './version.ts';
 
 const EXIT_REPORT_TIMEOUT_MS = 2000;
@@ -46,10 +46,99 @@ export function resolveSpawnCmd(
 }
 
 export default function pigroupsExtension(pi: PiLike): void {
-  // §7: the same extension is installed in every session; only members pull.
+  // Two entry paths, one member session.
+  //
+  // Configured (概念稿 §7.4): the session was handed an identity, so the ten member
+  // tools exist and `session_start` starts the loop. `pg_org_start` is deliberately
+  // NOT registered here: this session already belongs to a platform, and a tool that
+  // could conjure a second organisation from inside a member would be a way to end up
+  // polling two platforms with one identity (or to orphan the one it belongs to).
+  //
+  // Unconfigured: exactly one tool, `pg_org_start`. Nothing polls, nothing calls out,
+  // and no other tool exists until that tool has succeeded. On success it builds the
+  // same member session the configured path builds and starts it on the spot (the
+  // `session_start` event has already fired by the time a tool can run).
   const config = readConfig();
-  if (!config) return;
+  let session: MemberSession | undefined;
+  let org: OrgHandle | undefined;
 
+  if (config !== null) {
+    session = openMemberSession(pi, config);
+    pi.on('session_start', (_event, ctx) => session?.start(ctx));
+  } else {
+    pi.registerTool({
+      name: 'pg_org_start',
+      label: 'PiGroups start organisation',
+      description:
+        'Start a PiGroups organisation and make this session its root. This tool exists only in a ' +
+        'session that has no identity yet: a session started with PIGROUPS_URL and PIGROUPS_TOKEN already ' +
+        'belongs to a platform, so it is not given this tool at all. It finds the platform checkout ' +
+        '(`platform_dir`, else PIGROUPS_PLATFORM_DIR, else ../PiGroups next to the adapter, else ' +
+        '../../PiGroups) and verifies it by src/main.ts; a failed lookup lists every candidate it tried. ' +
+        'If <adapter dir>/org.json records a healthy organisation it reattaches to that one instead of ' +
+        'starting a second platform. Otherwise it starts the platform detached (the organisation outlives ' +
+        'this session), waits for /v1/health, bootstraps a root and writes org.json. Idempotent: a second ' +
+        'call, from this session or a later one, reattaches. After success the member tools (pg_say, ' +
+        'pg_members, pg_spawn, ...) appear and this session is the root; if it fails, the platform it ' +
+        'started is stopped again.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Name for the root member (the organisation\u2019s first name).' },
+          port: { type: 'number', description: 'Local port for the platform; a free port by default.' },
+          data_dir: {
+            type: 'string',
+            description:
+              'Where the platform keeps its database and log. Defaults to <adapter dir>/platform-data; ' +
+              'reuse the recorded one when the platform process is gone but its organisation should return.',
+          },
+          platform_dir: {
+            type: 'string',
+            description: 'PiGroups checkout containing src/main.ts. Overrides PIGROUPS_PLATFORM_DIR and the defaults.',
+          },
+        },
+        additionalProperties: false,
+      },
+      execute: async (_id, params, _signal, _update, ctx) => {
+        if (session !== undefined && org !== undefined) {
+          // The loop already runs; a second start would create a second polling
+          // identity against the same token (platform poll is single-consumer).
+          return text(JSON.stringify({ already_member: true, ...orgAnswer(org, true) }, null, 2));
+        }
+        const started = await startOrg({
+          name: typeof params.name === 'string' && params.name !== '' ? params.name : undefined,
+          port: optionalPort(params.port),
+          dataDir: typeof params.data_dir === 'string' && params.data_dir !== '' ? params.data_dir : undefined,
+          platformDir:
+            typeof params.platform_dir === 'string' && params.platform_dir !== '' ? params.platform_dir : undefined,
+        });
+        org = started;
+        session = openMemberSession(pi, loopConfig(started.url, started.token));
+        session.start(ctx);
+        return text(JSON.stringify({ already_member: false, ...orgAnswer(started, started.reattached) }, null, 2));
+      },
+    });
+  }
+
+  pi.on('session_shutdown', async () => {
+    const active = session;
+    session = undefined;
+    if (!active) return;
+    await active.stop();
+  });
+}
+
+/**
+ * One member session: the PiSurface, the platform client, the herdr CLI, the ten
+ * member tools, and the loop. Building it twice would register the same tools twice
+ * and run two polls of one identity, so `start()` is idempotent.
+ */
+interface MemberSession {
+  start(ctx: PiContext): void;
+  stop(): Promise<void>;
+}
+
+function openMemberSession(pi: PiLike, config: LoopConfig): MemberSession {
   const surface = new PiSurfaceAdapter(pi);
   const pg = new PgClient({ url: config.url, token: config.token });
   const herdr = new HerdrCli({ spawnCmd: config.spawnCmd });
@@ -58,33 +147,58 @@ export default function pigroupsExtension(pi: PiLike): void {
 
   for (const tool of buildTools(() => loop, pg, surface)) pi.registerTool(tool);
 
-  pi.on('session_start', (_event, ctx) => {
-    surface.attachContext(ctx);
-    if (loop) return;
-    // The one startup line: which adapter this member is running, and against what.
-    console.log(`[pigroups] adapter ${ADAPTER_VERSION} starting against ${config.url}`);
-    loop = new AdapterLoop({ pg, surface, herdr, config, now: () => Date.now() });
-    loop.start();
-  });
+  return {
+    start(ctx: PiContext): void {
+      if (loop) return;
+      surface.attachContext(ctx);
+      // The one startup line: which adapter this member is running, and against what.
+      console.log(`[pigroups] adapter ${ADAPTER_VERSION} starting against ${config.url}`);
+      loop = new AdapterLoop({ pg, surface, herdr, config, now: () => Date.now() });
+      loop.start();
+    },
+    async stop(): Promise<void> {
+      const active = loop;
+      if (!active) return;
+      loop = undefined;
+      await reportExiting(pg);
+      await active.stop();
+    },
+  };
+}
 
-  pi.on('session_shutdown', async () => {
-    const active = loop;
-    if (!active) return;
-    loop = undefined;
-    await reportExiting(pg);
-    await active.stop();
-  });
+function orgAnswer(org: OrgHandle, reattached: boolean): Record<string, unknown> {
+  return {
+    reattached,
+    url: org.url,
+    root: org.root,
+    data_dir: org.dataDir,
+    ...(org.platformDir === undefined ? {} : { platform_dir: org.platformDir }),
+    pid: org.pid,
+  };
+}
+
+function optionalPort(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`port must be an integer between 1 and 65535, got ${String(raw)}`);
+  }
+  return port;
 }
 
 function readConfig(): LoopConfig | null {
   const url = process.env.PIGROUPS_URL;
   const token = process.env.PIGROUPS_TOKEN;
   if (!url || !token) return null;
+  return loopConfig(url, token);
+}
 
+/** The same wiring for both paths: a configured member and one that just started an org. */
+function loopConfig(url: string, token: string): LoopConfig {
   return {
     url,
     token,
-    adapterDir: process.env.PIGROUPS_ADAPTER_DIR ?? join(homedir(), '.pigroups-adapter'),
+    adapterDir: defaultAdapterDir(),
     pollLimit: envInt('PIGROUPS_POLL_LIMIT', 20),
     pollWait: envInt('PIGROUPS_POLL_WAIT', 25),
     attentionToolMs: envInt('PIGROUPS_ATTENTION_TOOL_MS', 300_000),
