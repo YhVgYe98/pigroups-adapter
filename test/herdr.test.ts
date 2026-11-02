@@ -20,7 +20,7 @@ async function fakeHerdr(dir: string, stderr: string, code: number): Promise<str
   return path;
 }
 
-test('waitReady() asks herdr for every started state, not just idle', async () => {
+test('waitReady() asks herdr for every state that means an agent was recognised', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
   try {
     // herdr reports a child that has finished a turn as `done`, never as `idle`; a wait
@@ -67,6 +67,8 @@ printf '%s\n' '{"id":"cli:agent:wait","result":{"agent_status":"done"}}'
       'done',
       '--until',
       'blocked',
+      '--until',
+      'working',
       '--timeout',
       '8000',
     ]);
@@ -235,8 +237,8 @@ test('spawn() appends extra argv after the configured base command, one word per
       `#!/bin/sh
 DIR=$(dirname "$0")
 case "$1 $2" in
-  "pane split")
-    printf '%s\n' '{"id":"cli:pane:split","result":{"pane":{"pane_id":"wE:pX"}}}'
+  "tab create")
+    printf '%s\n' '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wE:pX"},"tab":{"tab_id":"wE:tX"}}}'
     ;;
   "agent start")
     for arg in "$@"; do printf '%s\n' "$arg" >> "$DIR/start-argv"; done
@@ -279,8 +281,8 @@ test('the pane send-text fallback shell-quotes every appended word, including me
       `#!/bin/sh
 DIR=$(dirname "$0")
 case "$1 $2" in
-  "pane split")
-    printf '%s\n' '{"id":"cli:pane:split","result":{"pane":{"pane_id":"wE:pX"}}}'
+  "tab create")
+    printf '%s\n' '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wE:pX"},"tab":{"tab_id":"wE:tX"}}}'
     ;;
   "agent start")
     printf '%s\n' '{"error":{"code":"agent_start_failed","message":"no"},"id":"cli"}' >&2
@@ -313,6 +315,46 @@ esac
       'the shell reads back the env assignments, base command and extra argv as separate words',
     );
     assert.ok(line.includes(`'${nasty}'`), 'the metacharacter path is one single-quoted word');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// The boss's call: a spawned member gets its own tab in the same workspace, not a pane
+// squeezed next to whatever the operator is looking at.
+test('spawn() creates a tab, not a pane split, and starts the agent in that tab\'s root pane', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+printf '%s\\n' "$*" >> "$DIR/calls"
+case "$1 $2" in
+  "tab create")
+    printf '%s\\n' '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wE:pTAB"},"tab":{"tab_id":"wE:tT"}}}'
+    ;;
+  "agent start")
+    printf '%s\\n' '{"id":"cli:agent:start","result":{"ok":true}}'
+    ;;
+  *)
+    printf '%s\\n' '{"error":{"code":"unexpected_command","message":"unexpected"},"next":[1]}' >&2
+    exit 1
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    const { pane } = await herdr.spawn({ label: 'alpha', env: { A: '1' }, cwd: '/tmp' });
+
+    assert.equal(pane, 'wE:pTAB', 'the agent goes into the tab root pane');
+    const calls = (await readFile(join(dir, 'calls'), 'utf8')).trim().split('\n');
+    assert.ok(calls[0].startsWith('tab create'), `the first call must create a tab, got: ${calls[0]}`);
+    assert.ok(!calls.some((line) => line.startsWith('pane split')), 'a member must not be put in a split pane');
+    assert.ok(calls[1].includes('agent start'), 'the agent starts in the new tab');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

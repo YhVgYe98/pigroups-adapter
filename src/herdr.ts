@@ -19,16 +19,18 @@ export interface HerdrCloseResult {
 }
 
 export interface Herdr {
-  /** Create a pane in the workspace and start a pi in it. Returns the pane id. */
+  /** Create a tab in the workspace and start a pi in its root pane. Returns the pane id. */
   spawn(opts: {
     label: string;
     env: Record<string, string>;
     cwd?: string;
     /** Extra pi argv appended to the configured spawn command (already split into words). */
     args?: string[];
+    /** Cancels the herdr calls; the started process, if any, keeps running. */
+    signal?: AbortSignal;
   }): Promise<{ pane: string }>;
-  /** Wait until the agent in that pane has started (idle, done, or blocked in herdr terms). */
-  waitReady(pane: string, timeoutMs: number): Promise<void>;
+  /** Wait until herdr recognises an agent in that pane (any state except unknown). */
+  waitReady(pane: string, timeoutMs: number, signal?: AbortSignal): Promise<void>;
   /** Read the raw text of that pane (diagnostics and reporting only). */
   read(pane: string, lines: number): Promise<string>;
   /**
@@ -75,7 +77,7 @@ export class HerdrCli implements Herdr {
   }
 
   /**
-   * Environment reaches the agent through the pane: `herdr pane split --env`
+   * Environment reaches the agent through the tab: `herdr tab create --env`
    * sets it for the process herdr launches in that pane, and `agent start` runs
    * the agent in the same pane.
    *
@@ -90,8 +92,9 @@ export class HerdrCli implements Herdr {
     env: Record<string, string>;
     cwd?: string;
     args?: string[];
+    signal?: AbortSignal;
   }): Promise<{ pane: string }> {
-    const pane = await this.splitPane(opts);
+    const pane = await this.createTab({ env: opts.env, cwd: opts.cwd, label: opts.label, signal: opts.signal });
     const extraArgs = opts.args ?? [];
     try {
       await this.startAgent(pane, opts.label, extraArgs);
@@ -101,19 +104,18 @@ export class HerdrCli implements Herdr {
     return { pane };
   }
 
-  async waitReady(pane: string, timeoutMs: number): Promise<void> {
+  async waitReady(pane: string, timeoutMs: number, signal?: AbortSignal): Promise<void> {
     // The CLI flag is `--until` (herdr's API: AgentWaitParams.until) and it may be
     // repeated. Do not wait for one label: the brief is sent before the pane starts, so
     // a healthy child has usually already finished (or is in) its first turn, and herdr
     // reports a finished turn as `done`, not `idle`. Waiting only for `idle` times out
     // on that child (probe/logs/spawn-args-20261101T142926/ready-probe/).
     //
-    // These are the states herdr itself matches when no `--until` is given: `idle` and
-    // `done` both mean "started and not working", and `blocked` means a live agent is
-    // waiting for input or permission. Blocked is still up, so treating it as not-ready
-    // would repeat the same false failure under another label. `working` stays out: it
-    // is a started agent in the middle of a turn, and spawn readiness is not a promise
-    // that the child is quiet.
+    // Every state except `unknown` means herdr has recognised an agent in that pane, and that
+    // is the only thing this method now answers - it no longer decides whether the member is
+    // ready (D1 does, with the platform's `last_seen_at`). `working` therefore belongs in the
+    // list: a child that starts its first turn immediately is the normal case, and leaving it
+    // out made a healthy spawn time out after SPAWN_READY_MS.
     await this.run([
       'agent',
       'wait',
@@ -124,9 +126,11 @@ export class HerdrCli implements Herdr {
       'done',
       '--until',
       'blocked',
+      '--until',
+      'working',
       '--timeout',
       String(timeoutMs),
-    ]);
+    ], signal);
   }
 
   async read(pane: string, lines: number): Promise<string> {
@@ -174,15 +178,21 @@ export class HerdrCli implements Herdr {
     }
   }
 
-  private async splitPane(opts: { env: Record<string, string>; cwd?: string }): Promise<string> {
-    const args = ['pane', 'split', '--direction', 'down', '--no-focus'];
+  /**
+   * A member gets its own tab in the same workspace, not a pane beside whatever the operator
+   * was looking at: a teammate running for minutes should not squeeze the work the human is
+   * doing. `tab create` carries the same `--cwd` / `--env` as `pane split` and answers with the
+   * tab's root pane, which is the pane the agent goes into.
+   */
+  private async createTab(opts: { env: Record<string, string>; cwd?: string; label: string; signal?: AbortSignal }): Promise<string> {
+    const args = ['tab', 'create', '--no-focus', '--label', opts.label];
     if (opts.cwd) args.push('--cwd', opts.cwd);
     for (const [key, value] of Object.entries(opts.env)) args.push('--env', `${key}=${value}`);
 
-    const envelope = await this.run(args);
-    const pane = asRecord(envelope?.pane);
-    const paneId = typeof pane?.pane_id === 'string' ? pane.pane_id : envelope?.pane_id;
-    if (typeof paneId !== 'string') throw new Error('herdr pane split returned no pane id');
+    const envelope = await this.run(args, opts.signal);
+    const root = asRecord(envelope?.root_pane);
+    const paneId = typeof root?.pane_id === 'string' ? root.pane_id : undefined;
+    if (paneId === undefined) throw new Error('herdr tab create returned no root pane id');
     return paneId;
   }
 
@@ -204,12 +214,12 @@ export class HerdrCli implements Herdr {
     return [...assigned, this.spawnCmd, ...extraArgs.map(shellQuote)].join(' ');
   }
 
-  private async run(args: string[]): Promise<Record<string, unknown> | null> {
+  private async run(args: string[], signal?: AbortSignal): Promise<Record<string, unknown> | null> {
     const stdout = await new Promise<string>((resolve, reject) => {
       execFile(
         this.command,
         args,
-        { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
+        { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, ...(signal === undefined ? {} : { signal }) },
         (error, out, errOut) => {
           if (error) {
             // herdr writes its error envelope to stderr and exits non-zero (`herdr

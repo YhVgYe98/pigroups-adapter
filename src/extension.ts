@@ -99,7 +99,7 @@ export default function pigroupsExtension(pi: PiLike): void {
         },
         additionalProperties: false,
       },
-      execute: async (_id, params, _signal, _update, ctx) => {
+      execute: async (_id, params, signal, _update, ctx) => {
         if (session !== undefined && org !== undefined) {
           // The loop already runs; a second start would create a second polling
           // identity against the same token (platform poll is single-consumer).
@@ -111,6 +111,7 @@ export default function pigroupsExtension(pi: PiLike): void {
           dataDir: typeof params.data_dir === 'string' && params.data_dir !== '' ? params.data_dir : undefined,
           platformDir:
             typeof params.platform_dir === 'string' && params.platform_dir !== '' ? params.platform_dir : undefined,
+          signal,
         });
         org = started;
         session = openMemberSession(pi, loopConfig(started.url, started.token));
@@ -172,6 +173,9 @@ function orgAnswer(org: OrgHandle, reattached: boolean): Record<string, unknown>
     url: org.url,
     root: org.root,
     data_dir: org.dataDir,
+    // Where this organisation's record lives. Two roots on one machine are two
+    // records under <adapter dir>/orgs/<key>/, and a person debugging needs the path.
+    org_file: org.orgFile,
     ...(org.platformDir === undefined ? {} : { platform_dir: org.platformDir }),
     pid: org.pid,
   };
@@ -413,8 +417,9 @@ function buildTools(
         required: ['brief'],
         additionalProperties: false,
       },
-      execute: async (_id, params) => {
+      execute: async (_id, params, signal) => {
         const spawned = await requireLoop().spawnMember({
+          signal,
           name: typeof params.name === 'string' ? params.name : undefined,
           brief: String(params.brief),
           cwd: typeof params.cwd === 'string' ? params.cwd : undefined,

@@ -213,6 +213,10 @@ function yieldOnce(): Promise<void> {
 }
 const DEFAULT_INSPECT_TIMEOUT_MS = 10_000;
 const SPAWN_READY_MS = 120_000;
+/** How often D1 is checked while a child starts. Its first poll lands in well under a second. */
+const READY_POLL_MS = 150;
+/** Only used to word the failure: "process never appeared" vs "it started and cannot reach us". */
+const READY_DIAGNOSTIC_MS = 3000;
 
 type AttentionExtra = { tool?: AttentionTool; owed?: string[]; note?: string; busy_ms?: number };
 
@@ -630,12 +634,58 @@ export class AdapterLoop {
     this.blockedReported.delete(conv);
   }
 
+  /**
+   * D1 (§8 of the concept): a member is ready when **the platform has seen it authenticate**,
+   * not when herdr reports one of its own UI labels. `last_seen_at` is stamped on the child's
+   * very first request, so this returns in about a second - and it is true for a child that is
+   * already in the middle of its first turn, which is the normal case because the brief is sent
+   * before the pane starts.
+   *
+   * herdr is asked only as a diagnostic: "did a process ever appear". A child that authenticates
+   * while herdr fails to recognise it is still a member, so the herdr answer never fails a spawn
+   * on its own.
+   */
+  private async waitMemberReady(id: string, name: string, pane: string, signal?: AbortSignal): Promise<void> {
+    const deadline = this.now() + SPAWN_READY_MS;
+    let sawProcess = false;
+    for (;;) {
+      // Esc in the parent must stop the wait. The child is already started and keeps
+      // running; what is cancelled is this tool call, which is what the operator asked for.
+      if (signal?.aborted === true) {
+        throw new Error(`${name} (${id}) is started in ${pane}; the wait for its first authentication was cancelled`);
+      }
+      try {
+        const member = await this.pg.getMember(id);
+        if (member.last_seen_at !== null) return;
+      } catch {
+        // A read that fails is not a verdict: the member may still authenticate next tick.
+      }
+      if (this.now() >= deadline) break;
+      await sleep(READY_POLL_MS);
+    }
+    // Only now, once, for the error message: a member that never authenticated is either a
+    // process that never started or one that started and cannot reach the platform.
+    try {
+      await this.herdr.waitReady(pane, READY_DIAGNOSTIC_MS);
+      sawProcess = true;
+    } catch {
+      sawProcess = false;
+    }
+    throw new Error(
+      sawProcess
+        ? `${name} (${id}) started in ${pane} but never authenticated against ${this.config.url} within ${SPAWN_READY_MS} ms - check its log there, not the platform`
+        : `${name} (${id}) never appeared in ${pane} and never authenticated within ${SPAWN_READY_MS} ms - the process did not start`,
+    );
+  }
+
   async spawnMember(opts: {
     name?: string;
     brief: string;
     cwd?: string;
     /** Extra pi argv for the child, appended to the configured spawn command (§2.2). */
     args?: string[];
+    /** Esc in the parent's session: stop waiting, not the child that is already started. */
+    signal?: AbortSignal;
   }): Promise<{ id: string; name: string }> {
     const requestId = randomUUID();
     const created = await this.pg.createMember({ name: opts.name, request_id: requestId });
@@ -652,10 +702,10 @@ export class AdapterLoop {
       PIGROUPS_ADAPTER_DIR: this.config.adapterDir,
       PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
     };
-    const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd, args: opts.args });
+    const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd, args: opts.args, signal: opts.signal });
     this.panes.set(id, pane);
     this.paneCheckedAt.set(id, this.now());
-    await this.herdr.waitReady(pane, SPAWN_READY_MS);
+    await this.waitMemberReady(id, name, pane, opts.signal);
     return { id, name };
   }
 

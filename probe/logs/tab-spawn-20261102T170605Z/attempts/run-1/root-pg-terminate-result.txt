@@ -1,0 +1,1 @@
+{"role":"toolResult","toolCallId":"call_00_ET_dkcFkAxStDkUPZG4dR1q6962","toolName":"pg_terminate","content":[{"type":"text","text":"{\"terminated\":[\"m_923cac\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}],"isError":false,"durationMs":413,"timestamp":1793639236519}

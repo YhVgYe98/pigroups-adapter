@@ -530,6 +530,8 @@ export class FakeHerdr implements Herdr {
   paneText = '';
   /** When set, `waitReady` rejects after recording the call (the timeout path). */
   failWait = false;
+  /** False simulates a child that never reaches the platform (D1 never satisfied). */
+  authenticate = true;
   /** When set, `close` rejects with this after recording the attempt (herdr down / a timeout). */
   failClose: Error | undefined;
   /** When set, `close` reports that it cut off an agent still running at the bound. */
@@ -539,6 +541,14 @@ export class FakeHerdr implements Herdr {
 
   async spawn(opts: { label: string; env: Record<string, string>; cwd?: string; args?: string[] }): Promise<{ pane: string }> {
     this.spawns.push(opts);
+    // A real child's first act is one authenticated request, and that is what D1 waits for
+    // (the platform's `last_seen_at`). A fake that only returns a pane name leaves the member
+    // permanently unseen, which is not a shape that happens outside the tests.
+    const url = opts.env.PIGROUPS_URL;
+    const token = opts.env.PIGROUPS_TOKEN;
+    if (this.authenticate && url !== undefined && token !== undefined) {
+      void fetch(`${url}/v1/whoami`, { headers: { authorization: `Bearer ${token}` } }).catch(() => undefined);
+    }
     return { pane: `pane-${this.spawns.length}` };
   }
 

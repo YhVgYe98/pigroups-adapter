@@ -1,3 +1,18 @@
+## v0.7.0（2026-11-02，与平台 0.2.0 配套）
+
+次版本，因为 `Herdr` 接口多了 `signal` 参数，且成员就绪的判据换了：
+
+- **成员就绪按 D1 判**：等平台的 `last_seen_at` 非空，不再等 herdr 的界面状态。旧实现等
+  `idle|done|blocked`，而**拿到长简报的子成员会立刻进入 `working`**，于是 `pg_spawn` 白等
+  120 秒后把健康的成员报成失败（真实任务里踩到）。herdr 现在只在超时时用来分辨「进程没起来」
+  和「起来了但连不上平台」，报错分两种。
+- **子成员放进新 tab**，同一 workspace，不再和操作者挤一页；`pg_terminate` 后 tab 一起消失。
+- **多个根 = 多个组织**：记录从 `<adapterDir>/org.json` 改为 `<adapterDir>/orgs/<key>/org.json`，
+  key 是组织名（没给名字时按工作目录，或复用唯一已存在的那个）。此前两个根会抢同一个文件，
+  第二个直接「重连」到第一个的组织上。
+- **Esc 能打断长工具**：pi 的 `execute` 第三个参数是 `AbortSignal`，之前被整个忽略。
+  `pg_spawn` 的等待、`pg_org_start` 的等待与 `herdr` 的 `execFile` 现在都听它。
+
 # 变更日志
 
 只记发生过的事。"修好了"必须能在 `npm test` 里指到一条会变红的测试。

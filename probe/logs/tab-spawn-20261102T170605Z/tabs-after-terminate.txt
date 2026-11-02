@@ -1,0 +1,9 @@
+wD:tD	1	panes=1	unknown	wD
+wE:t1Y	󰐻	panes=1	working	wE
+wE:t1	PiGroups 实现	panes=1	working	wE
+wE:tT	3	panes=1	unknown	wE
+wE:t1F	4	panes=1	unknown	wE
+wE:t23	5	panes=1	unknown	wE
+wE:t2C	tabspawn-root	panes=1	done	wE
+wF:t2	󰐻	panes=1	idle	wF
+wF:t3	量化研究组织	panes=10	working	wF

@@ -18,19 +18,10 @@
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PgClient, PgError } from './pgclient.ts';
@@ -53,6 +44,8 @@ export interface OrgHandle {
   /** The recorded platform process; `0` is never written, so this is always a real pid. */
   pid: number;
   dataDir: string;
+  /** Where this organisation's record lives: `<adapterDir>/orgs/<key>/org.json`. */
+  orgFile: string;
   /** The checkout that was started; undefined when we only reattached and did not need one. */
   platformDir?: string;
   root: { id: string; name: string };
@@ -63,8 +56,12 @@ export interface OrgStartOptions {
   port?: number;
   dataDir?: string;
   platformDir?: string;
-  /** The adapter directory holding `org.json`; defaults to `PIGROUPS_ADAPTER_DIR` or `~/.pigroups-adapter`. */
+  /** The adapter directory holding `orgs/`; defaults to `PIGROUPS_ADAPTER_DIR` or `~/.pigroups-adapter`. */
   adapterDir?: string;
+  /** Working directory used to derive the organisation key when no name is given. */
+  cwd?: string;
+  /** Cancels the waits. A platform already started is stopped again on cancellation. */
+  signal?: AbortSignal;
   /**
    * The adapter's own repository root, from which the `../PiGroups` candidates are
    * resolved. Defaults to this file's location; overridable so the lookup can be
@@ -91,6 +88,8 @@ export class OrgStartError extends Error {
 }
 
 const ORG_FILE = 'org.json';
+/** `<adapterDir>/orgs/<key>/` - one directory per organisation. */
+const ORG_DIR = 'orgs';
 const LOCK_FILE = 'org.lock';
 const PLATFORM_ENTRY = join('src', 'main.ts');
 const HEALTH_TIMEOUT_MS = 1200;
@@ -168,9 +167,45 @@ function platformLookupMessage(tried: PlatformCandidate[]): string {
 export async function startOrg(opts: OrgStartOptions = {}): Promise<OrgHandle> {
   const env = opts.env ?? process.env;
   const adapterDir = resolve(opts.adapterDir ?? defaultAdapterDir(env));
-  const orgFile = join(adapterDir, ORG_FILE);
+  // One directory per organisation, keyed by its name. A single org.json under the adapter
+  // directory made two roots on one machine fight over the same file: the second call found
+  // the first one's record, answered "healthy" and reattached both teams to one platform.
+  // The key is the org name, or the working directory it was started from when no name is
+  // given - two roots in two projects are two organisations, the same project is the same one.
+  const key = orgKey(opts.name, opts.cwd ?? process.cwd(), adapterDir);
+  const orgDir = join(adapterDir, ORG_DIR, key);
+  const orgFile = join(orgDir, ORG_FILE);
 
-  return withOrgLock(adapterDir, () => startOrgLocked(opts, adapterDir, orgFile, env));
+  return withOrgLock(orgDir, () => startOrgLocked(opts, orgDir, orgFile, env));
+}
+
+/** Keys that already hold a record under <adapterDir>/orgs/. */
+function orgKeys(adapterDir: string): string[] {
+  const root = join(adapterDir, ORG_DIR);
+  try {
+    return readdirSync(root).filter((key) => existsSync(join(root, key, ORG_FILE)));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Directory-safe key. The name wins; without one it is the basename of the working
+ * directory, unless exactly one organisation is already recorded here - then that is the
+ * one a later session means. Two records and no name is ambiguous, so the working
+ * directory decides: guessing between two teams is worse than starting a third record.
+ */
+function orgKey(name: string | undefined, cwd: string, adapterDir: string): string {
+  if (name === undefined) {
+    const existing = orgKeys(adapterDir);
+    if (existing.length === 1) return existing[0];
+  }
+  const base = (name ?? basename(cwd)) || ORG_FILE;
+  const cleaned = base
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return cleaned === '' ? 'org' : cleaned.slice(0, 64);
 }
 
 async function startOrgLocked(
@@ -195,6 +230,7 @@ async function startOrgLocked(
           adminToken: previous.admin_token,
           pid: previous.pid,
           dataDir: previous.data_dir,
+          orgFile,
           root,
         };
       } catch (err) {
@@ -241,7 +277,7 @@ async function startOrgLocked(
 
   try {
     // (d) Wait bounded, then claim the root seat.
-    await waitForPlatform(platform.child, url, opts.healthTimeoutMs ?? START_TIMEOUT_MS);
+    await waitForPlatform(platform.child, url, opts.healthTimeoutMs ?? START_TIMEOUT_MS, opts.signal);
 
     if (previous !== undefined) {
       try {
@@ -259,6 +295,7 @@ async function startOrgLocked(
           url,
           token: state.token,
           adminToken,
+          orgFile,
           pid: platform.pid,
           dataDir,
           platformDir: checkout.dir,
@@ -288,6 +325,7 @@ async function startOrgLocked(
       url,
       token: state.token,
       adminToken,
+      orgFile,
       pid: platform.pid,
       dataDir,
       platformDir: checkout.dir,
@@ -470,7 +508,12 @@ function launchPlatform(opts: {
   return { child, pid };
 }
 
-async function waitForPlatform(child: ChildProcess, url: string, timeoutMs: number): Promise<void> {
+async function waitForPlatform(
+  child: ChildProcess,
+  url: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
   let exited = child.exitCode !== null || child.signalCode !== null;
   child.once('exit', () => {
     exited = true;
@@ -478,6 +521,7 @@ async function waitForPlatform(child: ChildProcess, url: string, timeoutMs: numb
 
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    if (signal?.aborted === true) throw new OrgStartError('cancelled while waiting for the platform to answer');
     if (exited) throw new OrgStartError(`the platform process at ${url} exited before answering`);
     if (await platformAnswers(url)) {
       // Something answered at the URL, and it may not be the child we just started

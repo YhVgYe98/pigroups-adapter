@@ -1,0 +1,10 @@
+commit: cb4e70b81dda85ac2bb47d36fd0597a84dd8bb89
+working tree:
+   M src/herdr.ts
+   M src/loop.ts
+   M test/herdr.test.ts
+  ?? probe/logs/tab-spawn-20261102T170605Z/
+adapter version: 0.6.0+platform.0.2.0
+pi: 1.4.0
+herdr: herdr 0.9.5
+platform: 210ed07e4d2b3f7dce61d26b45a656636938b2a4 (0 dirty files)

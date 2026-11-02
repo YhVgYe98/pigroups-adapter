@@ -8,8 +8,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readdirSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -138,7 +138,18 @@ async function waitUntilGone(url: string, timeoutMs = 5000): Promise<void> {
 async function cleanupOrg(adapterDir: string, ...extraDirs: string[]): Promise<void> {
   let state: { pid?: number; url?: string } | undefined;
   try {
-    state = JSON.parse(await readFile(join(adapterDir, 'org.json'), 'utf8')) as { pid?: number; url?: string };
+    // The record now lives under orgs/<key>/; the newest one is this test's org.
+    const dir = join(adapterDir, 'orgs');
+    const keys = await readdir(dir).catch(() => [] as string[]);
+    const files = await Promise.all(
+      keys.map(async (key) => {
+        const file = join(dir, key, 'org.json');
+        const info = await stat(file).catch(() => undefined);
+        return info === undefined ? undefined : { file, at: info.mtimeMs };
+      }),
+    );
+    const newest = files.filter((f) => f !== undefined).sort((a, b) => b!.at - a!.at)[0];
+    state = newest === undefined ? undefined : (JSON.parse(await readFile(newest.file, 'utf8')) as { pid?: number; url?: string });
   } catch {
     state = undefined;
   }
@@ -217,6 +228,16 @@ test('a session with an identity gets the ten member tools and is not offered pg
 // What the tool does
 // ---------------------------------------------------------------------------
 
+
+/** Every organisation record under a test's adapter directory. */
+function orgRecords(adapterDir: string): string[] {
+  const root = join(adapterDir, 'orgs');
+  if (!existsSync(root)) return [];
+  return readdirSync(root)
+    .map((key) => join(root, key, 'org.json'))
+    .filter((file) => existsSync(file));
+}
+
 test('pg_org_start starts a platform, bootstraps a root, wires the member tools, and is idempotent', async (t) => {
   isolateEnv(t);
   const adapterDir = await tempDir('pigroups-orgstart-');
@@ -239,7 +260,7 @@ test('pg_org_start starts a platform, bootstraps a root, wires the member tools,
   assert.equal(typeof started.url, 'string');
   assert.ok(await answers(started.url), 'the org answers /v1/health');
 
-  const state = JSON.parse(await readFile(join(adapterDir, 'org.json'), 'utf8')) as {
+  const state = JSON.parse(await readFile(String(started.org_file), 'utf8')) as {
     url: string;
     token: string;
     admin_token: string;
@@ -304,7 +325,7 @@ test('a later session reattaches to the org that outlived the root session inste
   await first.fire('session_start', { reason: 'startup' }, CTX);
   const started = await callTool(first, 'pg_org_start', { name: 'alpha', platform_dir: PLATFORM_DIR });
   const pid = started.pid as number;
-  const token = (JSON.parse(await readFile(join(adapterDir, 'org.json'), 'utf8')) as { token: string }).token;
+  const token = (JSON.parse(await readFile(String(started.org_file), 'utf8')) as { token: string }).token;
 
   // The root session goes away; the organisation must not.
   await first.fire('session_shutdown', { reason: 'quit' });
@@ -313,7 +334,9 @@ test('a later session reattaches to the org that outlived the root session inste
   pigroupsExtension(second.pi);
   await second.fire('session_start', { reason: 'startup' }, CTX);
   assert.deepEqual([...second.tools.keys()], ['pg_org_start'], 'the new session starts from the same one door');
-  const reattached = await callTool(second, 'pg_org_start', { name: 'ignored', platform_dir: PLATFORM_DIR });
+  // The organisation is identified by its name; that is what makes two roots on one
+  // machine two organisations instead of one shared record.
+  const reattached = await callTool(second, 'pg_org_start', { name: 'alpha', platform_dir: PLATFORM_DIR });
 
   assert.equal(reattached.reattached, true, 'a healthy recorded org is reused');
   assert.equal(reattached.url, started.url, 'the URL did not move: no second platform was started');
@@ -365,7 +388,7 @@ test('a missing platform checkout fails with every candidate path it tried', asy
       return true;
     },
   );
-  assert.equal(existsSync(join(adapterDir, 'org.json')), false, 'a failed lookup writes no org record');
+  assert.equal(orgRecords(adapterDir).length, 0, 'a failed lookup writes no org record');
 });
 
 test('a recorded pid that is alive but is not this platform is never signalled', async (t) => {
@@ -380,13 +403,17 @@ test('a recorded pid that is alive but is not this platform is never signalled',
   });
   const deadPort = await freePort();
   const url = `http://127.0.0.1:${deadPort}`;
+  // The record lives under orgs/<key>/, keyed by the org name; the test names it explicitly
+  // so it does not have to guess a key derived from the working directory.
+  const orgDir = join(adapterDir, 'orgs', 'stale-pid');
+  await mkdir(orgDir, { recursive: true });
   await writeFile(
-    join(adapterDir, 'org.json'),
+    join(orgDir, 'org.json'),
     JSON.stringify({ url, token: 'stale', admin_token: 'stale-admin', pid: process.pid, data_dir: dataDir }),
   );
 
   await assert.rejects(
-    startOrg({ adapterDir, platformDir: PLATFORM_DIR }),
+    startOrg({ adapterDir, platformDir: PLATFORM_DIR, name: 'stale-pid' }),
     (err: Error) => {
       assert.match(err.message, new RegExp(String(process.pid)), 'the message names the pid it refused to kill');
       assert.match(err.message, /still running/i);
@@ -396,7 +423,7 @@ test('a recorded pid that is alive but is not this platform is never signalled',
 
   // If the guard were missing, this test process would have received SIGTERM and the
   // suite would die here; reaching this line is the proof that it did not.
-  assert.ok(existsSync(join(adapterDir, 'org.json')), 'the unreadable record is left for a person to inspect');
+  assert.equal(orgRecords(adapterDir).length, 1, 'the unreadable record is left for a person to inspect');
 });
 
 test('a failed bootstrap kills the platform it just started', async (t) => {
@@ -449,5 +476,33 @@ test('a failed bootstrap kills the platform it just started', async (t) => {
   );
 
   await waitUntilGone(url, 5000);
-  assert.equal(existsSync(join(adapterDir, 'org.json')), false, 'a failed start leaves no org record');
+  assert.equal(orgRecords(adapterDir).length, 0, 'a failed start leaves no org record');
+});
+
+// Two roots on one machine are two organisations. Before the per-name keying they shared one
+// org.json, so the second call found the first one's record and both teams landed on one platform.
+test('two organisations with different names are two platforms and two records', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  t.after(() => cleanupOrg(adapterDir));
+
+  const first = await startOrg({ adapterDir, platformDir: PLATFORM_DIR, name: 'team-a' });
+  const second = await startOrg({ adapterDir, platformDir: PLATFORM_DIR, name: 'team-b' });
+  try {
+    assert.notEqual(first.url, second.url, 'each organisation has its own platform');
+    assert.notEqual(first.pid, second.pid, 'each organisation has its own process');
+    assert.equal(first.root.name, 'team-a');
+    assert.equal(second.root.name, 'team-b');
+    assert.ok(await answers(first.url), 'the first organisation still answers');
+    assert.ok(await answers(second.url), 'the second organisation answers too');
+    assert.equal(orgRecords(adapterDir).length, 2, 'two records, one per name');
+  } finally {
+    for (const org of [first, second]) {
+      try {
+        process.kill(org.pid, 'SIGTERM');
+      } catch {
+        // already gone
+      }
+    }
+  }
 });

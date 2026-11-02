@@ -1,0 +1,6 @@
+[Extensions]                                                                                                                               │
+  @juicesharp/rpiv-ask-user-question, @juicesharp/rpiv-todo, @quintinshaw/pi-dynamic-workflows:workflow.ts, extension.ts,                  │
+herdr-agent-state.ts, pi-intercom, pi-straw-boss:src, pi-straw-boss:src/balance.ts, pi-straw-boss:src/blocked.ts, pi-subagents:bundle,     │
+pi-web-access:dist                                                                                                                         │
+                                                                                                                                           │
+                                                                                                                                           │

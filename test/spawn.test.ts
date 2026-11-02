@@ -8,6 +8,7 @@ import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { shellQuote, splitCommand } from '../src/command.ts';
+import { scenario } from './scenario.ts';
 import pigroupsExtension, { EXTENSION_ENTRY, defaultSpawnCmd, resolveSpawnCmd } from '../src/extension.ts';
 import type { PiLike, PiToolDefinition } from '../src/surface.ts';
 
@@ -113,3 +114,21 @@ function spawnTool(): PiToolDefinition {
     else process.env.PIGROUPS_TOKEN = savedToken;
   }
 }
+
+// Esc in the parent's session must stop the wait, not hang until SPAWN_READY_MS: pi hands the
+// tool an AbortSignal, and a tool that ignores it is exactly the "cannot interrupt" complaint.
+test('spawnMember stops waiting when the caller aborts, and says the child is already started', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  // This fake never authenticates, so without the abort check the wait would run for two minutes.
+  s.herdr.authenticate = false;
+
+  const controller = new AbortController();
+  const started = Date.now();
+  const running = s.loop.spawnMember({ name: 'slow', brief: 'work', signal: controller.signal });
+  setTimeout(() => controller.abort(), 100);
+
+  await assert.rejects(running, /cancelled|abort/i);
+  const took = Date.now() - started;
+  assert.ok(took < 5000, `the wait must end on cancel, took ${took}ms`);
+});

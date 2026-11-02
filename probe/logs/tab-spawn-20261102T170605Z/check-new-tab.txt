@@ -1,0 +1,5 @@
+wE:t2D
+label="tab-child" (expected "tab-child")
+workspace=wE (root workspace wE)
+panes=1 agent_status=done
+ok

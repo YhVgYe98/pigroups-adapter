@@ -11,7 +11,7 @@
  * change that needs no adapter change is answered by republishing the same numeric
  * version with new metadata, not by moving the number.
  */
-export const ADAPTER_VERSION = '0.6.0+platform.0.2.0';
+export const ADAPTER_VERSION = '0.7.0+platform.0.2.0';
 
 /**
  * Platform major.minor versions this adapter is built for. This is a warning list,

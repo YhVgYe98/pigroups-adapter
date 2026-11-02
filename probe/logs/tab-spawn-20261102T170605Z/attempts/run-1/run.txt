@@ -1,0 +1,55 @@
+[tab-spawn] 2026-11-02T17:07:02.260Z == 0. baseline ==
+[tab-spawn] 2026-11-02T17:07:02.416Z driver runs in pane wE:p1, workspace wE
+[tab-spawn] 2026-11-02T17:07:02.465Z baseline tabs (wE): wE:t1Y	󰐻	panes=1	idle	wE|wE:t1	PiGroups 实现	panes=1	working	wE|wE:tT	3	panes=1	unknown	wE|wE:t1F	4	panes=1	unknown	wE|wE:t23	5	panes=1	unknown	wE|
+[tab-spawn] 2026-11-02T17:07:02.483Z baseline panes (wE): wE:p36	tab=wE:t1Y	ws=wE	agent=pi	idle|wE:p1	tab=wE:t1	ws=wE	agent=pi	working|wE:p12	tab=wE:tT	ws=wE	agent=-	unknown|wE:p2Q	tab=wE:t1F	ws=wE	agent=-	unknown|wE:p3B	tab=wE:t23	ws=wE	agent=-	unknown|
+[tab-spawn] 2026-11-02T17:07:02.484Z == 1. throwaway platform ==
+[tab-spawn] 2026-11-02T17:07:02.505Z port 39511, data dir /tmp/pgtab-probe.T2BPX2/platform-data
+[tab-spawn] 2026-11-02T17:07:02.737Z platform pid 32102 answers http://127.0.0.1:39511
+[tab-spawn] 2026-11-02T17:07:02.798Z root member m_8d64c5
+[tab-spawn] 2026-11-02T17:07:02.799Z == 2. root member in a probe-owned tab ==
+[tab-spawn] 2026-11-02T17:07:02.837Z root tab wE:t2A, root pane wE:p3Q (not focused), workspace wE
+[tab-spawn] 2026-11-02T17:07:06.761Z root agent start: {"id":"cli:agent:start","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgtab-probe.T2BPX2/scratch","focused":false,"foreground_cwd":"/tmp/pgtab-probe.T2BPX2/scratch","interactive_ready":true,"name":"tabspawn-root","pane_i
+[tab-spawn] 2026-11-02T17:07:06.763Z root idle: {"id":"cli:agent:wait","result":{"agent":{"agent":"pi","agent_status":"idle","cwd":"/tmp/pgtab-probe.T2BPX2/scratch","focused":false,"foreground_cwd":"/tmp/pgta
+[tab-spawn] 2026-11-02T17:07:06.787Z root pi pid 32368; PIGROUPS_* in its environment: PIGROUPS_ADAPTER_DIR=/tmp/pgtab-probe.T2BPX2/adapter PIGROUPS_TOKEN=pgt_199dadfec845f8386b6404905a1aa0528b879f5855412542 PIGROUPS_URL=http://127.0.0.1:39511 
+[tab-spawn] 2026-11-02T17:07:06.788Z PASS  2.1 PIGROUPS_SPAWN_CMD is not set in the root environment (default command in play)
+[tab-spawn] 2026-11-02T17:07:06.789Z PASS  2.1b the herdr server environment carries no PIGROUPS_SPAWN_CMD
+[tab-spawn] 2026-11-02T17:07:08.493Z root session /tmp/pgtab-probe.T2BPX2/root-sessions/2026-11-02T17-07-03-103Z_01a19d3a-8f3e-71d5-beb9-8baa84ffc72a.jsonl
+[tab-spawn] 2026-11-02T17:07:08.514Z PASS  2.2 root session is the root member
+[tab-spawn] 2026-11-02T17:07:08.519Z == 3. root calls pg_spawn (no PIGROUPS_SPAWN_CMD, default command) ==
+[tab-spawn] 2026-11-02T17:07:08.553Z prompt: Call pg_spawn exactly once with name="tab-child", cwd="/tmp/pgtab-probe.T2BPX2/child", and this brief: "You are tab-child, a member of this PiGroups organisation. Call pg_say exactly once with to="g:m_8d64c5" and text="tab-child is in its own tab and answering". Then stop." Do not pass args. Do not call any other tool before pg_spawn. After it returns, report its JSON result verbatim and stop.
+[tab-spawn] 2026-11-02T17:07:14.260Z spawn turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"done","completion_seq":33,"cwd":"/tmp/pgtab-probe.T2BPX2/scratch","focused":false,"foreground_cwd":"/tmp/pgtab-probe.T2BPX2/scratch","interactive_ready":true,"name":"tabspawn-root","pane_id":"wE:p3Q","revision":3,"state_change_
+[tab-spawn] 2026-11-02T17:07:14.347Z new tab: label="tab-child" (expected "tab-child") workspace=wE (root workspace wE) panes=1 agent_status=done ok 
+[tab-spawn] 2026-11-02T17:07:14.348Z PASS  3.1 one new tab appeared, label 'tab-child', workspace wE (wE:t2B)
+[tab-spawn] 2026-11-02T17:07:14.366Z child pane: tab=wE:t2B (child tab wE:t2B) workspace=wE agent=pi status=done ok 
+[tab-spawn] 2026-11-02T17:07:14.367Z PASS  3.2 the new pane wE:p3R belongs to tab wE:t2B
+[tab-spawn] 2026-11-02T17:07:14.384Z root tab: before=[wE:p3Q] after=[wE:p3Q] ok 
+[tab-spawn] 2026-11-02T17:07:14.385Z PASS  3.3 the root's tab still has exactly its one pane; no split beside the operator
+[tab-spawn] 2026-11-02T17:07:14.401Z operator layout: baseline panes=17 still present and in place=17 ok 
+[tab-spawn] 2026-11-02T17:07:14.402Z PASS  3.4 every pre-existing pane is still there, in the same tab
+[tab-spawn] 2026-11-02T17:07:14.807Z NOTE  3.5 no startup line matched in the child pane (see child-pane.txt); adapter-side default is asserted by test/herdr.test.ts
+[tab-spawn] 2026-11-02T17:07:14.846Z PASS  3.6 pg_spawn created child member m_923cac under root m_8d64c5
+[tab-spawn] 2026-11-02T17:07:14.851Z child member: {"id":"m_923cac","name":"tab-child","parent_id":"m_8d64c5","status":"alive","is_root":false,"child_count":0,"groups":[{"to":"g:m_8d64c5","owner":"m_8d64c5"}],"last_seen_at":1793639231474,"created_at":1793639230013,"server_version":"0.2.0"}
+[tab-spawn] 2026-11-02T17:07:14.881Z PASS  3.7 the child's line is readable in the group (human token, GET /v1/messages?to=g:m_8d64c5)
+[tab-spawn] 2026-11-02T17:07:14.897Z group message: seq=1 sender=tab-child body="tab-child is in its own tab and answering"
+[tab-spawn] 2026-11-02T17:07:15.115Z == 4. root terminates the child ==
+[tab-spawn] 2026-11-02T17:07:15.118Z prompt: Call pg_terminate exactly once with member="m_923cac". Do not call any other tool. Then report its JSON result verbatim and stop.
+[tab-spawn] 2026-11-02T17:07:17.823Z terminate turn settled: {"id":"cli:agent:prompt","result":{"agent":{"agent":"pi","agent_status":"idle","completion_seq":35,"cwd":"/tmp/pgtab-probe.T2BPX2/scratch","focused":true,"foreground_cwd":"/tmp/pgtab-probe.T2BPX2/scratch","interactive_ready":true,"name":"tabspawn-root","pane_id":"wE:p3Q","revision":3,"state_change_s
+[tab-spawn] 2026-11-02T17:07:17.840Z pg_terminate result: {"role":"toolResult","toolCallId":"call_00_ET_dkcFkAxStDkUPZG4dR1q6962","toolName":"pg_terminate","content":[{"type":"text","text":"{\"terminated\":[\"m_923cac\"],\"pane_close_failed\":[],\"pane_close_forced\":[]}"}],"isError":false,"durationMs":413,"timestamp":1793639236519}
+[tab-spawn] 2026-11-02T17:07:17.894Z PASS  4.1 the child's tab wE:t2B is gone from herdr tab list
+[tab-spawn] 2026-11-02T17:07:17.910Z PASS  4.2 the child's pane wE:p3R is gone from herdr pane list
+[tab-spawn] 2026-11-02T17:07:17.911Z PASS  4.3 the child pi process 33341 is gone
+[tab-spawn] 2026-11-02T17:07:17.915Z PASS  4.4 the child is gone from /v1/tree
+[tab-spawn] 2026-11-02T17:07:17.932Z root tab after terminate: before=[wE:p3Q] after=[wE:p3Q] ok 
+[tab-spawn] 2026-11-02T17:07:17.933Z == 5. summary ==
+[tab-spawn] 2026-11-02T17:07:17.933Z SUMMARY failed=0
+[tab-spawn] 2026-11-02T17:07:17.934Z tabs before spawn:  wD:tD	1	panes=1	unknown	wD|wE:t1Y	󰐻	panes=1	idle	wE|wE:t1	PiGroups 实现	panes=1	working	wE|wE:tT	3	panes=1	unknown	wE|wE:t1F	4	panes=1	unknown	wE|wE:t23	5	panes=1	unknown	wE|wE:t2A	tabspawn-root	panes=1	done	wE|wF:t2	󰐻	panes=1	idle	wF|wF:t3	量化研究组织	panes=10	working	wF|
+[tab-spawn] 2026-11-02T17:07:17.935Z tabs after spawn:   wD:tD	1	panes=1	unknown	wD|wE:t1Y	󰐻	panes=1	idle	wE|wE:t1	PiGroups 实现	panes=1	working	wE|wE:tT	3	panes=1	unknown	wE|wE:t1F	4	panes=1	unknown	wE|wE:t23	5	panes=1	unknown	wE|wE:t2A	tabspawn-root	panes=1	done	wE|wE:t2B	tab-child	panes=1	done	wE|wF:t2	󰐻	panes=1	idle	wF|wF:t3	量化研究组织	panes=10	working	wF|
+[tab-spawn] 2026-11-02T17:07:17.936Z tabs after terminate: wD:tD	1	panes=1	unknown	wD|wE:t1Y	󰐻	panes=1	idle	wE|wE:t1	PiGroups 实现	panes=1	working	wE|wE:tT	3	panes=1	unknown	wE|wE:t1F	4	panes=1	unknown	wE|wE:t23	5	panes=1	unknown	wE|wE:t2A	tabspawn-root	panes=1	idle	wE|wF:t2	󰐻	panes=1	idle	wF|wF:t3	量化研究组织	panes=10	working	wF|
+[tab-spawn] 2026-11-02T17:07:17.937Z panes after spawn:  wD:p1E	tab=wD:tD	ws=wD	agent=-	unknown|wE:p36	tab=wE:t1Y	ws=wE	agent=pi	idle|wE:p1	tab=wE:t1	ws=wE	agent=pi	working|wE:p12	tab=wE:tT	ws=wE	agent=-	unknown|wE:p2Q	tab=wE:t1F	ws=wE	agent=-	unknown|wE:p3B	tab=wE:t23	ws=wE	agent=-	unknown|wE:p3Q	tab=wE:t2A	ws=wE	agent=pi	done|wE:p3R	tab=wE:t2B	ws=wE	agent=pi	done|wF:p2	tab=wF:t2	ws=wF	agent=pi	idle|wF:p4	tab=wF:t3	ws=wF	agent=pi	working|wF:pE	tab=wF:t3	ws=wF	agent=pi	working|wF:pD	tab=wF:t3	ws=wF	agent=pi	working|wF:p6	tab=wF:t3	ws=wF	agent=pi	working|wF:pC	tab=wF:t3	ws=wF	agent=pi	working|wF:pB	tab=wF:t3	ws=wF	agent=pi	working|wF:p5	tab=wF:t3	ws=wF	agent=pi	working|wF:pA	tab=wF:t3	ws=wF	agent=pi	working|wF:p9	tab=wF:t3	ws=wF	agent=pi	working|wF:p8	tab=wF:t3	ws=wF	agent=pi	working|
+[tab-spawn] 2026-11-02T17:07:17.938Z == cleanup ==
+[tab-spawn] 2026-11-02T17:07:17.963Z closed root pane wE:p3Q (exit 0)
+[tab-spawn] 2026-11-02T17:07:17.965Z closed root tab wE:t2A (exit 1)
+[tab-spawn] 2026-11-02T17:07:18.067Z platform pid 32102 stopped
+[tab-spawn] 2026-11-02T17:07:18.153Z layout diff: panes baseline=17 final=17 added=[] missing=[] tabs  baseline=8 final=8 added=[] missing=[] 
+[tab-spawn] 2026-11-02T17:07:18.154Z temp work dir /tmp/pgtab-probe.T2BPX2 removed
+[tab-spawn] 2026-11-02T17:07:18.155Z driver exit 0

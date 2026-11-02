@@ -1,0 +1,3 @@
+PIGROUPS_ADAPTER_DIR=/tmp/pgtab-probe.qpTKCI/adapter
+PIGROUPS_TOKEN=pgt_ca76c3a27de5bfa66b495c3d96cf8d140d65f010c6baf52f
+PIGROUPS_URL=http://127.0.0.1:32917

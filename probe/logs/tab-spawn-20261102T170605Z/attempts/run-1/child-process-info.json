@@ -1,0 +1,1 @@
+{"id":"cli:pane:process_info","result":{"process_info":{"foreground_process_group_id":33341,"foreground_processes":[{"argv":["pi"],"cmdline":"pi","cwd":"/tmp/pgtab-probe.T2BPX2/child","name":"pi","pid":33341}],"pane_id":"wE:p3R","shell_pid":33231},"type":"pane_process_info"}}

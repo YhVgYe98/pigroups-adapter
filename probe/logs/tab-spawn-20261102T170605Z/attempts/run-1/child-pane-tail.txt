@@ -1,0 +1,60 @@
+                                                                                                                                           │
+                                                                                                                                           │
+ [straw-boss]                                                                                                                              │
+                                                                                                                                           │
+ <straw-boss>                                                                                                                              │
+ Your Straw Boss role changed during this run. This replaces the role instructions in your system prompt:                                  │
+                                                                                                                                           │
+ You are the main agent of Herdr tab tab-child: the boss (the user) works with you here. Your workspace tower is                           │
+ subagent-chat-01a19d31-6057-7474.                                                                                                         │
+                                                                                                                                           │
+ - Split work by owning app (/home/yang/.pi/agent/npm/node_modules/pi-straw-boss/prompts/apps-config.md). A task is one worker's end-to-end│
+   work in one app; parallel writers in an app each get a worktree; dependent tasks wait.                                                  │
+ - Before your first dispatch, plan by /home/yang/.pi/agent/npm/node_modules/pi-straw-boss/prompts/planning.md; ask the boss only what it  │
+   cannot settle.                                                                                                                          │
+ - Write to agents terse, caveman-style: point first, no ceremony; keep negations, numbers, paths, IDs, and quoted decisions verbatim; full│
+   sentences where a fragment could mislead; a brief still carries its goal, context, reasons with their cause, scope, what others own, and│
+   acceptance check, because a thin brief makes workers redo or miss work; a reader unsure of the intent restates it or asks before acting.│
+ - Brief each worker in English: required behavior, the Reality anchor, the boss's authorizations quoted; leave cause and location to the  │
+   worker. End with: "When you need a decision these authorizations do not cover, call caller_ping and stop." Answer pings through the     │
+   boss, then subagent_resume the worker.                                                                                                  │
+ - Check each result against its brief. Merging to a shared branch or deploying needs the boss's authorization.                            │
+ - When your work turns to another task, boss_rename yourself with a phrase for it (at most 16 characters).                                │
+ - When work turns to another task and when a step is done, call board_set (one line, a short checklist). Terse; no secrets, credentials,  │
+   customer data, or paths outside the project: allies' towers read it. It is no report; the done report still goes to whoever asked.      │
+ - boss_status finds coordinators, call_tower reaches the tower (report coordination friction there), boss_broadcast broadcasts to the net.│
+ - If a tower opened your tab, report the outcome to the sender and to that tower with intercom send when done, then wait to be closed (say│
+   so if you await a boss decision).                                                                                                       │
+ - Done when every task has landed or is reported blocked and its worktree is removed.                                                     │
+   </straw-boss>                                                                                                                           │
+                                                                                                                                           │
+                                                                                                                                           │
+ Thinking...                                                                                                                               │
+                                                                                                                                           │
+ Done: pg_say sent once to g:m_8d64c5 ("tab-child is in its own tab and answering"), then stopped.                                         │
+                                                                                                                                           │
+ Standing by as main agent of tab tab-child — no task pending, no dispatch made, nothing to plan until you give me work.                   │
+                                                                                                                                           ┃
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┃
+ Update Available                                                                                                                          ┃
+ New version 1.5.0 is available. Run pi update                                                                                             ┃
+ Changelog: https://pi.dev/changelog                                                                                                       ┃
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┃
+                                                                                                                                           ┃
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┃
+ Package Updates Available                                                                                                                 ┃
+ Package updates are available. Run pi update --extensions                                                                                 ┃
+ Packages:                                                                                                                                 ┃
+ - pi-web-access                                                                                                                           ┃
+ - pi-subagents                                                                                                                            ┃
+ - @juicesharp/rpiv-ask-user-question                                                                                                      ┃
+ - @juicesharp/rpiv-todo                                                                                                                   ┃
+ - @quintinshaw/pi-dynamic-workflows                                                                                                       ┃
+ - pi-straw-boss                                                                                                                           ┃
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┃
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/pgtab-probe.T2BPX2/child
+↑27k ↓259 R4.6k CH13.6% $0.008 1.8%/1.0M (auto)                                                              (deepseek) deepseek-flash • max

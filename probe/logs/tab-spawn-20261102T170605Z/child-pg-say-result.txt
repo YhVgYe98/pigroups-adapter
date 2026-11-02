@@ -1,0 +1,1 @@
+{"role":"toolResult","toolCallId":"call_00_vK8HezA4DGGyLB68QDv81256","toolName":"pg_say","content":[{"type":"text","text":"{\"conv\":\"g:m_44d178\",\"seq\":1}"}],"isError":false,"durationMs":3,"timestamp":1793639276116}

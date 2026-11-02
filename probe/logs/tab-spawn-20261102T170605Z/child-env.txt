@@ -1,0 +1,4 @@
+PIGROUPS_ADAPTER_DIR=/tmp/pgtab-probe.qpTKCI/adapter
+PIGROUPS_SPAWN_CMD=pi -e /home/yang/Documents/pigroups-adapter/src/extension.ts
+PIGROUPS_TOKEN=pgt_0af1a486c1f4c89b662c45bdc50197343fedc630ac7e9969
+PIGROUPS_URL=http://127.0.0.1:32917
