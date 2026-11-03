@@ -53,6 +53,8 @@ export interface HerdrCliOptions {
 
 /** `agent start` waits for the agent to become interactive. */
 const AGENT_START_TIMEOUT_MS = 120_000;
+/** How long to wait between `agent start` attempts while the new tab's shell prints its prompt. */
+const AGENT_START_RETRY_MS = 250;
 const COMMAND_TIMEOUT_MS = 180_000;
 /**
  * How long `close()` waits for the pane's agent to leave before it closes the pane.
@@ -106,7 +108,7 @@ export class HerdrCli implements Herdr {
       // the process), the text landed in that pi's input box - the operator saw
       // "PIGROUPS_URL=… pi -e …" appear in a conversation. A failed start is a failure, and
       // the caller can close the tab it just made.
-      await this.startAgent(pane, opts.label, extraArgs, argv);
+      await this.startAgentWhenShellIsReady(pane, opts.label, extraArgs, argv);
       return { pane };
     }
     // A wrapper or a non-pi command: herdr cannot track it, so the only way to run it is to
@@ -198,6 +200,12 @@ export class HerdrCli implements Herdr {
    */
   private async createTab(opts: { env: Record<string, string>; cwd?: string; label: string; signal?: AbortSignal }): Promise<string> {
     const args = ['tab', 'create', '--no-focus', '--label', opts.label];
+    // Without --workspace herdr puts the tab in the FOCUSED workspace, not the caller's. A
+    // member therefore landed wherever the operator happened to be looking: the same
+    // organisation ended up spread over two workspaces, with the same role names twice. The
+    // pane's own environment knows the answer.
+    const workspace = this.workspaceId();
+    if (workspace !== undefined) args.push('--workspace', workspace);
     if (opts.cwd) args.push('--cwd', opts.cwd);
     for (const [key, value] of Object.entries(opts.env)) args.push('--env', `${key}=${value}`);
 
@@ -206,6 +214,19 @@ export class HerdrCli implements Herdr {
     const paneId = typeof root?.pane_id === 'string' ? root.pane_id : undefined;
     if (paneId === undefined) throw new Error('herdr tab create returned no root pane id');
     return paneId;
+  }
+
+  /** The workspace this adapter's own process lives in, from herdr's pane environment. */
+  private workspaceId(): string | undefined {
+    const fromEnv = process.env.HERDR_WORKSPACE_ID;
+    if (typeof fromEnv === 'string' && fromEnv !== '') return fromEnv;
+    // Older herdr builds only export the pane id; derive the workspace from its prefix (wE:p3).
+    const pane = process.env.HERDR_PANE_ID;
+    if (typeof pane === 'string') {
+      const cut = pane.indexOf(':');
+      if (cut > 0) return pane.slice(0, cut);
+    }
+    return undefined;
   }
 
   /** Wait until herdr shows no agent in that pane (the shell is free to receive a command). */
@@ -224,6 +245,36 @@ export class HerdrCli implements Herdr {
         setTimeout(resolve, this.paneAgentExitPollMs);
       });
     }
+  }
+
+  /**
+   * `agent start` requires the pane to be sitting at an interactive shell prompt, and a tab
+   * that was just created is not there yet: it returns immediately, the shell takes a beat to
+   * print its prompt. Calling `agent start` in that window fails, and that failure used to send
+   * the command line into the pane as a fallback - the text the operator saw appear in a
+   * conversation. Wait for the pane to exist, then retry the start a few times before giving up.
+   */
+  private async startAgentWhenShellIsReady(
+    pane: string,
+    label: string,
+    extraArgs: string[],
+    argv: string[],
+  ): Promise<void> {
+    const deadline = Date.now() + AGENT_START_TIMEOUT_MS;
+    let lastError: unknown;
+    for (;;) {
+      try {
+        await this.startAgent(pane, label, extraArgs, argv);
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+      if (Date.now() >= deadline) break;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, AGENT_START_RETRY_MS);
+      });
+    }
+    throw lastError instanceof Error ? lastError : new Error(`could not start the agent in ${pane}`);
   }
 
   private async startAgent(pane: string, label: string, extraArgs: string[], argv: string[]): Promise<void> {

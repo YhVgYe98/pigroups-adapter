@@ -632,6 +632,7 @@ async function makeLoop(tree: (signal?: AbortSignal) => Promise<unknown>): Promi
       remindWindowMs: 300_000,
       nudgeMax: 3,
       deliveryWindowMs: WINDOW,
+      spawnReadyMs: 5000,
       spawnCmd: 'pi',
     },
     now: clock.now,

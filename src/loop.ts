@@ -37,6 +37,8 @@ export interface LoopConfig {
   spawnCmd: string;
   /** Tumbling delivery window (概念稿 §8.1): the first queued item opens it. */
   deliveryWindowMs: number;
+  /** How long a spawned child gets to authenticate before the parent is told it never did. */
+  spawnReadyMs: number;
 }
 
 export interface InspectResult {
@@ -212,6 +214,7 @@ function yieldOnce(): Promise<void> {
   });
 }
 const DEFAULT_INSPECT_TIMEOUT_MS = 10_000;
+/** Default for `spawnReadyMs`; tests override it through the config. */
 const SPAWN_READY_MS = 120_000;
 /** How often D1 is checked while a child starts. Its first poll lands in well under a second. */
 const READY_POLL_MS = 150;
@@ -634,50 +637,6 @@ export class AdapterLoop {
     this.blockedReported.delete(conv);
   }
 
-  /**
-   * D1 (§8 of the concept): a member is ready when **the platform has seen it authenticate**,
-   * not when herdr reports one of its own UI labels. `last_seen_at` is stamped on the child's
-   * very first request, so this returns in about a second - and it is true for a child that is
-   * already in the middle of its first turn, which is the normal case because the brief is sent
-   * before the pane starts.
-   *
-   * herdr is asked only as a diagnostic: "did a process ever appear". A child that authenticates
-   * while herdr fails to recognise it is still a member, so the herdr answer never fails a spawn
-   * on its own.
-   */
-  private async waitMemberReady(id: string, name: string, pane: string, signal?: AbortSignal): Promise<void> {
-    const deadline = this.now() + SPAWN_READY_MS;
-    let sawProcess = false;
-    for (;;) {
-      // Esc in the parent must stop the wait. The child is already started and keeps
-      // running; what is cancelled is this tool call, which is what the operator asked for.
-      if (signal?.aborted === true) {
-        throw new Error(`${name} (${id}) is started in ${pane}; the wait for its first authentication was cancelled`);
-      }
-      try {
-        const member = await this.pg.getMember(id);
-        if (member.last_seen_at !== null) return;
-      } catch {
-        // A read that fails is not a verdict: the member may still authenticate next tick.
-      }
-      if (this.now() >= deadline) break;
-      await sleep(READY_POLL_MS);
-    }
-    // Only now, once, for the error message: a member that never authenticated is either a
-    // process that never started or one that started and cannot reach the platform.
-    try {
-      await this.herdr.waitReady(pane, READY_DIAGNOSTIC_MS);
-      sawProcess = true;
-    } catch {
-      sawProcess = false;
-    }
-    throw new Error(
-      sawProcess
-        ? `${name} (${id}) started in ${pane} but never authenticated against ${this.config.url} within ${SPAWN_READY_MS} ms - check its log there, not the platform`
-        : `${name} (${id}) never appeared in ${pane} and never authenticated within ${SPAWN_READY_MS} ms - the process did not start`,
-    );
-  }
-
   async spawnMember(opts: {
     name?: string;
     brief: string;
@@ -705,8 +664,46 @@ export class AdapterLoop {
     const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd, args: opts.args, signal: opts.signal });
     this.panes.set(id, pane);
     this.paneCheckedAt.set(id, this.now());
-    await this.waitMemberReady(id, name, pane, opts.signal);
+    // Handing work to someone is not waiting for them to start: the child has its brief and a
+    // pane, so the caller gets its answer now. Whether it ever connects is a fact that arrives
+    // later and is worth interrupting for only if it never does.
+    void this.watchSpawnedMember(id, name, pane);
     return { id, name };
+  }
+
+  /**
+   * Watch a just-spawned child in the background. Success is silent - the child will speak for
+   * itself. Failure becomes one line in this member's own context, because a child that never
+   * connected is exactly the kind of thing the parent must not have to discover by noticing a
+   * silence.
+   */
+  private async watchSpawnedMember(id: string, name: string, pane: string): Promise<void> {
+    const deadline = this.now() + this.config.spawnReadyMs;
+    for (;;) {
+      try {
+        const member = await this.pg.getMember(id);
+        if (member.last_seen_at !== null) return;
+      } catch {
+        // Not a verdict: the next tick may succeed.
+      }
+      if (this.stopped) return;
+      if (this.now() >= deadline) break;
+      await sleep(READY_POLL_MS);
+    }
+    if (this.stopped) return;
+    let sawProcess = false;
+    try {
+      await this.herdr.waitReady(pane, READY_DIAGNOSTIC_MS);
+      sawProcess = true;
+    } catch {
+      sawProcess = false;
+    }
+    this.enqueue({
+      text: sawProcess
+        ? `[spawn] ${name} (${id}) is in ${pane} but never connected to ${this.config.url} within ${this.config.spawnReadyMs} ms - it is not a member yet, check its pane`
+        : `[spawn] ${name} (${id}) never appeared in ${pane} and never connected within ${this.config.spawnReadyMs} ms - the process did not start`,
+      kind: 'nudge',
+    });
   }
 
   /** Ask a peer for `pg.inspect_result`; on timeout answer `unknown` rather than inventing (§9). */

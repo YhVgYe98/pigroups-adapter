@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { shellQuote, splitCommand } from '../src/command.ts';
 import { scenario } from './scenario.ts';
+import { delay } from './support.ts';
 import pigroupsExtension, { EXTENSION_ENTRY, defaultSpawnCmd, resolveSpawnCmd } from '../src/extension.ts';
 import type { PiLike, PiToolDefinition } from '../src/surface.ts';
 
@@ -115,20 +116,38 @@ function spawnTool(): PiToolDefinition {
   }
 }
 
-// Esc in the parent's session must stop the wait, not hang until SPAWN_READY_MS: pi hands the
-// tool an AbortSignal, and a tool that ignores it is exactly the "cannot interrupt" complaint.
-test('spawnMember stops waiting when the caller aborts, and says the child is already started', async (t) => {
-  const s = await scenario();
+// Handing work to someone is not waiting for them to start. The old spawn() blocked until the
+// child authenticated (up to 120 s), so a parent sat still while its team was already working.
+test('spawnMember returns as soon as the child is launched, without waiting for it to connect', async (t) => {
+  const s = await scenario({ spawnReadyMs: 60_000 });
   t.after(() => s.close());
-  // This fake never authenticates, so without the abort check the wait would run for two minutes.
+  s.herdr.authenticate = false; // it never connects, and that must not hold the caller
+
+  const started = Date.now();
+  const child = await s.loop.spawnMember({ name: 'fast', brief: 'work' });
+  const took = Date.now() - started;
+
+  assert.equal(child.name, 'fast');
+  assert.ok(took < 5000, `spawn must not wait for readiness, took ${took}ms`);
+  assert.equal(s.herdr.spawns.length, 1, 'the child was launched');
+});
+
+// The other half: if it never connects, the parent still has to learn. It arrives later, as one
+// line in its own context, instead of blocking the call that asked for it.
+test('a child that never connects is reported to the parent instead of blocking it', async (t) => {
+  const s = await scenario({ spawnReadyMs: 300, deliveryWindowMs: 250 });
+  t.after(() => s.close());
   s.herdr.authenticate = false;
 
-  const controller = new AbortController();
-  const started = Date.now();
-  const running = s.loop.spawnMember({ name: 'slow', brief: 'work', signal: controller.signal });
-  setTimeout(() => controller.abort(), 100);
+  await s.loop.spawnMember({ name: 'lost', brief: 'work' });
 
-  await assert.rejects(running, /cancelled|abort/i);
-  const took = Date.now() - started;
-  assert.ok(took < 5000, `the wait must end on cancel, took ${took}ms`);
+  // The watcher runs on the loop's clock, which is injected: advance it past `spawnReadyMs`
+  // and let the delivery window close, the way the real clock would.
+  for (let i = 0; i < 60 && !s.surface.texts().some((text) => text.includes('[spawn] lost')); i += 1) {
+    await delay(60);
+    await s.timer(200);
+  }
+  const notice = s.surface.texts().find((text) => text.includes('[spawn] lost')) ?? '';
+  assert.notEqual(notice, '', 'the parent must be told the child never joined');
+  assert.match(notice, /never connected|never appeared/, 'the notice says it never joined');
 });

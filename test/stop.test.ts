@@ -172,6 +172,7 @@ test('stop() waits for a settle that is still reading the roster, and a stopped 
       remindWindowMs: 300_000,
       nudgeMax: 3,
       deliveryWindowMs: 60_000,
+      spawnReadyMs: 5000,
       spawnCmd: 'pi',
     },
     now: () => now,

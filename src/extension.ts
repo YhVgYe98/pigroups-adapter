@@ -211,6 +211,7 @@ function loopConfig(url: string, token: string): LoopConfig {
     // 概念稿 §8.1 / §13.3: the tumbling delivery window. 60 s covers two 25 s polls, so
     // a window usually sees a whole batch; `tick()` (5 s) checks when it expires.
     deliveryWindowMs: envInt('PIGROUPS_DELIVERY_WINDOW_MS', 60_000),
+    spawnReadyMs: envInt('PIGROUPS_SPAWN_READY_MS', 120_000),
     spawnCmd: resolveSpawnCmd(),
   };
 }

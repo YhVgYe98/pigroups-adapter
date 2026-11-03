@@ -404,3 +404,124 @@ esac
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// herdr puts a new tab in the FOCUSED workspace when no --workspace is given. That is how one
+// organisation ended up spread over two workspaces with the same role names twice: the tab
+// landed wherever the operator happened to be looking. The caller's own pane knows the answer.
+test('tab create pins the workspace the adapter itself lives in', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  const previous = { ws: process.env.HERDR_WORKSPACE_ID, pane: process.env.HERDR_PANE_ID };
+  try {
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+printf '%s\n' "$*" >> "$DIR/calls"
+case "$1 $2" in
+  "tab create")
+    printf '%s\n' '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wE:pX"},"tab":{"tab_id":"wE:tX"}}}'
+    ;;
+  *)
+    printf '%s\n' '{"id":"cli:other","result":{"ok":true}}'
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    process.env.HERDR_WORKSPACE_ID = 'wQ';
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    await herdr.spawn({ label: 'child', env: {} });
+
+    const calls = (await readFile(join(dir, 'calls'), 'utf8')).trim().split('\n');
+    assert.match(calls[0], /--workspace wQ\b/, `the tab must be pinned to the caller's workspace: ${calls[0]}`);
+  } finally {
+    if (previous.ws === undefined) delete process.env.HERDR_WORKSPACE_ID;
+    else process.env.HERDR_WORKSPACE_ID = previous.ws;
+    if (previous.pane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previous.pane;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// The pane id is all older herdr builds export; its prefix is the workspace.
+test('the workspace falls back to the pane id prefix when no workspace variable is set', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  const previous = { ws: process.env.HERDR_WORKSPACE_ID, pane: process.env.HERDR_PANE_ID };
+  try {
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+printf '%s\n' "$*" >> "$DIR/calls"
+case "$1 $2" in
+  "tab create")
+    printf '%s\n' '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wE:pX"},"tab":{"tab_id":"wE:tX"}}}'
+    ;;
+  *)
+    printf '%s\n' '{"id":"cli:other","result":{"ok":true}}'
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    delete process.env.HERDR_WORKSPACE_ID;
+    process.env.HERDR_PANE_ID = 'wZ:p7';
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    await herdr.spawn({ label: 'child', env: {} });
+
+    const calls = (await readFile(join(dir, 'calls'), 'utf8')).trim().split('\n');
+    assert.match(calls[0], /--workspace wZ\b/, 'the workspace comes from the pane id prefix');
+  } finally {
+    if (previous.ws === undefined) delete process.env.HERDR_WORKSPACE_ID;
+    else process.env.HERDR_WORKSPACE_ID = previous.ws;
+    if (previous.pane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previous.pane;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// agent start needs the pane to be at a shell prompt; a tab that was just created is not there
+// yet. Retrying beats failing, and failing used to fall back to typing into the pane.
+test('agent start is retried while the new tab is still printing its prompt', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+case "$1 $2" in
+  "tab create")
+    printf '%s\n' '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wE:pX"},"tab":{"tab_id":"wE:tX"}}}'
+    ;;
+  "agent start")
+    n=$(cat "$DIR/attempts" 2>/dev/null || echo 0)
+    n=$((n+1))
+    echo "$n" > "$DIR/attempts"
+    if [ "$n" -lt 3 ]; then
+      printf '%s\n' '{"error":{"code":"not_a_shell","message":"pane is not at a shell prompt"},"id":"cli"}' >&2
+      exit 1
+    fi
+    printf '%s\n' '{"id":"cli:agent:start","result":{"ok":true}}'
+    ;;
+  *)
+    printf '%s\n' '{"id":"cli:other","result":{"ok":true}}'
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    await herdr.spawn({ label: 'child', env: {} });
+
+    const attempts = Number((await readFile(join(dir, 'attempts'), 'utf8')).trim());
+    assert.equal(attempts, 3, 'the start was retried until the shell was ready');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

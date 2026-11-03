@@ -5,7 +5,7 @@
 // platform process started by `src/org.ts` — the same process the tool starts in
 // production. The only fakes are pi (tools and events) and the clock of the test.
 
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
@@ -503,6 +503,23 @@ test('two organisations with different names are two platforms and two records',
       } catch {
         // already gone
       }
+    }
+  }
+});
+
+// A test process that dies mid-run leaves its platform behind: 17 of them piled up during one
+// afternoon, each holding a port and a database. Clean up by looking at what is actually
+// running, not at what the test hoped to have finished.
+after(async () => {
+  const entries = await readdir('/proc').catch(() => [] as string[]);
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    const environ = await readFile(`/proc/${entry}/environ`, 'utf8').catch(() => '');
+    if (!environ.includes('PIGROUPS_DATA=/tmp/pigroups-orgstart-')) continue;
+    try {
+      process.kill(Number(entry), 'SIGTERM');
+    } catch {
+      // Already gone.
     }
   }
 });

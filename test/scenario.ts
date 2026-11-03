@@ -43,6 +43,7 @@ export interface LoopConfigOverrides {
   remindWindowMs?: number;
   nudgeMax?: number;
   deliveryWindowMs?: number;
+  spawnReadyMs?: number;
 }
 
 /** A loop plus its fakes, all pointed at one platform and one member identity. */
@@ -83,6 +84,7 @@ export async function createLoop(
     remindWindowMs: opts.remindWindowMs ?? DEFAULT_REMIND_WINDOW_MS,
     nudgeMax: opts.nudgeMax ?? DEFAULT_NUDGE_MAX,
     deliveryWindowMs: opts.deliveryWindowMs ?? DEFAULT_DELIVERY_WINDOW_MS,
+    spawnReadyMs: 5000,
     spawnCmd: 'pi',
   };
   const pg = new PgClient({ url: config.url, token: config.token });
