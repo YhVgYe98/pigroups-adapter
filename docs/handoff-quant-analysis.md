@@ -36,7 +36,7 @@
    - **steer 排队中被 abort = 整条消息丢失**（session 文件里 0 次出现）。
    所以：abort 后关窗立即投；被切断那一轮的批次要重投（已实现，见 `unacknowledged`）。
 3. **工具面**：删 `pg_steer`；保留 `pg_abort`；加 `pg_members`、`pg_schedule`、`pg_org_start`。
-   十个成员工具 + 一个"进门"工具。
+   十个成员工具 + 一个"进门"工具。（本轮设计修订再加 `pg_ack` → 十一个，见 §6.1 P5；**代码未动**。）
 4. **根自己开组织**：无身份会话只注册 `pg_org_start`，调它 → 找平台代码、detached 起平台、
    bootstrap、注册其余工具并起循环。记录在 `<adapterDir>/orgs/<key>/org.json`（**按组织名分目录**）。
 5. **成员进新 tab**（同一 workspace）、`agent start` 失败会重试、失败**绝不**往 pane 里打字。
@@ -178,13 +178,51 @@
 
 | # | 问题 | 状态 |
 |---|---|---|
-| 1 | `controls` 不记录"谁发起了删除" | 待查：`sys.terminated` 的 `payload` 里有 `terminated_by`，但 `controls` 列表里看不到（可能只是没打印） |
-| 2 | 关 tab 会触发级联删除 | 待设计：`reportExiting` 是否该报 `exiting`，父级是否该据此 terminate |
+| 1 | `controls` 不记录"谁发起了删除" | **已结**：`payload_json.terminated_by` 20/20 行都有（`from_id` 恒为 `sys`），只是没打印 |
+| 2 | 关 tab 会触发级联删除 | 待设计：`reportExiting` 是否该报 `exiting`，父级是否该据此 terminate（→ 下表 P1） |
 | 3 | 成员 ↔ session 文件无持久映射 | 待做（respawn 的前置） |
-| 4 | 上下文膨胀：366 条消息 / 147M token | **待分析**（任务 2） |
-| 5 | 根几乎不用 `pg_children`/`pg_members` | 待分析：是模型不选，还是工具描述不吸引 |
-| 6 | `pg_spawn` 的 `brief` 极长（几百行），是否本身就在烧 token | 待分析 |
+| 4 | 上下文膨胀：366 条消息 / 147M token | **已分析**：99.02% 是 cacheRead（4,809 轮 × 均 300K）；注入只占 0.011%。见 `~/quant-analysis-20261103/总结.md` |
+| 5 | 根几乎不用 `pg_children`/`pg_members` | 已量：`pg_say` 869 / `pg_children` 13 / `@` 0（含 codemode 内调用） |
+| 6 | `pg_spawn` 的 `brief` 极长，是否本身就在烧 token | 按 token 不是问题（20 个成员共 137 KB）；行为问题待看 |
 | 7 | 一个组织被撒到两个 workspace | 已修（0.8.0 显式 `--workspace`），但**旧组织仍是旧状态** |
+
+### 6.1 本轮设计修订（2026-11-03，**设计已对齐、代码未动**）
+
+依据：`~/quant-analysis-20261103/总结.md`（19 个会话、4,809 次请求、1.455 B token 的实测）+ 与控制台的逐条讨论。
+`docs/设计说明.md` 与 `docs/概念稿.md` 已按结论改写；**`src/` 还是旧行为**，下面每项都标了要改的位置与"会红"的测试。
+
+| # | 变更 | 依据 | 设计说明 | 代码 |
+|---|---|---|---|---|
+| P1 | 子已消失的三条路径（`pg_terminate` 级联 / 退出的 `pg.report` / 30 s `GET /v1/members/{id}`） | 三个会话合计 42 次投递、39 次是同一份冻结快照的重播，跨 6.5 h | §3.2 §5.1 | `loop.ts` 控制分发 / 新建不依赖 pane 映射的活性复核 |
+| P2 | 遥测提醒**只一次**，删掉 30 分钟超时重提；父级要盯就用 `pg_children` | 同上：重提假设"状态还在持续"可从子成员印证，子一死即不成立 | §5.2 | `state.ts:shouldReport` |
+| P3 | 未确认批次：`aborted` 重投、**`error` 丢弃** | 31 个 `(会话,序号)` 重复投递，29 个间隔 ≥2 分钟（中位 650 s）。**机制已查实**：全部 31 个集中在 5 个会话，而每个会话各收到一次 `pg.abort`，时间就在第二次投递那一刻（`controls` 表 6 条 abort 对得上）。注意：abort 切断在飞请求时 session 里记的是 `error` 不是 `aborted`，别用这个推没发生 abort | §3.4 | `loop.ts:turn_end` |
+| P4 | 欠回复改成**持久化 flag**：投递置、reply/ack 清 | 历史推导的债只能靠说话清；17 次 ack↔ack、14 次 blocked | §4.1 §4.2 | `state.ts` obligations / 新 `owed/<id>.json` |
+| P5 | 新增 `pg_ack(conv, seq?, all?)`；催办文案改英文 | 旧文案"或说明为什么不需要回"是个没有出口的出口 | §4.3 §5.3 | `extension.ts` + `loop.ts` |
+| P6 | `idle_owed` 上报但**不触发注入** | 64 条 `idle_owed` 上报里 113 个 owed 引用（15 个不同会话），101 个引用不含父级 | §5.2 | `state.ts:due` 过滤 |
+| P7 | 注入给模型的文本全改英文 | 注入的是 prompt，不是给人读的报告 | 全文 | `loop.ts` / `state.ts` 的字符串 |
+| P8 | nudge 去重：与本会话上一条文本相同则跳过（不消耗预算） | 62 条逐字重复注入里 61 条是 nudge | §4.3 | `loop.ts:nudgeText` 旁 |
+
+### 6.2 四路 review 后仍未写入设计的（下一轮开工前先看）
+
+设计文档已按 review 改掉错误表述；下列是**已确认成立、但还没写进设计**的 12 条，按麻烦程度排序。它们都需要一次设计决定，不是纯实现细节。
+
+| # | 问题 | 为什么是坑 |
+|---|---|---|
+| Q1 | `error` 丢表时**债已经置上了**：模型会被催一条它从没看到的消息 | 需要一句“催办文本里带 `#seq`，没见过的先 `pg_read`”的规则，或者投递失败时不置 flag |
+| Q2 | abort 重投会**重复置债**：已经回过的会话被再催一遍 | `mark` 需要只在 `seq > owed.seq` 时置 |
+| Q3 | `silent acking` 上报会被自己的“清去重标记”规则解除 | ack 清 `blockedReported` 与“ack 不算开口”相矛盾 |
+| Q4 | `pg.report{status:'done'}` **不清债**：汇报完仍会被催 3 次并报 blocked | 报告与回复应当至少有一个等价关系 |
+| Q5 | `blocked` 上报之后成员**没有终态位**：父级只能靠一次注入记住 | `ChildSnapshot.state` 的枚举里没有它 |
+| Q6 | `slow_turn` / `stalled` 是**单槽**状态，`of:` 未定义嵌套情形 | 两个状态同时成立时只能记一个，恢复时就丢一个 |
+| Q7 | `gone` 被当成终态，但**进程会重启**：重启后一个活着的子会被当成已删 | 需要区分“gone 事件”与“本进程启动前就有的历史” |
+| Q8 | 群债（`g:`）没有剪除路径 | 群里的人全没了之后那条债物理上不可偿 |
+| Q9 | 兜底对账**失败一次就永远不再跑**，也没人知道跑没跑成 | 启动时的网络错误 = 永久丢债 |
+| Q10 | `acks` 无上限、无生命周期约定 | 长跑成员的账本会无限长 |
+| Q11 | `pg_ack` 的 `seq ≤ 点名过或投递过的最大序号` 需要一个**新的计数器** | 现在的 `Watermarks.injected` 只暴露 `seen()`，且 gap 锚点不进它；0.5.1 删掉的 `lastDelivered` 不能复用 |
+| Q12 | P7 只给了两句英文串（催办、遥测汇总），**闲聊后缀**与 **gap 提示**还没给 | `test/delivery.test.ts` 逐字断言这两句，不给新串测试者写不出断言 |
+
+四份 review 原文（结构 40 条 / 逻辑 21 条 / 可实现性 12 条 / 事实 18 条）在 `~/quant-analysis-20261103/review/`。其中“数字类”发现已全部核对并改过；一条 review 结论**已被推翻**（R4 认为 31 次重复与 abort 无关，错在把 `error` 当成“没发生 abort”）。
+| — | `pg_spawn` 不校验 `cwd` | `data-adj` 把 review 子成员的 cwd 写成 `/tmp`；2026-11-03 判定：**模型自选，预期行为，不修** | — | — |
 
 ---
 
