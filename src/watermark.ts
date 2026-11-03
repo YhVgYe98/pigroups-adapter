@@ -49,8 +49,13 @@ export class Watermarks {
    * Read this member's map once, at startup, before the first injection point runs.
    * A corrupt file means the whole dedup record is gone (a duplicate is possible, a
    * lost message is not), so say so instead of starting from an empty map silently.
+   *
+   * Returns whether a readable map existed. The caller uses it for the one decision the
+   * watermark can answer that the ledger cannot: has this member ever been handed anything
+   * before? No map means a fresh spawn, which is the only startup where the parent's last
+   * DM is the task book (§4.2).
    */
-  async load(memberId: string): Promise<void> {
+  async load(memberId: string): Promise<boolean> {
     const path = join(this.dir, `${memberId}.json`);
     this.path = path;
     this.injected.clear();
@@ -59,7 +64,7 @@ export class Watermarks {
     try {
       raw = await readFile(path, 'utf8');
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
       throw err;
     }
 
@@ -68,13 +73,17 @@ export class Watermarks {
       injected = (JSON.parse(raw) as Partial<WatermarkFile> | null)?.injected;
     } catch {
       console.warn(`[pigroups] unreadable injection watermark at ${path}; starting with an empty one`);
-      return;
+      // The file is there, so this member has started before: not a fresh spawn. Starting
+      // empty may duplicate an injection (a lost message would be worse), and calling it a
+      // spawn would silence a debt the parent's last instruction deserves.
+      return true;
     }
-    if (typeof injected !== 'object' || injected === null) return;
+    if (typeof injected !== 'object' || injected === null) return true;
 
     for (const [conv, seq] of Object.entries(injected)) {
       if (typeof seq === 'number' && Number.isFinite(seq)) this.injected.set(conv, seq);
     }
+    return true;
   }
 
   /** §3.4: `seq <= injected[conv]` means this message has already been shown to the model. */

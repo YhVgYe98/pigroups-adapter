@@ -202,7 +202,7 @@ test('a session with no identity gets exactly one tool: pg_org_start, and nothin
   assert.match(description, /reattach/i, 'idempotence is part of the contract the model reads');
 });
 
-test('a session with an identity gets the ten member tools and is not offered pg_org_start', async (t) => {
+test('a session with an identity gets the eleven member tools and is not offered pg_org_start', async (t) => {
   isolateEnv(t);
   const platform = await bootPlatform();
   const adapterDir = await tempDir('pigroups-orgstart-');
@@ -221,7 +221,7 @@ test('a session with an identity gets the ten member tools and is not offered pg
   await fake.fire('session_start', { reason: 'startup' }, CTX);
 
   assert.equal(fake.tools.has('pg_org_start'), false, 'a member already belongs to a platform; conjuring a second org is not an offer');
-  assert.equal(fake.tools.size, 10, 'the configured surface is still the ten member tools');
+  assert.equal(fake.tools.size, 11, 'the configured surface is still the eleven member tools');
 });
 
 // ---------------------------------------------------------------------------
@@ -283,6 +283,7 @@ test('pg_org_start starts a platform, bootstraps a root, wires the member tools,
     [...fake.tools.keys()].sort(),
     [
       'pg_abort',
+      'pg_ack',
       'pg_children',
       'pg_inspect',
       'pg_members',
@@ -294,7 +295,7 @@ test('pg_org_start starts a platform, bootstraps a root, wires the member tools,
       'pg_terminate',
       'pg_whoami',
     ],
-    'after success the ten member tools appear next to the door tool',
+    'after success the eleven member tools appear next to the door tool',
   );
 
   const live = await callTool(fake, 'pg_whoami');

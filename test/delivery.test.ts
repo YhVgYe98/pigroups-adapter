@@ -91,7 +91,7 @@ test('chatter is counted and appears as a suffix on the next real delivery, neve
   assert.equal(s.surface.deliveries.length, 1, 'the real message must produce one deliver');
   const [delivery] = s.surface.deliveries;
   assert.ok(delivery.text.includes('the real task'), delivery.text);
-  assert.match(delivery.text, /另有\s*3\s*条无关消息/, `missing the chatter suffix: ${delivery.text}`);
+  assert.match(delivery.text, /and 3 unrelated messages/, `missing the chatter suffix: ${delivery.text}`);
 });
 
 test('a busy member still receives the window batch: delivery is a steer, not a wait for idle', async (t) => {
@@ -144,7 +144,7 @@ test('a gap that skipped messages naming me is delivered as a hint with its anch
 
   const delivered = s.surface.texts().join('\n');
   assert.ok(delivered.includes('pointed 4'), `the newest messages are still delivered: ${delivered}`);
-  assert.match(delivered, /跳过了\s*3\s*条/, `skipped mentions must surface a gap hint: ${delivered}`);
+  assert.match(delivered, /skipped 3 messages/, `skipped mentions must surface a gap hint: ${delivered}`);
   assert.match(
     delivered,
     new RegExp(`before\\D{0,4}${anchor}`),
@@ -196,7 +196,7 @@ test('a settle is no longer a delivery trigger; the window is', async (t) => {
   assert.deepEqual(s.loop.state().owed, [s.dm], 'the nudge was not delivered alongside the message');
 });
 
-test('a batch delivered into a provider-error turn is kept; the next aborted end re-sends it', async (t) => {
+test('a batch delivered into a provider-error turn is dropped; a later abort does not replay it', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
@@ -206,17 +206,23 @@ test('a batch delivered into a provider-error turn is kept; the next aborted end
   await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 1, 'precondition: the batch reached pi');
 
-  // A provider error proves neither that the model saw it nor that it did not: keep the copy.
+  // §3.4: a provider error proves neither that the model saw it nor that it did not, and
+  // keeping the copy would put everything delivered during that turn under suspicion. The
+  // measured cost of keeping it was 31 re-deliveries after `pg.abort` on a real run, so the
+  // rule is "delivered means seen": the table goes.
   s.surface.settle({ message: 'provider 429 ×7' });
   await s.loop.settled();
   await s.loop.flush();
-  assert.equal(s.surface.deliveries.length, 1, 'an errored end neither clears nor re-sends');
+  assert.equal(s.surface.deliveries.length, 1, 'an errored end does not re-send by itself');
 
   s.surface.settleAborted();
   await s.loop.settled();
   await s.loop.flush();
-  assert.equal(s.surface.deliveries.length, 2, 'the kept copy is re-sent when an abort takes the turn');
-  assert.ok(s.surface.deliveries[1].text.includes('the message a failed turn did not necessarily show'));
+  assert.equal(
+    s.surface.deliveries.length,
+    1,
+    'the errored end dropped the copy, so a later abort has nothing to take back',
+  );
 });
 
 test('a batch delivered into an aborted turn is put back and delivered again; a clean end clears it', async (t) => {

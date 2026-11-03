@@ -266,6 +266,31 @@ test('an unknown cmd and a pg.* payload with v:2 are injected, not dropped', asy
   assert.equal(answers.length, 0, 'a v:2 pg.inspect is not understood: it must not be answered as if it were v:1');
 });
 
+// §3.2/§6: a `pg.report` that is not `exiting` is "一行可读控制" — a conclusion a member
+// reached, not a state. Dumping the payload as JSON buries the one line the parent has to
+// read (`no output after 3 nudges`) inside `{"v":1,…}`.
+test('a pg.report is injected as one readable line, not as a payload dump', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.report', {
+    v: 1,
+    status: 'blocked',
+    text: 'no output after 3 nudges (g:quant)',
+  });
+  await s.cycle();
+  await s.timer(WINDOW); // controls take the same window as messages
+
+  const control = s.surface.textsOfKind('control').join('\n');
+  assert.match(
+    control,
+    /^\[report m_[A-Za-z0-9_]+\] blocked: no output after 3 nudges \(g:quant\)$/m,
+    `the parent reads the conclusion itself: ${control}`,
+  );
+  assert.ok(!control.includes('"status"'), `a report is a line, not a JSON dump: ${control}`);
+});
+
 // §9: "`poll` 401 | 停循环，注入一条'token 失效'给 agent，等人工". The line has to leave *before*
 // the loop stops: a stopped loop refuses every delivery (`deliverPending` answers `stopped`), so
 // a notice queued after `stop()` would die in the queue — the member would go silent without its
@@ -284,6 +309,7 @@ test('a 401 from poll hands the model the token line before the loop stops', asy
   const [line] = rejected.surface.deliveries;
   assert.equal(line.kind, 'message');
   assert.match(line.text, /token/, 'the one line says the token is invalid');
+  assert.match(line.text, /replace it and restart this session/, `the line is an English prompt: ${line.text}`);
 
   // The loop is stopped by then, and nothing may start a turn behind it.
   await within(rejected.loop.stop(), 'the loop to stop after a 401');

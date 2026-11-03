@@ -36,10 +36,13 @@ test('the startup brief and the polled copy of the same message are injected onc
     1,
     `the same (conv, seq) must be injected exactly once, got:\n${text}`,
   );
-  assert.equal(
-    s.loop.state().owed.filter((conv) => conv === s.dm).length,
-    1,
-    `the conversation must be owed exactly once, got ${JSON.stringify(s.loop.state().owed)}`,
+  // §4.2: what the member was handed at startup is its brief, and the brief is not a debt
+  // (the member cannot answer its own task book) — so the dedup is visible in the text
+  // above and in the absence of a flag, not in a count of one.
+  assert.deepEqual(
+    s.loop.state().owed,
+    [],
+    `the startup brief must not leave a debt, got ${JSON.stringify(s.loop.state().owed)}`,
   );
 });
 

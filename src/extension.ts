@@ -48,7 +48,7 @@ export function resolveSpawnCmd(
 export default function pigroupsExtension(pi: PiLike): void {
   // Two entry paths, one member session.
   //
-  // Configured (概念稿 §7.4): the session was handed an identity, so the ten member
+  // Configured (概念稿 §7.4): the session was handed an identity, so the eleven member
   // tools exist and `session_start` starts the loop. `pg_org_start` is deliberately
   // NOT registered here: this session already belongs to a platform, and a tool that
   // could conjure a second organisation from inside a member would be a way to end up
@@ -300,6 +300,44 @@ function buildTools(
       },
     },
     {
+      name: 'pg_ack',
+      label: 'PiGroups ack',
+      description:
+        'Confirm an owed conversation without sending anything: the owed flag goes, no message is ' +
+        'written and no new debt appears at the other end. This is the way to close a notification you ' +
+        'do not intend to answer. `conv` is required; clearing every owed conversation needs an ' +
+        'explicit `all: true`. `seq` may not exceed the largest seq this adapter delivered or named ' +
+        'in that conversation — call `pg_read` first to confirm something newer. An ack keeps the ' +
+        'nudge budget and the blocked episode as they are: three confirmations in a row without a ' +
+        'reply are reported to the parent as `silent acking`.',
+      parameters: {
+        type: 'object',
+        properties: {
+          conv: { type: 'string', description: 'Conversation id (`dm:<a>_<b>` or `g:<owner>`).' },
+          seq: {
+            type: 'number',
+            description: 'The seq being confirmed; must not exceed what this adapter delivered or named.',
+          },
+          all: {
+            type: 'boolean',
+            description: 'Clear every owed conversation. Must be explicit; never the default.',
+          },
+        },
+        required: ['conv'],
+        additionalProperties: false,
+      },
+      execute: async (_id, params) => {
+        const result = await requireLoop().ack({
+          // A missing `conv` must reach the loop as "missing": `String(undefined)` is the
+          // conversation named "undefined", and the loop cannot refuse that (§4.3).
+          conv: typeof params.conv === 'string' ? params.conv : '',
+          seq: typeof params.seq === 'number' ? params.seq : undefined,
+          all: params.all === true,
+        });
+        return text(JSON.stringify(result));
+      },
+    },
+    {
       name: 'pg_children',
       label: 'PiGroups children',
       description:
@@ -384,12 +422,12 @@ function buildTools(
         additionalProperties: false,
       },
       execute: async (_id, params) => {
-        const conv = String(params.conv);
+        const conv = typeof params.conv === 'string' ? params.conv : '';
         const before = typeof params.before === 'number' ? params.before : undefined;
         const limit = typeof params.limit === 'number' ? params.limit : undefined;
-        const history = await pg.messages({ to: conv, before, limit });
-        const lines = history.items.map((m) => `[${m.to}#${m.seq}] ${m.sender_name}: ${m.body}`);
-        return text(lines.join('\n'));
+        // §4.3: reading is the documented way to make a later seq confirmable, so the read
+        // has to go through the loop — the ledger is the half that knows what was seen.
+        return text(await requireLoop().read({ conv, before, limit }));
       },
     },
     {

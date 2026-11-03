@@ -9,11 +9,27 @@ import { join } from 'node:path';
 import { AdapterLoop } from '../src/loop.ts';
 import { PgClient, PgGone } from '../src/pgclient.ts';
 import { FakeClock, FakeSurface, createMember, dmId, poll, removeMember, send, waitFor } from './support.ts';
-import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, payloads, scenario } from './scenario.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, payloads, scenario, type Scenario } from './scenario.ts';
+
+/**
+ * One whole nudge cycle for a conversation that is already owed: a new inbound message
+ * (a new `seq`, so the text changes and §4.3 does not skip it), its delivery, then the
+ * nudge for it.
+ */
+async function nudgeRound(s: Scenario, text: string): Promise<void> {
+  await send(s.platform, s.parent!.token, s.me.id, text);
+  await s.cycle();
+  await s.timer(WINDOW); // the message goes out
+  await s.settle(); // the turn ends, so a nudge becomes due
+  await s.timer(WINDOW); // the nudge goes out
+}
 
 test('an owed reply is nudged on the window after the turn settles; after replying it is not', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
+  // Drain the startup sequence first: a DM that is there before the first poll is the
+  // brief, and §4.2 says the brief is not a debt (the member cannot answer its task book).
+  await s.cycle();
 
   await send(s.platform, s.parent!.token, s.me.id, 'status please');
   await s.cycle();
@@ -25,6 +41,12 @@ test('an owed reply is nudged on the window after the turn settles; after replyi
   await s.timer(WINDOW);
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(nudges.length, 1, 'a DM from the parent with no reply must be nudged once');
+  assert.match(nudges[0], /^Unanswered messages: /, `the nudge is an English prompt: ${nudges[0]}`);
+  assert.match(
+    nudges[0],
+    /Reply, or call pg_ack to clear this notification\./,
+    `the nudge names the way out (§4.3): ${nudges[0]}`,
+  );
   assert.ok(nudges[0].includes(s.dm), `the nudge must name the conversation: ${nudges[0]}`);
 
   const said = await s.loop.say(s.parent!.id, 'ack, working on it');
@@ -68,6 +90,7 @@ test('@all produces exactly one obligation for that conversation, not one per me
 test('queued work wins the window over a nudge, and the nudge waits for a quiet window', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
+  await s.cycle(); // drain the startup sequence: a DM already there would be the brief
 
   await send(s.platform, s.parent!.token, s.me.id, 'status please');
   await s.cycle();
@@ -144,15 +167,12 @@ test('flush() reports what it did: false while the window is open, true when it 
 test('three nudges without an outbound message produce an adapter-authored blocked report to the parent', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
-
-  await send(s.platform, s.parent!.token, s.me.id, 'report back');
   await s.cycle();
-  await s.timer(WINDOW);
 
-  for (let i = 0; i < 5; i += 1) {
-    await s.settle();
-    await s.timer(WINDOW);
-  }
+  // Each nudge has to carry something new: §4.3 skips a verbatim repeat, so the parent
+  // writes again between nudges and the text names a fresh `#seq`. The budget still stops
+  // at `nudgeMax`, and the report that follows is still the adapter's own.
+  for (let i = 0; i < s.config.nudgeMax + 2; i += 1) await nudgeRound(s, `report back ${i}`);
 
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(nudges.length, s.config.nudgeMax, `nudging must stop at ${s.config.nudgeMax}, got ${nudges.length}`);
@@ -163,6 +183,49 @@ test('three nudges without an outbound message produce an adapter-authored block
   assert.ok(String(blocked[0].text ?? '').length > 0, 'the blocked report carries a text');
 });
 
+// §4.3 (design decision): a verbatim repeat is not delivered, but it is still a nudge that
+// came due, so it spends one unit of the budget. Otherwise a frozen debt could be "nudged"
+// forever without ever reaching `no output after N nudges`, and `idle_owed` — which does not
+// carry the budget — would leave the parent unable to see either side of the loop.
+test('a skipped verbatim nudge spends the budget, so a frozen debt still reports blocked', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  await send(s.platform, s.parent!.token, s.me.id, 'report back');
+  await s.cycle();
+  await s.timer(WINDOW); // delivered → owed
+  await s.settle();
+  await s.timer(WINDOW); // nudge #1: delivered
+  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'precondition: the first nudge went out');
+  assert.equal(s.loop.state().nudges[s.dm], 1, 'precondition: the first nudge spent one unit of budget');
+
+  // Nothing changed — same conversation, same seq — so the next two dues are verbatim
+  // repeats. They must not be injected, and they must still be counted.
+  const mark = s.surface.mark();
+  await s.settle();
+  await s.timer(WINDOW); // due #2: skipped, counted
+  await s.settle();
+  await s.timer(WINDOW); // due #3: skipped, counted
+  assert.equal(
+    s.surface.since(mark).length,
+    0,
+    `a verbatim repeat must not be delivered: ${JSON.stringify(s.surface.since(mark))}`,
+  );
+  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'only the first nudge reached the model');
+  assert.equal(s.loop.state().nudges[s.dm], 3, 'every skipped due spends one unit of the budget');
+
+  await s.settle(); // the spent budget is seen at this settle
+  const blocked = payloads(await s.controlsToParent(), 'pg.report').filter(
+    (payload) => payload.status === 'blocked' && payload.text === `no output after 3 nudges (${s.dm})`,
+  );
+  assert.equal(
+    blocked.length,
+    1,
+    `a frozen debt must still reach the blocked report after 3 nudges, got ${JSON.stringify(blocked)}`,
+  );
+});
+
 // §4.3: "已经报过 blocked 是一个只在成员开口时才失效的状态", not something an inbound message
 // resets. A fresh message continues the same episode; only `say()` closes it and opens the next.
 test('a new inbound message neither resets the nudge budget nor re-reports blocked; only say() opens a new episode', async (t) => {
@@ -170,14 +233,10 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
   t.after(() => s.close());
   await s.cycle();
 
-  await send(s.platform, s.parent!.token, s.me.id, 'report back');
-  await s.cycle();
+  // Spend the budget: §4.3 skips a verbatim repeat, so every nudge names a new `#seq`.
+  for (let i = 0; i < s.config.nudgeMax; i += 1) await nudgeRound(s, `report back ${i}`);
+  await s.settle(); // the spend is seen at the next settle, which reports blocked
   await s.timer(WINDOW);
-
-  for (let i = 0; i < s.config.nudgeMax + 2; i += 1) {
-    await s.settle();
-    await s.timer(WINDOW);
-  }
 
   assert.equal(
     s.surface.textsOfKind('nudge').length,
@@ -218,10 +277,9 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
   await s.cycle();
   await s.timer(WINDOW);
   const secondEpisode = s.surface.textsOfKind('nudge').length;
-  for (let i = 0; i < s.config.nudgeMax + 2; i += 1) {
-    await s.settle();
-    await s.timer(WINDOW);
-  }
+  for (let i = 0; i < s.config.nudgeMax; i += 1) await nudgeRound(s, `second half ${i}`);
+  await s.settle(); // the spent budget reports blocked
+  await s.timer(WINDOW);
 
   assert.equal(
     s.surface.textsOfKind('nudge').length,
@@ -274,13 +332,11 @@ test('an exhausted conversation reports blocked once while the live one keeps be
   t.after(() => s.close());
   await s.cycle();
 
-  await send(s.platform, s.parent!.token, s.me.id, 'the dm that never gets answered');
-  await s.cycle();
+  // The DM spends its whole budget: §4.3 skips a verbatim repeat, so each round brings a
+  // new inbound message and the nudge names a new `#seq`.
+  for (let i = 0; i < s.config.nudgeMax; i += 1) await nudgeRound(s, `the dm that never gets answered ${i}`);
+  await s.settle(); // the spent budget reports blocked
   await s.timer(WINDOW);
-  for (let i = 0; i < s.config.nudgeMax + 1; i += 1) {
-    await s.settle();
-    await s.timer(WINDOW);
-  }
 
   assert.equal(s.surface.textsOfKind('nudge').length, s.config.nudgeMax, 'the DM spends its whole budget');
   assert.equal(
@@ -317,10 +373,16 @@ test('an exhausted conversation reports blocked once while the live one keeps be
     'the still-live conversation must not produce another blocked report',
   );
 
-  for (let i = 0; i < s.config.nudgeMax + 1; i += 1) {
+  // The live conversation gets a full budget of its own, again one new `#seq` per nudge.
+  for (let i = 0; i < s.config.nudgeMax - 1; i += 1) {
+    await send(s.platform, s.parent!.token, s.group, `and this one too ${i}`, [s.me.id]);
+    await s.cycle();
+    await s.timer(WINDOW);
     await s.settle();
     await s.timer(WINDOW);
   }
+  await s.settle(); // the newly spent budget reports blocked
+  await s.timer(WINDOW);
 
   assert.equal(
     s.surface.textsOfKind('nudge').length - nudgesBefore,
@@ -342,7 +404,7 @@ test('an exhausted conversation reports blocked once while the live one keeps be
 // no public drive can hold the report open at a chosen instant.
 interface LoopInternals {
   aborting: boolean;
-  obligations: { recordNudge(conv: string): number };
+  nudges: { record(conv: string): number };
   markNudgeDue(): Promise<void>;
   pg: { sendControl(input: unknown): Promise<unknown> };
 }
@@ -382,7 +444,7 @@ test('an abort during the blocked report stops the nudge to the live conversatio
   await s.timer(WINDOW);
   const inner = internals(s.loop);
   assert.equal(
-    inner.obligations.recordNudge(s.dm),
+    inner.nudges.record(s.dm),
     s.config.nudgeMax,
     'precondition: the DM has spent its budget, the group has not',
   );
@@ -863,4 +925,61 @@ test('say() answering 410 forgets the conversation the peer can no longer answer
     'the platform must answer 410 for a deleted member',
   );
   assert.deepEqual(s.loop.state().owed, [], 'the 410 pruned the unpayable conversation immediately');
+});
+
+// §4.3: the same nudge text is not delivered twice in a session, but each skipped due still
+// spends one unit of budget. 61 of the 62 verbatim duplicate injections measured on the real
+// run were nudges: the same `(conv, #seq)` was already in the context above.
+test('an identical nudge is skipped and logged, but the skip still spends the budget', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle();
+
+  await send(s.platform, s.parent!.token, s.me.id, 'report back');
+  await s.cycle();
+  await s.timer(WINDOW); // the message is delivered
+  await s.settle();
+  await s.timer(WINDOW); // the first nudge
+  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'precondition: the first nudge went out');
+  assert.equal(s.loop.state().nudges[s.dm], 1, 'precondition: the first nudge spent one unit of budget');
+
+  // Nothing changed: same conversation, same seq, so the text is verbatim the same.
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]): void => {
+    warnings.push(args.map(String).join(' '));
+  };
+  t.after(() => {
+    console.warn = original;
+  });
+
+  const mark = s.surface.mark();
+  await s.settle();
+  await s.timer(WINDOW);
+
+  assert.equal(
+    s.surface.since(mark).length,
+    0,
+    `a verbatim repeat must not be delivered: ${JSON.stringify(s.surface.since(mark))}`,
+  );
+  assert.equal(s.loop.state().nudges[s.dm], 2, 'a skipped nudge still spends one unit of budget');
+  const logged = warnings.filter((line) => line.includes('skipped a repeated nudge, identical to the last one this session'));
+  assert.equal(logged.length, 1, `the skip must be logged once, got ${JSON.stringify(warnings)}`);
+  assert.ok(
+    logged[0].includes(`Unanswered messages: ${s.dm}`),
+    `the log has to show which nudge was skipped, not just that one was: ${logged[0]}`,
+  );
+
+  // New information — a new seq — makes the text different, so the nudge goes out again.
+  await send(s.platform, s.parent!.token, s.me.id, 'any news?');
+  await s.cycle();
+  await s.timer(WINDOW); // the message
+  await s.settle();
+  await s.timer(WINDOW); // the nudge naming the new seq
+  assert.equal(
+    s.surface.textsOfKind('nudge').length,
+    2,
+    `a nudge with new information must be delivered: ${JSON.stringify(s.surface.textsOfKind('nudge'))}`,
+  );
+  assert.equal(s.loop.state().nudges[s.dm], 3, 'the delivered nudge moves the budget again');
 });

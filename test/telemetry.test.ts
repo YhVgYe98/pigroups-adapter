@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { command, createMember, delay, send } from './support.ts';
+import { command, createMember, delay, removeMember, send } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, payloads, scenario } from './scenario.ts';
 
 test('a tool call past the threshold emits exactly one stalled attention, and recovery emits recovered', async (t) => {
@@ -65,6 +65,8 @@ test('two children stalled in one window produce one consolidated nudge; a windo
   await s.timer(WINDOW); // the delivery window closes
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(nudges.length, 1, `two events in one window mean one nudge, got ${nudges.length}`);
+  assert.match(nudges[0], /^2 children need attention:$/m, `the summary is an English prompt: ${nudges[0]}`);
+  assert.match(nudges[0], /error: provider 429 ×7/, `the error note is rendered under an English label: ${nudges[0]}`);
   assert.ok(nudges[0].includes(a.id), `the summary must name the stalled child: ${nudges[0]}`);
   assert.ok(nudges[0].includes(b.id), `the summary must name the failing child: ${nudges[0]}`);
 
@@ -296,6 +298,275 @@ test('the parent sees a child’s last round in its snapshot and in the consolid
   await s.timer(WINDOW); // the delivery window closes
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(nudges.length, 1, `precondition: one consolidated reminder, got ${JSON.stringify(s.surface.texts())}`);
-  assert.ok(nudges[0].includes('refactoring the scheduler'), `the reminder says what the child last said: ${nudges[0]}`);
-  assert.ok(nudges[0].includes('edit'), `the reminder names the last tool: ${nudges[0]}`);
+  // P7: every prompt injected into a model is English. Asserting only that the child's own
+  // data survives would let the labels (`said:`, `last tool`, `(failed)`) go back to Chinese
+  // unnoticed — they were 8 of the 13 strings the translation touched.
+  assert.match(
+    nudges[0],
+    new RegExp(
+      `^1 child needs attention:\\n- ${child.id} \\(coder\\) stalled 5m in bash: sleep 600; ` +
+        `last round said: refactoring the scheduler, last tool edit: src/scheduler\\.ts \\(failed\\)$`,
+      'm',
+    ),
+    `the whole line is the English prompt the design pins: ${nudges[0]}`,
+  );
+});
+
+// §5.1 path 2: a child that says it is exiting is a state change, not a line of text.
+// The control reaches the parent as `pg.report{status:'blocked', text:'exiting'}`; leaving it
+// in the default branch would inject the payload and leave the child in its last state forever.
+test('a pg.report with text exiting puts the sender in the table as gone instead of injecting it', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'leaver');
+
+  await command(s.platform, child.token, s.me.id, 'pg.report', {
+    v: 1,
+    status: 'blocked',
+    text: 'exiting',
+  });
+  await s.cycle();
+
+  assert.equal(s.surface.deliveries.length, 0, 'an exit report is not a line of text for the parent');
+  const rows = await s.loop.children();
+  assert.equal(
+    rows.find((row) => row.id === child.id)?.state,
+    'gone',
+    `the sender must be gone in the table, got ${JSON.stringify(rows)}`,
+  );
+
+  await s.timer(0); // gone skips the reminder merge window
+  await s.timer(WINDOW); // but it still waits for the delivery window
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, `gone must be reported once, got ${JSON.stringify(s.surface.texts())}`);
+  assert.ok(nudges[0].includes(child.id), `the report must name the child that left: ${nudges[0]}`);
+});
+
+// §5.1 path 3: the liveness recheck must cover the telemetry table, not the pane map.
+// `panes` only holds members this process spawned, so a parent that restarted (or a child
+// created by an ancestor) would never be checked, and an `error` entry would stay forever.
+test('a child that dies is rechecked from the telemetry table even when no pane is mapped', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'ghost');
+
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'error',
+    since: s.clock.now(),
+    note: 'provider 429',
+  });
+  await s.cycle();
+  assert.equal(s.herdr.spawns.length, 0, 'precondition: this process spawned nobody, so its pane map is empty');
+  assert.equal(
+    (await s.loop.children()).find((row) => row.id === child.id)?.state,
+    'error',
+    'precondition: the child is in the telemetry table',
+  );
+
+  await removeMember(s.platform, s.me.token, child.id); // a delete this process never issued
+  s.clock.advance(30_000); // the recheck TTL
+  await s.cycle();
+
+  await s.timer(0); // gone skips the reminder merge window
+  await s.timer(WINDOW);
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, `a dead child must be reported gone, got ${JSON.stringify(s.surface.texts())}`);
+  assert.match(nudges[0], /gone/, `the reminder must say the child is gone: ${nudges[0]}`);
+  assert.ok(nudges[0].includes(child.id), `the reminder must name the child: ${nudges[0]}`);
+});
+
+// §5.2: one reminder per state entry, with no timeout repeat. The old rule ("still going
+// after 30 minutes, said again") assumed the state could be confirmed by the child; a dead
+// child confirms nothing, and that is how one frozen snapshot was replayed for 6.5 hours.
+// A parent that wants to keep watching calls `pg_children()`.
+test('a state that is still there hours later is reminded once, never on a repeat interval', async (t) => {
+  const s = await scenario({ role: 'root', remindWindowMs: 60_000 });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'stuck');
+
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'stalled',
+    since: s.clock.now(),
+    tool: { name: 'bash', elapsed_ms: 720_000, preview: 'sleep 600' },
+  });
+  await s.cycle();
+  await s.timer(); // the reminder merge window expires and the reminder enters the queue
+  await s.timer(WINDOW); // the delivery window closes and delivers it
+  assert.equal(
+    s.surface.textsOfKind('nudge').length,
+    1,
+    `precondition: one reminder, got ${JSON.stringify(s.surface.texts())}`,
+  );
+
+  // A second event for the same state is not a new state entry, so it must not re-arm the
+  // one reminder this entry gets. Re-arming here is the exact bug that replayed a frozen
+  // snapshot every 30 minutes for 6.5 hours.
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'stalled',
+    since: s.clock.now(),
+    tool: { name: 'bash', elapsed_ms: 720_000, preview: 'sleep 600' },
+  });
+  await s.cycle();
+
+  // Well past the removed 30 minute repeat interval, twice.
+  for (let i = 0; i < 2; i += 1) {
+    await s.timer(31 * 60_000);
+    await s.timer(WINDOW);
+  }
+
+  assert.equal(
+    s.surface.textsOfKind('nudge').length,
+    1,
+    `the same state entry must not be reminded again, got ${JSON.stringify(s.surface.texts())}`,
+  );
+  const [row] = await s.loop.children();
+  assert.equal(row.state, 'stalled', 'and the state stays in the table for pg_children to read');
+});
+
+// §5.2: `idle_owed` is reported (the parent can read it in `pg_children`) but never
+// injects. The debt is the child's, in a conversation the parent may not even be in:
+// 101 of 113 owed references measured in the real run named a conversation without the
+// parent, so a reminder about them spends a whole context request on nothing.
+test('idle_owed stays in the table but opens no window and joins no summary', async (t) => {
+  const s = await scenario({ role: 'root', remindWindowMs: 60_000, deliveryWindowMs: 1_000 });
+  t.after(() => s.close());
+  const indebted = await createMember(s.platform, s.me, 'indebted');
+  const broken = await createMember(s.platform, s.me, 'broken');
+
+  await command(s.platform, indebted.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: indebted.id,
+    name: indebted.name,
+    state: 'idle_owed',
+    since: s.clock.now(),
+    owed: ['g:someone-else'],
+  });
+  await s.cycle();
+
+  // `idle_owed` must not open the window, and the only way to see the difference is time:
+  // if it opened one at T, an actionable state arriving at T+30 s would ride that window
+  // and the reminder would be queued at T+60 s; opening its own window at T+30 s means
+  // nothing can be queued before T+90 s. (An idle-only window ends silently, so delivery
+  // contents alone cannot tell the two apart — the instant matters.)
+  await s.timer(30_000);
+  await command(s.platform, broken.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: broken.id,
+    name: broken.name,
+    state: 'error',
+    since: s.clock.now(),
+    note: 'provider 429',
+  });
+  await s.cycle();
+  await s.timer(31_000); // T+61: the idle_owed window would have expired by now
+  await s.timer(2_000); // and its reminder would have left through the 1 s delivery window
+
+  assert.equal(
+    s.surface.deliveries.length,
+    0,
+    `idle_owed opened a window that carried someone else's event out early: ${JSON.stringify(s.surface.texts())}`,
+  );
+  const indebtedRow = (await s.loop.children()).find((row) => row.id === indebted.id);
+  assert.equal(indebtedRow?.state, 'idle_owed', 'the state is still in the table for pg_children');
+
+  // The error's own window expires 60 s after it arrived; the summary that comes out names
+  // that child only.
+  await s.timer(28_000); // T+91: the window the error opened expires
+  await s.timer(2_000); // and the delivery window closes
+
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, `one reminder for the actionable child, got ${JSON.stringify(s.surface.texts())}`);
+  assert.ok(nudges[0].includes(broken.id), `the summary names the failing child: ${nudges[0]}`);
+  assert.ok(!nudges[0].includes(indebted.id), `idle_owed must never join a summary: ${nudges[0]}`);
+});
+
+// §5.2: "报一次就从表里删掉". A `gone` row that stays would make `pg_children()` list a dead
+// child as gone forever, long after the parent was told once.
+test('a gone child is dropped from the table once the reminder is delivered', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'departed');
+
+  await command(s.platform, child.token, s.me.id, 'pg.report', { v: 1, status: 'blocked', text: 'exiting' });
+  await s.cycle();
+  await s.timer(0);
+  await s.timer(WINDOW);
+  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'precondition: the disappearance was reported');
+
+  const rows = await s.loop.children();
+  assert.notEqual(
+    rows.find((row) => row.id === child.id)?.state,
+    'gone',
+    `a reported disappearance is no longer a state in the table: ${JSON.stringify(rows)}`,
+  );
+});
+
+// §5.1 path 2 + path 3 are two ways to learn the same fact. A child that reported `exiting`
+// and then disappeared from the platform must not be reported gone a second time — and the
+// pane map is what keeps the recheck alive, because a close that failed leaves the mapping in
+// place for a retry. Left alone, that retry rebuilt the row every poll cycle and injected a
+// fresh "1 child needs attention … gone" each time: the 6.5 hour replay with a new trigger.
+test('one disappearance is reported once, even when the pane close fails and the check is retried', async (t) => {
+  // A short delivery window: the 30 s liveness bound has to still be running when the next
+  // poll happens, so the test cannot spend a whole 60 s window to get the reminder out.
+  const s = await scenario({ role: 'root', deliveryWindowMs: 1_000 });
+  t.after(() => s.close());
+  const child = await s.loop.spawnMember({ brief: 'watch the build' });
+  const goneLines = (): string[] =>
+    s.surface.textsOfKind('nudge').filter((text) => new RegExp(`${child.id}.*gone`).test(text));
+  // Count the liveness questions themselves: delivery text cannot show whether the 30 s
+  // bound was honoured, and a platform that is asked once per poll is what this guards.
+  let checks = 0;
+  const realGetMember = s.pg.getMember.bind(s.pg);
+  (s.pg as unknown as { getMember: (id: string) => Promise<unknown> }).getMember = async (id: string) => {
+    checks += 1;
+    return realGetMember(id);
+  };
+
+  // herdr is down: the pane stays mapped, which is exactly the retry case (§5.3).
+  s.herdr.failClose = new Error('herdr daemon is not running');
+  await removeMember(s.platform, s.me.token, child.id);
+
+  s.clock.advance(30_000);
+  await s.cycle(); // getMember → gone, the pane close fails
+  await s.timer(0); // gone skips the merge window
+  await s.timer(2_000); // and only the 1 s delivery window has to close
+  assert.equal(goneLines().length, 1, `the disappearance is reported once: ${JSON.stringify(s.surface.texts())}`);
+
+  // The background spawn watchdog notices the same 30 s and gives up; it asks `getMember`
+  // too, so let it finish before counting.
+  await delay(400);
+  checks = 0;
+
+  // A second look inside the 30 s bound is not a question worth asking the platform.
+  await s.cycle();
+  await s.timer(0);
+  await s.timer(2_000);
+  assert.equal(checks, 0, 'a poll inside the 30 s bound must not re-ask about a member it just checked');
+  assert.equal(
+    goneLines().length,
+    1,
+    `a retried recheck inside the TTL must not re-report: ${JSON.stringify(s.surface.texts())}`,
+  );
+
+  // And a recheck after the bound still describes the same disappearance, not a new one.
+  s.clock.advance(30_001);
+  await s.cycle();
+  await s.timer(0);
+  await s.timer(2_000);
+  assert.equal(checks, 1, 'after the bound the member is checked again — the retry the failed close needs');
+  assert.equal(
+    goneLines().length,
+    1,
+    `a recheck after the TTL must not re-report either: ${JSON.stringify(s.surface.texts())}`,
+  );
 });

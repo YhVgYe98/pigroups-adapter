@@ -8,9 +8,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { Journal } from './journal.ts';
-import { ObligationTable, TelemetryTable } from './state.ts';
+import { OwedLedger } from './owed.ts';
+import { NudgeBudget, TelemetryTable } from './state.ts';
 import { Watermarks } from './watermark.ts';
-import type { AttentionEvent, AttentionState, AttentionTool, LastRound, LastTool, Obligation } from './state.ts';
+import type { AttentionEvent, AttentionState, AttentionTool, LastRound, LastTool } from './state.ts';
+import type { OwedFlag } from './owed.ts';
 import { PgError, PgGone, PgPollBusy, PgUnavailable } from './pgclient.ts';
 import type {
   PgClient,
@@ -91,6 +93,12 @@ export interface ScheduleResult {
   pending: number;
 }
 
+/** What `pg_ack` did: the flags it cleared, and the debts that are still there (§4.3). */
+export interface AckResult {
+  cleared: Array<{ conv: string; seq: number }>;
+  remaining: Array<{ conv: string; seq: number }>;
+}
+
 export interface LoopDeps {
   pg: PgClient;
   surface: PiSurface;
@@ -118,6 +126,12 @@ interface PendingDelivery {
    * against the watermark when enqueued, but delivery must not advance it (§3.4).
    */
   anchor?: true;
+  /**
+   * This delivery must not set an owed flag (§4.2: "启动简报不置"). The task book a member
+   * is spawned with is a one-to-one message from its parent, so the normal rule would give
+   * it a debt for the work it was just handed. Set only for a fresh spawn (`injectBrief`).
+   */
+  noOwed?: boolean;
 }
 
 /**
@@ -150,6 +164,8 @@ const LAST_TEXT_CHARS = 500;
 const SCHEDULE_MIN_SECONDS = 5;
 const SCHEDULE_MAX_SECONDS = 86_400;
 const SCHEDULE_MAX_PENDING = 8;
+/** §4.3: this many confirmations in a row, with no reply between them, are reported once. */
+const SILENT_ACK_LIMIT = 3;
 /** §9: after five `poll_in_progress` conflicts in a row, rest this long. */
 const POLL_CONFLICT_LIMIT = 5;
 const POLL_CONFLICT_REST_MS = 30_000;
@@ -232,7 +248,13 @@ export class AdapterLoop {
 
   private readonly journal: Journal;
   private readonly watermark: Watermarks;
-  private readonly obligations = new ObligationTable();
+  /**
+   * The owed-reply flags (§4.2). Persisted, unlike the old history-derived table: a debt
+   * can only be trusted across a restart if it is a fact on disk, not an inference.
+   */
+  private readonly owed: OwedLedger;
+  /** The nudge budget and blocked episodes (§4.3). In memory: an episode is this process's. */
+  private readonly nudges = new NudgeBudget();
   private readonly telemetry: TelemetryTable;
   private readonly pending: PendingDelivery[] = [];
   private readonly queuedByJournal = new Map<string, number>();
@@ -244,6 +266,11 @@ export class AdapterLoop {
   private windowStart: number | null = null;
   /** A nudge is due but must wait for a window with nothing else in it (§8.4). */
   private nudgeDue = false;
+  /**
+   * The last nudge text this session delivered (§4.3). A nudge identical to this one is
+   * skipped: the same conversation at the same seq is already in the context.
+   */
+  private lastNudgeText: string | undefined;
   /**
    * The next windowed item goes out at the next opportunity, without waiting for a
    * window. Armed by an abort (概念稿 §8.3 ①): the window exists to avoid interrupting
@@ -277,6 +304,14 @@ export class AdapterLoop {
    * The episode stands until the member speaks: only `say()` clears an entry.
    */
   private readonly blockedReported = new Set<string>();
+  /**
+   * §4.3: consecutive confirmations per conversation since the last reply. A confirmation
+   * is deliberately silent (no message, no new debt), so "acking instead of working" can
+   * only be seen from this side; three in a row without a reply is reported once.
+   */
+  private readonly silentAcks = new Map<string, number>();
+  /** The dedup marker for that report; only `say()` clears it, so one episode reports once. */
+  private readonly silentAckReported = new Set<string>();
 
   private chatter = 0;
   /**
@@ -322,6 +357,15 @@ export class AdapterLoop {
   private rosterRetryAt = 0;
   /** When each mapped child's status was last confirmed with `GET /v1/members/{id}` (§5.3). */
   private readonly paneCheckedAt = new Map<string, number>();
+  /**
+   * Members this process already reported `gone` (§5.1). The telemetry row is deleted as soon
+   * as the reminder is delivered (§5.2), so the row cannot be the dedup key: three paths can
+   * learn the same disappearance (this adapter's delete, the member's own `exiting`, the 30 s
+   * recheck), and a failed pane close keeps the recheck alive. Without this set each path
+   * rebuilt the row and the parent got one urgent injection per path — the 6.5 hour replay
+   * with a new trigger. Memory only: what survives a restart is Q7's problem, not this one.
+   */
+  private readonly goneReported = new Set<string>();
   /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
   private aborting = false;
   /** Ends an in-flight abort wait when `stop()` runs (§3.2). */
@@ -340,6 +384,7 @@ export class AdapterLoop {
     this.now = deps.now;
     this.journal = new Journal(deps.config.adapterDir);
     this.watermark = new Watermarks(deps.config.adapterDir);
+    this.owed = new OwedLedger(deps.config.adapterDir);
     this.telemetry = new TelemetryTable({ windowMs: deps.config.remindWindowMs });
     this.eventUnsub = deps.surface.onEvent((event) => this.handleEvent(event));
     // The settle reaction lives here, not in `start()` (§2.3): nudges (§4.3) and
@@ -393,7 +438,7 @@ export class AdapterLoop {
     if (run && !this.inLoop) work.push(run.catch(() => undefined));
     const flush = this.flushInFlight;
     if (flush) work.push(flush.catch(() => undefined));
-    // A settle that is still inside `pruneUnanswerableDms()`/`reconcilePanes()` has
+    // A settle that is still inside `pruneUnanswerableDms()`/`reconcileMembers()` has
     // not started its delivery yet, so `deliveries` cannot see it. Wait for the whole
     // reaction: it re-checks `stopped` after each await and will not deliver now.
     for (const settle of this.settles) work.push(settle.catch(() => undefined));
@@ -413,9 +458,10 @@ export class AdapterLoop {
     try {
       await this.ensureReady();
       // The poll loop keeps running while the member is idle, which makes it the one
-      // path that can notice an ancestor's delete between settles (§5.3). Bounded by
-      // `PANE_CHECK_TTL_MS`, and it returns at once when no pane is mapped.
-      await this.reconcilePanes();
+      // path that can notice an ancestor's delete between settles (§5.3, §5.1 path 3).
+      // Bounded by `PANE_CHECK_TTL_MS`, and it returns at once when neither a pane nor
+      // a telemetry entry names a member.
+      await this.reconcileMembers();
       await this.flush();
 
       this.pollAbort ??= new AbortController();
@@ -509,10 +555,10 @@ export class AdapterLoop {
     const batch = this.pending.slice(0, DELIVER_BATCH);
     let text: string;
     let kind: DeliverKind;
-    let nudged: Obligation[] = [];
+    let nudged: OwedFlag[] = [];
     if (batch.length > 0) {
       let joined = batch.map((item) => item.text).join('\n');
-      if (this.chatter > 0) joined += `\n[另有 ${this.chatter} 条无关消息]`;
+      if (this.chatter > 0) joined += `\n[and ${this.chatter} unrelated messages]`;
       text = joined;
       kind = batch.some((item) => item.kind === 'control') ? 'control' : batch[0].kind;
     } else {
@@ -524,6 +570,23 @@ export class AdapterLoop {
       }
       text = nudgeText(nudged);
       kind = 'nudge';
+      // §4.3: the same text as the last nudge this session is not delivered twice. The
+      // one `(conv, #seq)` it names is already in the context above, so a repeat adds
+      // nothing — it was 61 of the 62 verbatim duplicates measured on a real run. The
+      // skip is logged, but it still spends one unit of budget per conversation: a
+      // frozen debt must reach `no output after N nudges`, and `idle_owed` does not
+      // carry the budget, so a skip that cost nothing would hide the loop from both
+      // sides. `lastNudgeText` stays: the next due is still compared with what the
+      // model actually saw.
+      if (text === this.lastNudgeText) {
+        console.warn(
+          `[pigroups] skipped a repeated nudge, identical to the last one this session: ${text}`,
+        );
+        for (const entry of nudged) this.nudges.record(entry.conv);
+        this.nudgeDue = false;
+        this.windowStart = null;
+        return 'empty';
+      }
     }
 
     try {
@@ -535,8 +598,15 @@ export class AdapterLoop {
     }
 
     if (batch.length === 0) {
-      // §4.3: only a delivered nudge counts against the budget.
-      for (const entry of nudged) this.obligations.recordNudge(entry.conv);
+      // §4.3: a delivered nudge counts against the budget and becomes the text a later
+      // nudge is compared against. A skipped one was counted where it was skipped.
+      this.lastNudgeText = text;
+      for (const entry of nudged) {
+        this.nudges.record(entry.conv);
+        // §4.3 / Q11: the nudge named `#seq`, so that seq is now answerable by `pg_ack`
+        // even when it never reached the injection watermark (a gap anchor, §3.4).
+        this.owed.advance(entry.conv, entry.seq);
+      }
       this.nudgeDue = false;
       this.windowStart = null;
       this.windowImmediate = false;
@@ -559,11 +629,32 @@ export class AdapterLoop {
           `an abort will not replay it`,
       );
     }
+    // Three records are written per item, and the order between them decides which window
+    // a crash can land in:
+    //
+    //   1. the owed flag (§4.2): "a message is in my context and I have not answered it";
+    //   2. the injection watermark (§3.4): "this `(conv, seq)` has been shown";
+    //   3. the journal entry (§3.1): the only copy of the item — dropped last, so a crash
+    //      before it replays the batch.
+    //
+    // The debt goes first on purpose. A crash between the two writes is possible either way
+    // (two files cannot be renamed atomically), so the question is which loss it may cause:
+    // flag first → the watermark is behind, the journal replays, the model sees the message
+    // twice and `set` keeps the earlier flag; watermark first → the replay is suppressed
+    // ("already seen"), the entry is committed and the debt is gone for good. This file
+    // chooses the duplicate: "错剪会丢一条真债" is the rule the prune path already follows,
+    // and a re-shown `[conv#seq]` costs one turn while a lost flag is silence.
     for (const item of batch) {
       if (item.conv !== undefined) {
-        // `mark` keeps `nudges`, so it must not re-arm `blockedReported` either:
-        // a blocked episode ends only when the member speaks (§4.3), not on inbound traffic.
-        this.obligations.mark(item.conv, item.seq ?? 0, this.now());
+        // §4.2: a delivered message is what makes the conversation owed. The start-up
+        // brief is the one delivery that must not create a debt ("启动简报不置"): it is a
+        // one-to-one message from the parent, so the normal rule would make the member owe
+        // a reply for the task book it was just handed. It still advances the high-water
+        // seq — the brief's `#seq` was named in the context.
+        if (item.seq !== undefined) {
+          if (item.noOwed === true) this.owed.advance(item.conv, item.seq);
+          else await this.owed.set(item.conv, item.seq, this.now());
+        }
         // §3.4: the watermark moves only now, after `deliver` returned, so a delivery
         // that throws or a crash in between cannot make the message disappear. This is
         // an acknowledgement that pi accepted the message, not that a run started
@@ -585,8 +676,8 @@ export class AdapterLoop {
   }
 
   /** Conversations the nudge may name: owed, and not past their budget. */
-  private owableNudges(): Obligation[] {
-    return this.obligations.entries().filter((entry) => entry.nudges < this.config.nudgeMax);
+  private owableNudges(): OwedFlag[] {
+    return this.owed.entries().filter((entry) => this.nudges.count(entry.conv) < this.config.nudgeMax);
   }
 
   /**
@@ -606,7 +697,7 @@ export class AdapterLoop {
     });
   }
 
-  /** The only send path: keeps the owed table honest (§2.3). */
+  /** The only send path: keeps the owed ledger honest (§2.3, §4.2). */
   async say(to: string, text: string, mentions?: string[]): Promise<{ conv: string; seq: number }> {
     let sent: { to: string; seq: number };
     try {
@@ -615,13 +706,108 @@ export class AdapterLoop {
       // A peer that just died answers 410, and the debt it created is unpayable from
       // that moment. Forgetting it here is the difference between "cannot reply yet"
       // and "is being told forever to reply to nobody".
-      if (err instanceof PgGone && !to.startsWith('g:')) this.forgetDm(to);
+      if (err instanceof PgGone && !to.startsWith('g:')) await this.forgetDm(to);
       throw err;
     }
-    this.obligations.clear(sent.to);
+    // §4.2: replying clears the flag. This is also the one event that ends a blocked
+    // episode (§4.3) and the run of silent confirmations that reports it, because the
+    // member has spoken: the next debt starts with a clean budget and no marker.
+    await this.owed.clear(sent.to);
+    this.nudges.clear(sent.to);
     this.blockedReported.delete(sent.to);
+    this.silentAcks.delete(sent.to);
+    this.silentAckReported.delete(sent.to);
     this.evaluateAttention(this.now());
     return { conv: sent.to, seq: sent.seq };
+  }
+
+  /**
+   * §4.3: `pg_ack` — clear a flag without saying anything.
+   *
+   * A confirmation is worth exactly one thing: it closes the local notification. It does
+   * not send a message (so it cannot open a debt at the other end), it does not touch the
+   * nudge budget, and it does not end a blocked episode — "not speaking" is itself the
+   * thing that has to stay visible, which is why a run of them is reported.
+   *
+   * `conv` is required: wiping every debt silently is not a default. `seq` may not exceed
+   * the largest seq this adapter delivered, named or had read back in that conversation, so
+   * a model cannot confirm what it has never been shown — it must `pg_read` first.
+   *
+   * The bound guards a flag that exists. With nothing owed there is nothing to confirm, and
+   * the answer is the ordinary `{cleared: [], remaining}`: the high-water map is memory only
+   * (§4.3, Q11), so after a restart a repeated ack would otherwise be refused by a bound
+   * that has just forgotten every seq this member ever saw.
+   */
+  async ack(opts: { conv: string; seq?: number; all?: boolean }): Promise<AckResult> {
+    const conv = typeof opts.conv === 'string' ? opts.conv.trim() : '';
+    if (conv === '') throw new Error('pg_ack: conv is required (a conversation id such as `dm:<a>_<b>` or `g:<owner>`)');
+    const now = this.now();
+    const cleared: AckResult['cleared'] = [];
+
+    if (opts.all === true) {
+      for (const entry of this.owed.entries()) {
+        await this.owed.clear(entry.conv);
+        await this.owed.recordAck(entry.conv, entry.seq, now);
+        cleared.push({ conv: entry.conv, seq: entry.seq });
+        await this.auditSilentAck(entry.conv);
+      }
+      return { cleared, remaining: this.remainingOwed() };
+    }
+
+    const flag = this.owed.entries().find((entry) => entry.conv === conv);
+    if (opts.seq !== undefined) {
+      if (!Number.isFinite(opts.seq) || opts.seq < 1) {
+        throw new Error(`pg_ack: seq must be a positive integer, got ${String(opts.seq)}`);
+      }
+      const limit = this.owed.maxSeq(conv);
+      if (flag !== undefined && opts.seq > limit) {
+        throw new Error(
+          `pg_ack: seq ${opts.seq} was never named or delivered in ${conv} (the highest is ${limit}); ` +
+            `call pg_read on that conversation before confirming a later message`,
+        );
+      }
+    }
+    if (flag !== undefined) {
+      await this.owed.clear(conv);
+      await this.owed.recordAck(conv, flag.seq, now);
+      cleared.push({ conv, seq: flag.seq });
+      await this.auditSilentAck(conv);
+    }
+    return { cleared, remaining: this.remainingOwed() };
+  }
+
+  /**
+   * §4.3: read history backwards, and count what it returned as seen.
+   *
+   * The ack bound says a model may not confirm a message it was never shown — so reading a
+   * message is exactly the act that makes it confirmable. `pg_read` is the exit the bound's
+   * own error message points at ("call pg_read on that conversation before confirming a
+   * later message"); reading through the platform client alone left that exit closed.
+   */
+  async read(opts: { conv: string; before?: number; limit?: number }): Promise<string> {
+    const conv = typeof opts.conv === 'string' ? opts.conv.trim() : '';
+    if (conv === '') throw new Error('pg_read: conv is required (a conversation id such as `dm:<a>_<b>` or `g:<owner>`)');
+    const history = await this.pg.messages({ to: conv, before: opts.before, limit: opts.limit });
+    for (const message of history.items) this.owed.advance(conv, message.seq);
+    return history.items.map((m) => `[${m.to}#${m.seq}] ${m.sender_name}: ${m.body}`).join('\n');
+  }
+
+  private remainingOwed(): AckResult['remaining'] {
+    return this.owed.entries().map((entry) => ({ conv: entry.conv, seq: entry.seq }));
+  }
+
+  /**
+   * §4.3: confirmations are silent, so "confirming instead of answering" leaves no trace
+   * in any conversation. Three in a row in one conversation, with no reply in between,
+   * is reported to the parent once — the report is authored here, so it costs the model
+   * no turn, and `say()` is what re-arms it.
+   */
+  private async auditSilentAck(conv: string): Promise<void> {
+    const count = (this.silentAcks.get(conv) ?? 0) + 1;
+    this.silentAcks.set(conv, count);
+    if (count < SILENT_ACK_LIMIT || this.silentAckReported.has(conv)) return;
+    this.silentAckReported.add(conv);
+    await this.reportBlocked('silent acking');
   }
 
   /**
@@ -629,12 +815,15 @@ export class AdapterLoop {
    * Also drops that member from the cached roster: both callers know the peer is gone
    * from the platform's own answer, so the cache must not keep calling it alive (§4.1).
    */
-  private forgetDm(member: string): void {
+  private async forgetDm(member: string): Promise<void> {
     this.roster?.ids.delete(member);
     if (this.selfId === undefined) return;
     const conv = dmConv(this.selfId, member);
-    this.obligations.clear(conv);
+    await this.owed.clear(conv);
+    this.nudges.clear(conv);
     this.blockedReported.delete(conv);
+    this.silentAcks.delete(conv);
+    this.silentAckReported.delete(conv);
   }
 
   async spawnMember(opts: {
@@ -834,9 +1023,11 @@ export class AdapterLoop {
   }
 
   state(): { owed: string[]; nudges: Record<string, number> } {
-    const nudges: Record<string, number> = {};
-    for (const entry of this.obligations.entries()) nudges[entry.conv] = entry.nudges;
-    return { owed: this.obligations.entries().map((entry) => entry.conv), nudges };
+    const owed = this.owed.entries();
+    return {
+      owed: owed.map((entry) => entry.conv),
+      nudges: Object.fromEntries(owed.map((entry) => [entry.conv, this.nudges.count(entry.conv)])),
+    };
   }
 
   /**
@@ -856,14 +1047,8 @@ export class AdapterLoop {
     // The members are gone, so their private debts are unpayable. Prune them now rather
     // than at the next roster read: nobody should be nudged once more for a member this
     // call just deleted. `member` is included even if the platform's answer is odd.
-    for (const id of new Set([member, ...terminated])) this.forgetDm(id);
-    const now = this.now();
-    for (const id of terminated) {
-      this.telemetry.apply(
-        { child: id, name: id === member && known ? known.name : id, state: 'gone', since: now },
-        now,
-      );
-    }
+    for (const id of new Set([member, ...terminated])) await this.forgetDm(id);
+    for (const id of terminated) this.markGone(id, id === member ? known?.name : undefined);
     const pane_close_failed: TerminateResult['pane_close_failed'] = [];
     const pane_close_forced: TerminateResult['pane_close_forced'] = [];
     for (const id of new Set([member, ...terminated])) {
@@ -898,8 +1083,8 @@ export class AdapterLoop {
   }
 
   /**
-   * Confirm the members this adapter spawned are still alive and close the panes of the
-   * ones that are not (§5.3).
+   * Confirm the members in the pane map and in the telemetry table are still alive, and
+   * close the panes of the ones that are not (§5.3, §5.1 path 3).
    *
    * `terminate()` only sees deletes this adapter issued. A grandparent deleting this
    * adapter's direct child is a legal `DELETE` that never reaches this process, so the
@@ -907,18 +1092,33 @@ export class AdapterLoop {
    * answer this: it is a 30 s snapshot, and absence from a stale snapshot is exactly
    * the false-prune this file now guards against. Ask about each member directly; only
    * an explicit `status:'gone'` closes a pane, so a failed read keeps everything.
+   *
+   * The telemetry table is checked on its own, never through the pane map: `panes` is
+   * only filled by `spawnMember()`, so a parent that restarted has none and a child
+   * created by an ancestor never had one. Those are precisely the children whose
+   * `error` state has no other way of leaving the table (§5.1: `error` cannot self-clear).
    */
-  private async reconcilePanes(): Promise<void> {
-    if (this.panes.size === 0) return;
+  private async reconcileMembers(): Promise<void> {
+    const candidates = new Set<string>(this.panes.keys());
+    for (const entry of this.telemetry.snapshot()) {
+      if (entry.state !== 'gone') candidates.add(entry.child);
+    }
+    if (candidates.size === 0) return;
     const now = this.now();
-    for (const member of [...this.panes.keys()]) {
+    for (const member of candidates) {
       const checkedAt = this.paneCheckedAt.get(member);
       if (checkedAt !== undefined && now >= checkedAt && now - checkedAt < PANE_CHECK_TTL_MS) continue;
+      // Stamped before the request, not after the answer: "每个成员最多每 30 秒查一次" is a
+      // bound on the question, not on the reply. A failed read used to leave the timestamp
+      // untouched, so an unreachable platform turned every poll (25 s) and every settle into
+      // another attempt for every mapped child. It also keeps two concurrent callers apart.
+      this.paneCheckedAt.set(member, now);
       try {
         // Bounded like the roster read: a platform that does not answer must not turn
         // the poll/settle path into an unbounded wait.
         const detail = await withTimeout(this.pg.getMember(member), ROSTER_TIMEOUT_MS);
         if (detail.status === 'gone') {
+          this.markGone(member, detail.name);
           const outcome = await this.closePane(member);
           if (outcome.failure !== undefined) {
             console.warn(`[pigroups] could not close the pane of gone member ${member}: ${outcome.failure.error}`);
@@ -927,9 +1127,9 @@ export class AdapterLoop {
           }
           continue;
         }
-        this.paneCheckedAt.set(member, now);
       } catch {
-        // Unreachable platform, 404, our own 410: keep the pane and ask again later.
+        // Unreachable platform, 404, our own 410: keep the pane and ask again later —
+        // one bounded recheck per TTL, not one per poll.
         // A wrong close removes the shell of a living child; a late close loses nothing.
       }
     }
@@ -960,24 +1160,42 @@ export class AdapterLoop {
     this.selfId = who.member.id;
     this.selfName = who.member.name;
     this.parentId = who.member.parent_id;
-    // Both records are this member's (§3.4), so they are keyed only now — and read
-    // before the first injection point below can decide anything.
-    await this.watermark.load(who.member.id);
+    // All three records are this member's (§3.4, §4.2), so they are keyed only now — and
+    // read before the first injection point below can decide anything. `hadInjected`
+    // separates a fresh spawn from a restart: only a process that has never delivered
+    // anything can treat the parent's last DM as the task book (§4.2).
+    const hadInjected = await this.watermark.load(who.member.id);
     this.journal.load(who.member.id);
-    await this.injectBrief();
-    await this.reconcileObligations();
+    const hadOwedFile = await this.owed.load(who.member.id);
+    await this.injectBrief(!hadInjected);
+    // §4.2: the flags on disk are the answer. Only a missing file (first start, or an
+    // upgrade from the history-derived version) is reconciled — once, from history.
+    // Deriving on every start is what made a debt impossible to confirm: the history can
+    // only say who spoke last, so a conversation confirmed with `pg_ack` came back owed.
+    if (!hadOwedFile) await this.reconcileObligations();
     await this.replayJournal();
-    // §4.1: a peer that died while this member was down is still in the history that
-    // `reconcileObligations()` just read. Prune it once here, at the end of startup, so
+    // §4.1: a peer that died while this member was down is still in the ledger (or in the
+    // history the fallback just read). Prune it once here, at the end of startup, so
     // `idle_owed`/`pg_inspect` do not name an unanswerable conversation until the first
-    // settle. The roster is read after the history, so its absence is conclusive even
-    // for a debt the reconciliation has only just marked.
+    // settle. The roster is read after both, so its absence is conclusive even for a debt
+    // the reconciliation has only just marked.
     await this.pruneUnanswerableDms(true);
     this.ready = true;
   }
 
-  /** §8.3: the parent's last DM is the briefing, injected once, without waiting for a window. */
-  private async injectBrief(): Promise<void> {
+  /**
+   * §8.3: the parent's last DM is read at startup and injected once, without waiting for a
+   * window.
+   *
+   * `freshStart` decides whether that message is the task book `pg_spawn` sent. §4.2 says the
+   * brief does not create a debt because the member cannot reply to its own task book — but
+   * that holds for the message `spawnMember` sent, not for "whatever the parent said last".
+   * A member that was down while its parent wrote an instruction saw that instruction in its
+   * context and owed nothing for it: no flag, no `idle_owed`, no nudge, and the next restart
+   * forgot it. A process that has never delivered anything (no injection watermark) is the
+   * spawn; after that, a parent DM is a message like any other and is owed.
+   */
+  private async injectBrief(freshStart: boolean): Promise<void> {
     const parent = this.parentId;
     const self = this.selfId;
     if (!parent || !self) return;
@@ -993,16 +1211,27 @@ export class AdapterLoop {
       windowless: true,
       conv,
       seq: brief.seq,
+      // §4.2: the task book is not a debt. It is a one-to-one message from the parent, so
+      // the delivery rule would make the member owe a reply for the work it was just given.
+      noOwed: freshStart,
     });
   }
 
-  /** §4.2: recompute the owed table from history, so a restart needs no local state. */
+  /**
+   * §4.2's fallback: the §4.1 triggers, read out of history once, when there is no ledger
+   * file to trust. A message that is mine proves nothing (I cannot owe myself a reply), and
+   * neither does the brief: it is the one `(conv, seq)` the adapter knows by construction.
+   */
   private async reconcileObligations(): Promise<void> {
     const self = this.selfId;
     if (!self) return;
     const { items } = await this.pg.conversations();
-    const now = this.now();
     const parentId = this.parentId;
+    // Read every conversation first and keep the result only in memory. Writing each flag
+    // as its read returned made a failed read permanent: the half-written ledger existed
+    // on the retry, so `load()` returned true and the conversation whose read had thrown
+    // was never visited again (Q9).
+    const found: Array<{ conv: string; seq: number }> = [];
     for (const conv of items) {
       const last = await this.pg.messages({ to: conv.to, limit: 1 });
       const message = last.items[0];
@@ -1015,9 +1244,13 @@ export class AdapterLoop {
         mentionsMe: message.mentions.includes(self),
         fromParent: parentId !== null && message.sender_id === parentId,
       });
-      if (owed) this.obligations.mark(conv.to, message.seq, now);
-      else this.obligations.clear(conv.to);
+      if (!owed) continue;
+      if (this.brief?.conv === conv.to && this.brief.seq === message.seq) continue;
+      found.push({ conv: conv.to, seq: message.seq });
     }
+    // Every read succeeded. Only now may the ledger change, and all of it at once.
+    const now = this.now();
+    for (const entry of found) await this.owed.set(entry.conv, entry.seq, now);
   }
 
   /** §3.1: replay batches that were journalled but never delivered. */
@@ -1079,7 +1312,7 @@ export class AdapterLoop {
   private classifyGap(item: PollGapItem, journalId?: string): void {
     if (item.mentioned > 0) {
       this.enqueue({
-        text: `[${item.to} 跳过了 ${item.count} 条，其中 ${item.mentioned} 条点了你的名；用 pg_read(to, before=${item.before}, limit=20) 回补]`,
+        text: `[${item.to} skipped ${item.count} messages, ${item.mentioned} of them mention you; backfill with pg_read(to, before=${item.before}, limit=20)]`,
         kind: 'message',
         journalId,
         conv: item.to,
@@ -1145,6 +1378,18 @@ export class AdapterLoop {
         this.applyAttention(payload);
         return;
 
+      // §6: a member's conclusion. `text:"exiting"` is not a conclusion but a state
+      // change — the child is on its way out and will never report anything again, so
+      // the parent writes `gone` (§5.1 path 2). Every other text stays a readable
+      // control line: it is something the member said, not a state.
+      case 'pg.report':
+        if (payload.text === 'exiting') {
+          this.markGone(item.from_id);
+          return;
+        }
+        await this.injectReport(item, payload, journalId);
+        return;
+
       default:
         await this.injectUnknownControl(item, payload, journalId);
         return;
@@ -1152,6 +1397,26 @@ export class AdapterLoop {
 
     // A `sys.` command that did not come from `sys` is just an ordinary control.
     await this.injectUnknownControl(item, payload, journalId);
+  }
+
+  /**
+   * §3.2/§6: a member's conclusion is "一行可读控制" — `status: text` — not a payload dump.
+   * The parent has to read the line ("no output after 3 nudges"); `{"v":1,"status":…}` buries
+   * it. The JSON stays only as the fallback for a report that carries no text at all, where
+   * nothing readable exists to render.
+   */
+  private async injectReport(
+    item: PollControlItem,
+    payload: Record<string, unknown>,
+    journalId?: string,
+  ): Promise<void> {
+    const status = typeof payload.status === 'string' ? payload.status.trim() : '';
+    const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+    const line =
+      text === ''
+        ? `[report ${item.from_id}] ${status === '' ? item.cmd : status} ${JSON.stringify(payload)}`
+        : `[report ${item.from_id}] ${status === '' ? '' : `${status}: `}${text}`;
+    this.enqueue({ text: line, kind: 'control', journalId });
   }
 
   /**
@@ -1280,7 +1545,7 @@ export class AdapterLoop {
     return {
       phase: this.tool ? 'tool_call' : this.surface.isBusy() ? 'thinking' : 'idle',
       busy_ms: this.turnStartedAt === null ? 0 : now - this.turnStartedAt,
-      owed: this.obligations.entries().map((entry) => entry.conv),
+      owed: this.owed.entries().map((entry) => entry.conv),
       children: this.telemetry.snapshot().length,
       tool: this.tool
         ? { name: this.tool.name, elapsed_ms: now - this.tool.startedAt, preview: this.tool.preview }
@@ -1306,10 +1571,32 @@ export class AdapterLoop {
     });
   }
 
+  /**
+   * §5.1: every path to "this child is gone" writes the same row, so the parent cannot
+   * tell them apart and none of them can leave a stale state behind. A member this process
+   * already reported gone is left alone: the row is deleted once the reminder is delivered,
+   * so re-applying would count a second event for the same disappearance (and, with a pane
+   * that could not be closed, once per recheck interval for as long as the process lives).
+   */
+  private markGone(member: string, name?: string): void {
+    if (this.goneReported.has(member)) return;
+    const known = this.telemetry.snapshot().find((entry) => entry.child === member);
+    this.goneReported.add(member);
+    const now = this.now();
+    this.telemetry.apply(
+      { child: member, name: name ?? known?.name ?? member, state: 'gone', since: now },
+      now,
+    );
+  }
+
   private applyAttention(payload: Record<string, unknown>): void {
     const child = typeof payload.child === 'string' ? payload.child : '';
     const state = attentionStateOf(payload.state);
     if (!child || !state) return;
+    // A member this process has already reported gone cannot report anything new. Its
+    // remaining events were queued before it died; folding one in would replace the `gone`
+    // row with `error` and make the parent wait a whole recheck before learning it is dead.
+    if (this.goneReported.has(child)) return;
     const event: AttentionEvent = {
       child,
       name: typeof payload.name === 'string' ? payload.name : child,
@@ -1415,7 +1702,7 @@ export class AdapterLoop {
     // `stop()` waits for this reaction, but it sets `stopped` before it waits: do not
     // deliver into a loop that is on its way down.
     if (this.stopped) return;
-    await this.reconcilePanes();
+    await this.reconcileMembers();
     if (this.stopped) return;
     // The window is checked here, by the same scan the 5 s timer runs. Nothing is
     // delivered outside that check — except the two documented cases: the start-up
@@ -1441,13 +1728,13 @@ export class AdapterLoop {
    * owed at or after the snapshot's `at` therefore proves nothing about that peer's
    * existence; only an older debt can be judged by that snapshot.
    *
-   * `startup` is the one time the guard does not apply: the history was read first, so
-   * the fresh roster that follows it is newer than every debt it judges. A peer absent
-   * from that roster is gone even though `reconcileObligations()` has just marked its
-   * debt at the current instant.
+   * `startup` is the one time the guard does not apply: every debt on disk was recorded by
+   * an earlier process, and the fallback reconciliation read its history a moment earlier,
+   * so the fresh roster that follows is newer than every debt it judges. A peer absent
+   * from that roster is gone even though the debt's `since` is from the same startup.
    */
   private async pruneUnanswerableDms(startup = false): Promise<void> {
-    const dms = this.obligations.entries().filter((entry) => isDmConv(entry.conv));
+    const dms = this.owed.entries().filter((entry) => isDmConv(entry.conv));
     if (dms.length === 0) return;
     const roster = await this.aliveIds(startup);
     if (!roster) return;
@@ -1457,7 +1744,8 @@ export class AdapterLoop {
       if (!startup && entry.since >= roster.at) continue;
       const peer = dmPeer(entry.conv, this.selfId);
       if (peer === undefined || roster.ids.has(peer)) continue;
-      this.obligations.clear(entry.conv);
+      await this.owed.clear(entry.conv);
+      this.nudges.clear(entry.conv);
       // The `blocked` episode also ends here: the parent was told this member cannot
       // answer, and that stopped being true the moment the conversation did.
       this.blockedReported.delete(entry.conv);
@@ -1524,7 +1812,7 @@ export class AdapterLoop {
     // §3.2: an abort is cutting the turn, so a nudge now would be the very turn
     // `surface.abort` then waits for. The flag is set on the next settle instead.
     if (this.aborting || this.stopped) return;
-    const owed = this.obligations.entries();
+    const owed = this.owed.entries();
     if (owed.length === 0) {
       this.nudgeDue = false;
       return;
@@ -1532,10 +1820,11 @@ export class AdapterLoop {
 
     let due = 0;
     for (const entry of owed) {
-      if (entry.nudges >= this.config.nudgeMax) {
+      const spent = this.nudges.count(entry.conv);
+      if (spent >= this.config.nudgeMax) {
         if (!this.blockedReported.has(entry.conv)) {
           this.blockedReported.add(entry.conv);
-          await this.reportBlocked(`no output after ${entry.nudges} nudges (${entry.conv})`);
+          await this.reportBlocked(`no output after ${spent} nudges (${entry.conv})`);
         }
         continue;
       }
@@ -1600,11 +1889,17 @@ export class AdapterLoop {
         this.errorNote = event.error ? event.error.message : undefined;
         // 概念稿 §8.3 ②: an aborted turn can swallow a steer that was still queued —
         // the only measured way a delivered message disappears. Put every batch back.
-        // A clean end proves pi persisted them all, so the copies are dropped; an
-        // errored end proves neither, so they wait for a later abort rather than
-        // vanishing — a recovery attempt, not a claim that they were unseen.
+        //
+        // Every other end drops the table, a provider error included (§3.4). The rule is
+        // "delivered means seen": `sendMessage` is void, so an error proves neither that
+        // the model saw a batch nor that it did not, and keeping the copies would make
+        // *everything* delivered during that turn suspect until the next abort. Measured
+        // on the quant run: that is 31 `(conv, seq)` delivered twice, 29 of them more than
+        // two minutes apart (median 650 s, longest 1839 s), all of it replaying batches the
+        // model had already acted on. An error is not evidence that the abort dropped them;
+        // only `aborted` is (probe/logs/steer-20261101T170244Z).
         if (event.aborted === true) this.requeueUnacknowledged();
-        else if (event.error === undefined) this.unacknowledged.length = 0;
+        else this.unacknowledged.length = 0;
         this.evaluateAttention(now);
         return;
       case 'tool_start':
@@ -1683,7 +1978,7 @@ export class AdapterLoop {
       if (busy > 2 * this.config.attentionToolMs) return { state: 'slow_turn', extra: { busy_ms: busy } };
     }
     if (!this.surface.isBusy()) {
-      const owed = this.obligations.owedLongerThan(this.config.attentionToolMs, now);
+      const owed = this.owed.entries().filter((entry) => now - entry.since >= this.config.attentionToolMs);
       if (owed.length > 0) return { state: 'idle_owed', extra: { owed: owed.map((entry) => entry.conv) } };
     }
     return undefined;
@@ -1785,7 +2080,7 @@ export class AdapterLoop {
       // `windowless` is the one exception the start-up brief also uses — the window
       // exists to avoid interrupting work, and there is no work left to protect.
       this.pending.push({
-        text: 'PIGROUPS token 失效：请更新 token 并重启本 session。',
+        text: 'PIGROUPS token is no longer valid: replace it and restart this session.',
         kind: 'message',
         windowless: true,
       });
@@ -1914,10 +2209,14 @@ function relationOf(
   return 'peer';
 }
 
-/** §4.3: every owed conversation in one line, so one wake-up shows all of them. */
-function nudgeText(due: Obligation[]): string {
-  const debts = due.map((entry) => `${entry.conv} #${entry.lastSeq}`).join(', ');
-  return `你在这些会话还有未回复的消息：${debts}。回复，或说明为什么不需要回。`;
+/**
+ * §4.3: every owed conversation in one line, so one wake-up shows all of them. The
+ * wording is the one the design pins, and it is English (P7): the recipient is a model,
+ * and the way out of the debt is a local action — `pg_ack` — not another message.
+ */
+function nudgeText(due: OwedFlag[]): string {
+  const debts = due.map((entry) => `${entry.conv} #${entry.seq}`).join(', ');
+  return `Unanswered messages: ${debts}. Reply, or call pg_ack to clear this notification.`;
 }
 
 /** Cut a string to `max` characters, marking that there is more. */

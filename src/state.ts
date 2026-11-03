@@ -1,55 +1,35 @@
 /**
  * Local tables that make the adapter's two obligations and its telemetry work.
  * Pure logic, no HTTP: 设计说明 §4 (欠回复) and §5 (遥测).
+ *
+ * The owed reply itself is not here: it is a persisted flag (`OwedLedger`, `owed.ts`),
+ * because a debt that only exists between polls cannot be confirmed. What stays in
+ * memory is the nudge budget: "how many times have I already asked" is about this
+ * process's conversation with the model, not about the ledger.
  */
-
-export interface Obligation {
-  conv: string;
-  /** Seq of the last message in the conversation that is not mine. */
-  lastSeq: number;
-  /** When the conversation first became owed (for the `idle_owed` state, §5.1). */
-  since: number;
-  nudges: number;
-}
 
 /**
- * Owed replies (§4). The truth is recomputed from conversation history on every
- * start (§4.1); this table only mirrors it between polls, so a restart needs no
- * local state.
+ * §4.3: how many reminders a still-owed conversation has spent, per conversation. It
+ * survives an inbound message and a `pg_ack`; only the member speaking (`say`) ends the
+ * episode and resets it.
  */
-export class ObligationTable {
-  private readonly owed = new Map<string, Obligation>();
+export class NudgeBudget {
+  private readonly spent = new Map<string, number>();
 
-  /** Mark a conversation owed. Idempotent; keeps the original `since`. */
-  mark(conv: string, lastSeq: number, now: number): void {
-    const existing = this.owed.get(conv);
-    if (existing) {
-      existing.lastSeq = Math.max(existing.lastSeq, lastSeq);
-      return;
-    }
-    this.owed.set(conv, { conv, lastSeq, since: now, nudges: 0 });
+  count(conv: string): number {
+    return this.spent.get(conv) ?? 0;
   }
 
-  /** The conversation stopped being owed: the member spoke, or the history moved on. */
+  /** Count one delivered nudge. Returns the new total. */
+  record(conv: string): number {
+    const total = this.count(conv) + 1;
+    this.spent.set(conv, total);
+    return total;
+  }
+
+  /** The member spoke: the episode is over and the next debt starts with a full budget. */
   clear(conv: string): void {
-    this.owed.delete(conv);
-  }
-
-  entries(): Obligation[] {
-    return [...this.owed.values()];
-  }
-
-  /** One nudge per conversation per settle (§4.3). Returns the new nudge total. */
-  recordNudge(conv: string): number {
-    const entry = this.owed.get(conv);
-    if (!entry) return 0;
-    entry.nudges += 1;
-    return entry.nudges;
-  }
-
-  /** Conversations owed for longer than `ms` while idle → the `idle_owed` state. */
-  owedLongerThan(ms: number, now: number): Obligation[] {
-    return this.entries().filter((entry) => now - entry.since >= ms);
+    this.spent.delete(conv);
   }
 }
 
@@ -112,7 +92,10 @@ export interface TelemetryEntry {
   last?: LastRound;
   /** Events folded into this entry since the last reminder. */
   count: number;
-  /** When this state was last reminded to the member; `null` means never. */
+  /**
+   * When this state entry was reminded to the member; `null` means never. §5.2 reminds
+   * a state entry exactly once — a long-lived state is not a reason to speak again.
+   */
   remindedAt: number | null;
 }
 
@@ -124,11 +107,7 @@ export type TelemetryDecision =
 export interface TelemetryOptions {
   /** Coalescing window opened by the first unhandled event (§5.2). */
   windowMs: number;
-  /** A state that keeps going this long is reminded again. */
-  repeatAfterMs?: number;
 }
-
-const DEFAULT_REPEAT_AFTER_MS = 1_800_000;
 
 /**
  * Parent side of telemetry (§5.2): `child → {state, since, tool, count}`, plus
@@ -138,12 +117,10 @@ const DEFAULT_REPEAT_AFTER_MS = 1_800_000;
 export class TelemetryTable {
   private readonly entries = new Map<string, TelemetryEntry>();
   private readonly windowMs: number;
-  private readonly repeatAfterMs: number;
   private windowStart: number | null = null;
 
   constructor(opts: TelemetryOptions) {
     this.windowMs = opts.windowMs;
-    this.repeatAfterMs = opts.repeatAfterMs ?? DEFAULT_REPEAT_AFTER_MS;
   }
 
   /** Fold one `pg.attention` event into the table. Never injects. */
@@ -161,10 +138,15 @@ export class TelemetryTable {
       note: event.note,
       last: event.last,
       count: (prev?.count ?? 0) + 1,
-      // (a) once a new event arrives, this child may be reminded again.
-      remindedAt: null,
+      // (a) entering a state is what may be reminded, and only once (§5.2). A second
+      // event for the same state is the same entry, not a new one: re-arming here is
+      // what used to turn a frozen child into a repeating reminder.
+      remindedAt: stateChanged ? null : prev.remindedAt,
     });
-    if (this.windowStart === null) this.windowStart = now;
+    // §5.2: `idle_owed` never opens the window. It is reported — `pg_children` reads it —
+    // but a debt in a conversation the parent may not be part of is not something the
+    // parent can act on, so it must not cost it a whole context request.
+    if (this.windowStart === null && event.state !== 'idle_owed') this.windowStart = now;
   }
 
   snapshot(): TelemetryEntry[] {
@@ -198,13 +180,15 @@ export class TelemetryTable {
     if (this.windowStart === null) return { kind: 'idle' };
 
     const urgent = [...this.entries.values()].some(
-      (entry) => entry.state === 'gone' && this.shouldReport(entry, now),
+      (entry) => entry.state === 'gone' && entry.remindedAt === null,
     );
     const expired = now - this.windowStart >= this.windowMs;
     if (!urgent && !expired) return { kind: 'idle' };
 
     const reportable = [...this.entries.values()].filter(
-      (entry) => entry.state !== 'recovered' && this.shouldReport(entry, now),
+      // §5.2: a summary must never be made of `idle_owed` alone (or carry it along):
+      // it reports a state, it never asks the parent for anything.
+      (entry) => entry.state !== 'recovered' && entry.state !== 'idle_owed' && entry.remindedAt === null,
     );
     if (reportable.length === 0) {
       this.windowStart = now;
@@ -225,18 +209,19 @@ export class TelemetryTable {
       children: reportable.map((entry) => entry.child),
     };
   }
-
-  private shouldReport(entry: TelemetryEntry, now: number): boolean {
-    if (entry.remindedAt === null) return true;
-    return (
-      now - entry.stateSince >= this.repeatAfterMs && now - entry.remindedAt >= this.repeatAfterMs
-    );
-  }
 }
 
+/**
+ * §5.2: what the parent is told. English on purpose (P7): this is a prompt for a model,
+ * not a report for a person. The shape is the one the design pins:
+ *
+ *     2 children need attention:
+ *     - m_abc (reviewer) stalled 12m in bash: find ~/ -name '*.ts'
+ */
 function renderAttention(entries: TelemetryEntry[], now: number): string {
-  const lines = [`你的 ${entries.length} 个下级需要处理：`];
-  for (const entry of entries) lines.push(`- ${entry.child}（${entry.name}）${renderState(entry, now)}${renderLast(entry)}`);
+  const header = entries.length === 1 ? '1 child needs attention:' : `${entries.length} children need attention:`;
+  const lines = [header];
+  for (const entry of entries) lines.push(`- ${entry.child} (${entry.name}) ${renderState(entry, now)}${renderLast(entry)}`);
   return lines.join('\n');
 }
 
@@ -245,32 +230,32 @@ function renderLast(entry: TelemetryEntry): string {
   const last = entry.last;
   if (!last) return '';
   const parts: string[] = [];
-  if (last.text !== undefined) parts.push(`说：${last.text}`);
+  if (last.text !== undefined) parts.push(`said: ${last.text}`);
   if (last.tool !== undefined) {
-    const verdict = last.tool.ok ? '' : '（失败）';
-    const preview = last.tool.preview === '' ? '' : `：${last.tool.preview}`;
-    parts.push(`最后工具 ${last.tool.name}${preview}${verdict}`);
+    const verdict = last.tool.ok ? '' : ' (failed)';
+    const preview = last.tool.preview === '' ? '' : `: ${last.tool.preview}`;
+    parts.push(`last tool ${last.tool.name}${preview}${verdict}`);
   }
-  return parts.length === 0 ? '' : `；最后一轮${parts.join('，')}`;
+  return parts.length === 0 ? '' : `; last round ${parts.join(', ')}`;
 }
 
 function renderState(entry: TelemetryEntry, now: number): string {
   const elapsed = formatDuration(now - entry.stateSince);
   switch (entry.state) {
     case 'stalled': {
-      const tool = entry.tool ? ` 在 ${entry.tool.name}：${entry.tool.preview}` : '';
+      const tool = entry.tool ? ` in ${entry.tool.name}: ${entry.tool.preview}` : '';
       return `stalled ${elapsed}${tool}`;
     }
     case 'slow_turn':
       return `slow_turn ${elapsed}`;
     case 'error':
-      return `error：${entry.note ?? 'provider error'}`;
+      return `error: ${entry.note ?? 'provider error'}`;
     case 'idle_owed':
-      return `idle_owed ${elapsed}${entry.owed?.length ? `，欠回复：${entry.owed.join(', ')}` : ''}`;
+      return `idle_owed ${elapsed}${entry.owed?.length ? `, owed: ${entry.owed.join(', ')}` : ''}`;
     case 'recovered':
-      return `recovered${entry.of ? `（原 ${entry.of}）` : ''}`;
+      return `recovered${entry.of ? ` (was ${entry.of})` : ''}`;
     case 'gone':
-      return `gone${entry.note ? `：${entry.note}` : ''}`;
+      return `gone${entry.note ? `: ${entry.note}` : ''}`;
   }
 }
 

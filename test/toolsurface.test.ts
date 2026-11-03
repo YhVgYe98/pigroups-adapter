@@ -1,6 +1,7 @@
 // 概念稿 §7: the tool surface is the whole of what the model can do. This file pins
-// the ten tools and the two things the spec says about their text: there is no
-// `pg_steer`, and `pg_members` must say what `last_seen_at` is not.
+// the eleven tools and the things the spec says about their text: there is no
+// `pg_steer`, `pg_members` must say what `last_seen_at` is not, and `pg_ack` must say
+// that clearing everything is explicit (§4.3).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,7 +42,7 @@ function fakePi(): { pi: PiLike; tools: Map<string, PiToolDefinition>; fire(even
 
 const CTX = { isIdle: () => true, abort: () => undefined, shutdown: () => undefined };
 
-test('the registered tool surface is exactly the ten tools, with no pg_steer', async () => {
+test('the registered tool surface is exactly the eleven tools, with no pg_steer', async () => {
   const platform = await bootPlatform();
   const adapterDir = await mkdtemp(join(tmpdir(), 'pigroups-toolsurface-'));
   const saved = {
@@ -63,8 +64,8 @@ test('the registered tool surface is exactly the ten tools, with no pg_steer', a
 
     assert.deepEqual(
       [...tools.keys()].sort(),
-      ['pg_abort', 'pg_children', 'pg_inspect', 'pg_members', 'pg_read', 'pg_say', 'pg_schedule', 'pg_spawn', 'pg_terminate', 'pg_whoami'],
-      '概念稿 §7: ten tools, and steering is pg_say + pg_abort, never a pg_steer',
+      ['pg_abort', 'pg_ack', 'pg_children', 'pg_inspect', 'pg_members', 'pg_read', 'pg_say', 'pg_schedule', 'pg_spawn', 'pg_terminate', 'pg_whoami'],
+      '概念稿 §7 + §4.3: eleven tools, and steering is pg_say + pg_abort, never a pg_steer',
     );
     assert.equal(tools.has('pg_steer'), false, 'pg_steer is gone: only pg_abort can change a member inside a tool');
 
@@ -73,6 +74,16 @@ test('the registered tool surface is exactly the ten tools, with no pg_steer', a
     assert.match(members.description, /authenticated/i, 'last_seen_at is "the last time that member authenticated"');
     assert.match(members.description, /not liveness/i, 'and it must say it is not a heartbeat');
     assert.match(members.description, /case-insensitive/i, 'query is a case-insensitive name search');
+
+    const ack = tools.get('pg_ack')!;
+    assert.deepEqual(
+      (ack.parameters as { required: string[] }).required,
+      ['conv'],
+      '§4.3: conv is required — a bare ack is not a way to wipe every debt',
+    );
+    assert.match(ack.description, /all: true/i, 'clearing everything has to be said out loud');
+    assert.match(ack.description, /silent acking/i, 'the tool tells the model what a run of acks is taken for');
+    assert.match(ack.description, /pg_read/i, 'a seq past what it has seen needs a read first');
 
     const schedule = tools.get('pg_schedule')!;
     assert.match(schedule.description, /one-shot|once/i, 'a wake is one-shot');
