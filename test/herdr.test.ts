@@ -272,7 +272,7 @@ esac
   }
 });
 
-test('the pane send-text fallback shell-quotes every appended word, including metacharacters', async () => {
+test('a non-pi spawn command is typed into a free pane, shell-quoted word by word', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
   try {
     const command = join(dir, 'herdr-fake');
@@ -288,6 +288,9 @@ case "$1 $2" in
     printf '%s\n' '{"error":{"code":"agent_start_failed","message":"no"},"id":"cli"}' >&2
     exit 1
     ;;
+  "pane list")
+    printf '%s\n' '{"id":"cli:pane:list","result":{"panes":[{"pane_id":"wE:pX","agent_status":"unknown"}]}}'
+    ;;
   "pane send-text")
     printf '%s' "$4" > "$DIR/fallback-command"
     printf '%s\n' '{"id":"cli:pane:send-text","result":{"ok":true}}'
@@ -301,7 +304,8 @@ esac
     );
     await chmod(command, 0o755);
 
-    const spawnCmd = "pi -e '/opt/base extension.ts'";
+    // A wrapper, not a pi invocation: herdr cannot track it, so typing is the only way.
+    const spawnCmd = "my-launcher --launch '/opt/base extension.ts'";
     const nasty = '/tmp/pi groups/$(touch pwned)/ext (beta).ts';
     const env = { PIGROUPS_TOKEN: "tok en'$(touch pwned)" };
     const extra = ['--extension', nasty, '--future', nasty];
@@ -355,6 +359,47 @@ esac
     assert.ok(calls[0].startsWith('tab create'), `the first call must create a tab, got: ${calls[0]}`);
     assert.ok(!calls.some((line) => line.startsWith('pane split')), 'a member must not be put in a split pane');
     assert.ok(calls[1].includes('agent start'), 'the agent starts in the new tab');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// The leak the operator saw: "PIGROUPS_URL=... pi -e ..." appearing in a pi conversation.
+// The old spawn() fell back to typing the command line into the pane whenever `agent start`
+// failed, and a pane that already held a running pi received it as a prompt.
+test('a failed agent start fails the spawn: it never types the command line into a pane', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+DIR=$(dirname "$0")
+printf '%s\n' "$*" >> "$DIR/calls"
+case "$1 $2" in
+  "tab create")
+    printf '%s\n' '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"wE:pX"},"tab":{"tab_id":"wE:tX"}}}'
+    ;;
+  "agent start")
+    printf '%s\n' '{"error":{"code":"agent_start_failed","message":"no"},"id":"cli"}' >&2
+    exit 1
+    ;;
+  *)
+    printf '%s\n' '{"id":"cli:other","result":{"ok":true}}'
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    await assert.rejects(herdr.spawn({ label: 'child', env: { PIGROUPS_TOKEN: 'tok' } }), /agent_start_failed|herdr/i);
+
+    const calls = (await readFile(join(dir, 'calls'), 'utf8')).trim().split('\n');
+    assert.ok(
+      !calls.some((line) => line.startsWith('pane send-text')),
+      `nothing may be typed into the pane after a failed start, got: ${calls.join(' | ')}`,
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

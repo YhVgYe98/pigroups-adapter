@@ -111,7 +111,13 @@ test('two attentions from one child build a real table entry: state, since, coun
   t.after(() => s.close());
   const child = await createMember(s.platform, s.me, 'coder');
 
-  assert.deepEqual(s.loop.children(), [], 'before any attention the table is empty: it is not the tree');
+  // The list is the tree, the state comes from telemetry: before any attention the child is
+  // there and simply reports nothing wrong.
+  assert.deepEqual(
+    (await s.loop.children()).map((row) => [row.id, row.state]),
+    [[child.id, 'ok']],
+    'a child that has reported nothing is listed as ok',
+  );
 
   const since = s.clock.now() - 120_000;
   await command(s.platform, child.token, s.me.id, 'pg.attention', {
@@ -134,7 +140,7 @@ test('two attentions from one child build a real table entry: state, since, coun
 
   assert.equal(s.surface.deliveries.length, 0, 'attention updates the table, it is not injected');
 
-  const rows = s.loop.children();
+  const rows = await s.loop.children();
   assert.equal(rows.length, 1, `the telemetry table must hold the child, got ${JSON.stringify(rows)}`);
   const [row] = rows;
   assert.equal(row.id, child.id, 'the row is keyed by the child id');
@@ -281,7 +287,7 @@ test('the parent sees a child’s last round in its snapshot and in the consolid
   });
   await s.cycle();
 
-  const [row] = s.loop.children();
+  const [row] = await s.loop.children();
   assert.equal(row.last?.text, 'refactoring the scheduler', 'pg_children carries the last round');
   assert.equal(row.last?.tool?.name, 'edit');
   assert.equal(row.last?.tool?.ok, false, 'a failed last tool stays visibly failed');

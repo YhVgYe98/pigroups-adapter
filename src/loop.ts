@@ -727,16 +727,41 @@ export class AdapterLoop {
     }
   }
 
-  children(): ChildSnapshot[] {
-    return this.telemetry.snapshot().map((entry) => ({
-      id: entry.child,
-      name: entry.name,
-      state: entry.state === 'recovered' ? 'ok' : entry.state,
-      since: entry.stateSince,
-      tool: entry.tool,
-      count: entry.count,
-      last: entry.last,
-    }));
+  /**
+   * Every direct child, with whatever telemetry has arrived folded in.
+   *
+   * The platform owns "who my children are"; telemetry only ever reports trouble, so a
+   * freshly spawned member that is working quietly has no telemetry entry at all. Listing
+   * `telemetry.snapshot()` alone therefore answered `[]` right after `pg_spawn` succeeded -
+   * the one moment a parent is most likely to look. The roster is the list; telemetry only
+   * fills in the state.
+   */
+  async children(signal?: AbortSignal): Promise<ChildSnapshot[]> {
+    // The tool can be called before the first poll has read whoami; without this the answer
+    // would be an empty list that looks exactly like "I have no children".
+    await this.ensureReady();
+    const self = this.selfId;
+    if (self === undefined) return [];
+    const known = new Map(this.telemetry.snapshot().map((entry) => [entry.child, entry]));
+    const { nodes } = await this.pg.tree(signal);
+    return nodes
+      .filter((node) => node.parent_id === self)
+      .map((node) => {
+        const entry = known.get(node.id);
+        if (entry === undefined) {
+          // Alive, and nothing has gone wrong that it has reported: that is `ok`.
+          return { id: node.id, name: node.name, state: 'ok' as const, since: node.last_seen_at ?? 0, count: 0 };
+        }
+        return {
+          id: entry.child,
+          name: entry.name,
+          state: entry.state === 'recovered' ? ('ok' as const) : entry.state,
+          since: entry.stateSince,
+          tool: entry.tool,
+          count: entry.count,
+          last: entry.last,
+        };
+      });
   }
 
   /**

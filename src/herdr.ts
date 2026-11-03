@@ -96,11 +96,23 @@ export class HerdrCli implements Herdr {
   }): Promise<{ pane: string }> {
     const pane = await this.createTab({ env: opts.env, cwd: opts.cwd, label: opts.label, signal: opts.signal });
     const extraArgs = opts.args ?? [];
-    try {
-      await this.startAgent(pane, opts.label, extraArgs);
-    } catch {
-      await this.run(['pane', 'send-text', pane, this.commandLine(opts.env, extraArgs)]);
+    const argv = [...splitCommand(this.spawnCmd), ...extraArgs];
+    if (baseName(argv[0] ?? 'pi') === 'pi') {
+      // The normal path: herdr recognises the agent, so `agent wait` and `agent list` mean
+      // something. If this fails, fail - do NOT fall back to typing the command line.
+      //
+      // The fallback used to type it into the pane. When the pane already held a running pi
+      // (the tab's shell had been replaced, or `agent start` failed for a reason unrelated to
+      // the process), the text landed in that pi's input box - the operator saw
+      // "PIGROUPS_URL=… pi -e …" appear in a conversation. A failed start is a failure, and
+      // the caller can close the tab it just made.
+      await this.startAgent(pane, opts.label, extraArgs, argv);
+      return { pane };
     }
+    // A wrapper or a non-pi command: herdr cannot track it, so the only way to run it is to
+    // type it. Do that in a pane that has no agent, so the text cannot reach somebody's prompt.
+    await this.waitPaneHasNoAgent(pane, this.paneAgentExitTimeoutMs);
+    await this.run(['pane', 'send-text', pane, this.commandLine(opts.env, extraArgs)]);
     return { pane };
   }
 
@@ -196,14 +208,25 @@ export class HerdrCli implements Herdr {
     return paneId;
   }
 
-  private async startAgent(pane: string, label: string, extraArgs: string[]): Promise<void> {
-    const argv = [...splitCommand(this.spawnCmd), ...extraArgs];
-    const executable = argv[0] ?? 'pi';
-    if (baseName(executable) !== 'pi') {
-      // Not a pi invocation: herdr cannot detect it as an agent, so run it as a
-      // plain command line in the pane.
-      throw new Error(`unsupported spawn command: ${this.spawnCmd}`);
+  /** Wait until herdr shows no agent in that pane (the shell is free to receive a command). */
+  private async waitPaneHasNoAgent(pane: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        if (!agentStillRunning(await this.run(['pane', 'list']), pane)) return;
+      } catch {
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`pane ${pane} still holds an agent; refusing to type into it`);
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, this.paneAgentExitPollMs);
+      });
     }
+  }
+
+  private async startAgent(pane: string, label: string, extraArgs: string[], argv: string[]): Promise<void> {
     const args = ['agent', 'start', label, '--kind', 'pi', '--pane', pane, '--timeout', String(AGENT_START_TIMEOUT_MS)];
     if (argv.length > 1) args.push('--', ...argv.slice(1));
     await this.run(args);

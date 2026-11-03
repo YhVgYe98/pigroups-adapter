@@ -305,7 +305,8 @@ function buildTools(
         'Telemetry snapshot of this member’s direct children (state, since, tool, count) including what ' +
         'each one’s last round did (last assistant text and last tool call).',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
-      execute: async () => text(JSON.stringify(requireLoop().children(), null, 2)),
+      execute: async (_id, _params, signal) =>
+        text(JSON.stringify(await requireLoop().children(signal), null, 2)),
     },
     {
       name: 'pg_inspect',
