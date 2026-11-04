@@ -196,6 +196,13 @@ export class TelemetryTable {
     }
     child.name = event.name;
 
+    // §5.1: `stalled` is a special case of `slow_turn` (one tool eating the turn). While a
+    // tool is stalled the turn is slow by definition, so the second line adds nothing to
+    // the parent's summary. The narrower state wins; `slow_turn` comes back after the tool
+    // ends if the turn is still running.
+    if (event.state === 'stalled') child.states.delete('slow_turn');
+    if (event.state === 'slow_turn' && child.states.has('stalled')) return;
+
     const prev = child.states.get(event.state);
     const setState = SET_STATES.has(event.state);
     const owed = setState ? normalizeOwed(event.owed ?? prev?.owed) : (event.owed ?? prev?.owed);

@@ -387,6 +387,39 @@ test('idle_owed beside blocked is left out of the summary entirely', async (t) =
   assert.ok(!nudges[0].includes('idle_owed'), `idle_owed never joins a summary: ${nudges[0]}`);
 });
 
+// §5.1: `stalled` is a special case of `slow_turn` (one tool eating the turn). Reporting
+// both would put the same fact on the parent's line twice, so the narrower state wins.
+test('a stalled tool does not also report the turn as slow', async (t) => {
+  const s = await scenario({ role: 'root', remindWindowMs: 60_000 });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'coder');
+
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'slow_turn',
+    since: s.clock.now(),
+    busy_ms: 700_000,
+  });
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'stalled',
+    since: s.clock.now() + 1_000,
+    tool: { name: 'bash', elapsed_ms: 400_000, preview: 'find . -name "*.ts"' },
+  });
+  await s.cycle();
+  await s.timer(60_000);
+  await s.timer(WINDOW);
+
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, JSON.stringify(s.surface.texts()));
+  assert.match(nudges[0], /stalled/);
+  assert.ok(!nudges[0].includes('slow_turn'), `the narrower state replaces the broader one: ${nudges[0]}`);
+});
+
 // §5.2: a state entry is reminded once. A different `owed` set is new information (the
 // parent replaces the whole set); the same set is not.
 test('a repeated blocked set is not re-reported, while a larger or smaller set is', async (t) => {
