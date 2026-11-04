@@ -18,7 +18,18 @@
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +46,11 @@ export interface OrgState {
   admin_token: string;
   pid: number;
   data_dir: string;
+  /**
+   * The platform instance inside the shared data root. Absent from records written
+   * before the platform named itself; a healthy reattach fills it in.
+   */
+  platform_id?: string;
 }
 
 export interface OrgHandle {
@@ -73,6 +89,8 @@ export interface OrgStartOptions {
   env?: NodeJS.ProcessEnv;
   /** Test seam: how long to wait for a freshly started platform to answer `/v1/health`. */
   healthTimeoutMs?: number;
+  /** Test seam: where a new organisation's platform id comes from. */
+  platformIdSource?: () => string;
 }
 
 /** One place the adapter looked for the platform checkout, and why. */
@@ -92,6 +110,8 @@ export class OrgStartError extends Error {
 const ORG_FILE = 'org.json';
 /** `<adapterDir>/orgs/<key>/` - one directory per organisation. */
 const ORG_DIR = 'orgs';
+const PLATFORM_DATA_DIR = 'platform-data';
+const PLATFORM_DB = 'pigroups.db';
 const LOCK_FILE = 'org.lock';
 const PLATFORM_ENTRY = join('src', 'main.ts');
 const HEALTH_TIMEOUT_MS = 1200;
@@ -174,7 +194,7 @@ export async function startOrg(opts: OrgStartOptions = {}): Promise<OrgHandle> {
   const orgDir = join(adapterDir, ORG_DIR, key);
   const orgFile = join(orgDir, ORG_FILE);
 
-  return withOrgLock(orgDir, () => startOrgLocked(opts, orgDir, orgFile, env));
+  return withOrgLock(orgDir, () => startOrgLocked(opts, adapterDir, orgFile, env));
 }
 
 /** Keys that already hold a record under <adapterDir>/orgs/. */
@@ -213,24 +233,34 @@ async function startOrgLocked(
   env: NodeJS.ProcessEnv,
 ): Promise<OrgHandle> {
   const previous = readOrgState(orgFile);
+  // One-time follow of a moved data root. It is only a candidate here: a live
+  // platform is reattached first, and an unresponsive one is stopped against the
+  // data dir its process was actually started with before anything is rewritten.
+  const migratedDataDir =
+    previous === undefined || (opts.dataDir !== undefined && opts.dataDir !== '')
+      ? undefined
+      : migratedRecordDataDir(previous, adapterDir, orgFile);
 
   // (b) Reattach when the recorded organisation is still there. This is checked
   // before the platform checkout: a member that already has an identity does not
   // need the source tree at all.
   if (previous !== undefined) {
-    if (await platformAnswers(previous.url)) {
+    const health = await platformHealth(previous.url);
+    if (health !== undefined) {
+      assertPlatformIdentity({
+        requested: undefined,
+        recorded: previous.platform_id,
+        health,
+        url: previous.url,
+        orgFile,
+      });
+      // A healthy URL does not make a wrong record right: if the record names a
+      // platform, its database must be where the record says. A restart would
+      // otherwise create a second instance in the empty dir.
+      assertRecordedPlatformDatabase(previous, migratedDataDir ?? resolve(previous.data_dir), orgFile);
+      let root: { id: string; name: string };
       try {
-        const root = await whoamiRoot(previous.url, previous.token);
-        return {
-          reattached: true,
-          url: previous.url,
-          token: previous.token,
-          adminToken: previous.admin_token,
-          pid: previous.pid,
-          dataDir: previous.data_dir,
-          orgFile,
-          root,
-        };
+        root = await whoamiRoot(previous.url, previous.token);
       } catch (err) {
         throw new OrgStartError(
           `the platform at ${previous.url} (pid ${previous.pid}) answers /v1/health, but the member ` +
@@ -241,11 +271,40 @@ async function startOrgLocked(
             `start a new organisation.`,
         );
       }
+      // A record written before the platform had ids gets one the first time it is
+      // seen again. Writing it now makes the next restart pin the same instance.
+      const platformId = previous.platform_id ?? platformIdOf(health);
+      if (
+        migratedDataDir !== undefined ||
+        (previous.platform_id === undefined && platformId !== undefined)
+      ) {
+        writeOrgState(orgFile, {
+          ...previous,
+          data_dir: migratedDataDir ?? previous.data_dir,
+          ...(platformId === undefined ? {} : { platform_id: platformId }),
+        });
+      }
+      return {
+        reattached: true,
+        url: previous.url,
+        token: previous.token,
+        adminToken: previous.admin_token,
+        pid: previous.pid,
+        dataDir: migratedDataDir ?? previous.data_dir,
+        orgFile,
+        root,
+      };
     }
     // The platform process is gone (a reboot, a killed process). Keep its data dir
     // and port so the same organisation comes back with the same URL and tokens.
     await stopRecordedProcess(previous, orgFile);
   }
+
+  // The startup path must never create a platform in a directory that the record
+  // says already holds one: an empty new platform would accept the bootstrap and
+  // overwrite the record with a second organisation's identity.
+  const dataDir = resolveStartDataDir(opts, previous, adapterDir, orgFile);
+  assertRecordedPlatformDatabase(previous, dataDir, orgFile);
 
   // (a) Find the checkout only when a platform actually has to be started.
   const checkout = findPlatformDir({ platformDir: opts.platformDir, env, adapterRoot: opts.adapterRoot });
@@ -265,17 +324,60 @@ async function startOrgLocked(
     // spawning into EADDRINUSE and then reading health from the old process.
     port = await freePort();
   }
-  const dataDir = resolve(opts.dataDir ?? previous?.data_dir ?? join(adapterDir, 'platform-data'));
+  // One data root per adapter directory, not one per organisation: the platform
+  // makes `platforms/<platform_id>/` inside it. A new organisation therefore has to
+  // name its own id, otherwise the platform reuses the only platform already there
+  // and bootstrap would find that platform's root.
   const adminToken = previous?.admin_token ?? randomBytes(24).toString('base64url');
   const url = `http://127.0.0.1:${port}`;
+  const requestedPlatformId =
+    previous === undefined ? generatePlatformId(dataDir, opts.platformIdSource) : previous.platform_id;
+  // Each organisation logs beside its own record. The data root is shared, so a
+  // platform.log there would interleave every organisation's stderr.
+  const logFile = join(dirname(orgFile), 'platform.log');
+  const launchedAt = Date.now();
 
-  const platform = launchPlatform({ platformDir: checkout.dir, port, dataDir, adminToken, env });
-  const logFile = join(dataDir, 'platform.log');
+  const platform = launchPlatform({
+    platformDir: checkout.dir,
+    port,
+    dataDir,
+    adminToken,
+    platformId: requestedPlatformId,
+    logFile,
+    env,
+  });
   let tokenError: string | undefined;
 
   try {
     // (d) Wait bounded, then claim the root seat.
-    await waitForPlatform(platform.child, url, opts.healthTimeoutMs ?? START_TIMEOUT_MS, opts.signal);
+    const health = await waitForPlatform(platform.child, url, opts.healthTimeoutMs ?? START_TIMEOUT_MS, opts.signal);
+
+    // The platform that answered must be the instance org.json names, and a new
+    // organisation must get exactly the id it asked for. This is checked before
+    // whoami or bootstrap: attaching to a same-named record on a different instance,
+    // or bootstrapping into a platform that won the port race, is the one mistake
+    // that must not be repaired silently.
+    assertPlatformIdentity({
+      requested: requestedPlatformId,
+      recorded: previous?.platform_id,
+      health,
+      url,
+      ...(previous === undefined ? {} : { orgFile }),
+    });
+    // A platform that reports no id is older than 0.3.0: it ignores
+    // PIGROUPS_PLATFORM_ID and writes `pigroups.db` flat into the data root. With one
+    // shared root that would put every organisation in one database, and the damage
+    // would surface as "my other team's members are here". Refuse.
+    if (platformIdOf(health) === undefined) {
+      throw new OrgStartError(
+        `the platform at ${url} (pid ${platform.pid}) does not report a platform_id, so it is older than ` +
+          `0.3.0. This adapter keeps every organisation's database in one shared data root ` +
+          `(${dataDir}) and relies on platform ids to keep them apart; an older platform would put them ` +
+          `all in one database. Point PIGROUPS_PLATFORM_DIR at a 0.3.0 checkout, or set data_dir to a ` +
+          `dedicated directory for this organisation.`,
+      );
+    }
+    const platformId = platformIdOf(health) ?? previous?.platform_id;
 
     if (previous !== undefined) {
       try {
@@ -286,6 +388,7 @@ async function startOrgLocked(
           admin_token: adminToken,
           pid: platform.pid,
           data_dir: dataDir,
+          ...(platformId === undefined ? {} : { platform_id: platformId }),
         };
         writeOrgState(orgFile, state);
         return {
@@ -316,6 +419,7 @@ async function startOrgLocked(
       admin_token: adminToken,
       pid: platform.pid,
       data_dir: dataDir,
+      ...(platformId === undefined ? {} : { platform_id: platformId }),
     };
     writeOrgState(orgFile, state);
     return {
@@ -335,11 +439,115 @@ async function startOrgLocked(
     await stopChild(platform.child);
     const detail = describe(err);
     const rejected = tokenError === undefined ? '' : `\n(the recorded member token was also rejected: ${tokenError})`;
+    let debris = '';
+    try {
+      const moved = relocateLegacyFlatDatabase(dataDir, requestedPlatformId, launchedAt);
+      if (moved !== undefined) {
+        debris =
+          `\nThis start created a flat ${PLATFORM_DB} in ${dataDir} (the pre-0.3 layout). ` +
+          `It was moved, not deleted, to ${moved}; the data root is usable by a 0.3.0 platform again.`;
+      }
+    } catch (moveErr) {
+      debris =
+        `\nA flat ${PLATFORM_DB} in ${dataDir} could not be moved aside: ${describe(moveErr)}. ` +
+        `Move it by hand before starting a 0.3.0 platform on this data root.`;
+    }
     throw new OrgStartError(
-      `${detail}${rejected}\n` +
+      `${detail}${rejected}${debris}\n` +
         `The platform process (pid ${platform.pid}) was stopped; its log may say why: ${logFile}`,
     );
   }
+}
+
+/**
+ * The data dir the next platform start uses. The record wins unless it is the old
+ * per-organisation default and the platform has actually been moved into the shared
+ * root: then the record follows its database once. An explicit data_dir always wins;
+ * an old default with no matching database in the shared root is left alone.
+ */
+function resolveStartDataDir(
+  opts: OrgStartOptions,
+  previous: OrgState | undefined,
+  adapterDir: string,
+  orgFile: string,
+): string {
+  if (opts.dataDir !== undefined && opts.dataDir !== '') return resolve(opts.dataDir);
+  if (previous === undefined) return resolve(adapterDir, PLATFORM_DATA_DIR);
+  return migratedRecordDataDir(previous, adapterDir, orgFile) ?? resolve(previous.data_dir);
+}
+
+/** The shared root when the record is the old per-org default and its database moved there. */
+function migratedRecordDataDir(
+  previous: OrgState,
+  adapterDir: string,
+  orgFile: string,
+): string | undefined {
+  const recorded = resolve(previous.data_dir);
+  const oldDefault = resolve(dirname(orgFile), PLATFORM_DATA_DIR);
+  if (recorded !== oldDefault || previous.platform_id === undefined) return undefined;
+  const shared = resolve(adapterDir, PLATFORM_DATA_DIR);
+  return existsSync(platformDatabasePath(shared, previous.platform_id)) ? shared : undefined;
+}
+
+function platformDatabasePath(dataDir: string, platformId: string): string {
+  return join(dataDir, 'platforms', platformId, PLATFORM_DB);
+}
+
+/**
+ * A record that names a platform is a promise that its database is under that data
+ * dir. Starting in an empty directory would make the platform create a second
+ * instance with the same id, the old token would be rejected, and bootstrap would
+ * overwrite the record with a new organisation. Never do that silently.
+ */
+function assertRecordedPlatformDatabase(
+  previous: OrgState | undefined,
+  dataDir: string,
+  orgFile: string,
+): void {
+  if (previous?.platform_id === undefined) return;
+  const database = platformDatabasePath(dataDir, previous.platform_id);
+  if (existsSync(database)) return;
+  throw new OrgStartError(
+    `${orgFile} records platform_id ${previous.platform_id} and data_dir ${dataDir}, but ${database} does ` +
+      `not exist. The record says that platform lives there, and the filesystem does not have it. ` +
+      `Refusing to start: a platform started in this directory would be a second, empty instance with ` +
+      `the same id, and bootstrapping on it would overwrite ${orgFile}. Restore ${database} (for example ` +
+      `by moving the old platform's platforms/${previous.platform_id}/ back), or delete ${orgFile} to ` +
+      `start a new organisation.`,
+  );
+}
+
+/**
+ * A pre-0.3 platform ignores PIGROUPS_PLATFORM_ID and writes `pigroups.db` flat into
+ * the data root. The refusal is correct, but that file makes the platform itself
+ * refuse every later start ("root database + platforms/ is not empty"). Move the
+ * debris aside (never delete it), and only when it was created by this start and no
+ * directory for the id we asked for exists. Anything else is left untouched.
+ */
+function relocateLegacyFlatDatabase(
+  dataDir: string,
+  platformId: string | undefined,
+  launchedAt: number,
+): string | undefined {
+  if (platformId === undefined) return undefined;
+  const database = join(dataDir, PLATFORM_DB);
+  if (!existsSync(database)) return undefined;
+  if (statSync(database).mtimeMs < launchedAt) return undefined;
+  if (existsSync(join(dataDir, 'platforms', platformId))) return undefined;
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  let destination = join(dataDir, `refused-0.2.0-${stamp}`);
+  for (let suffix = 1; existsSync(destination); suffix += 1) {
+    destination = join(dataDir, `refused-0.2.0-${stamp}-${suffix}`);
+  }
+  mkdirSync(destination, { recursive: true, mode: 0o700 });
+  // Sidecars first, database last: the flat database remaining in the root is the
+  // marker that the move has not finished.
+  for (const suffix of ['-wal', '-shm', '-journal', '']) {
+    const source = `${database}${suffix}`;
+    if (existsSync(source)) renameSync(source, join(destination, `${PLATFORM_DB}${suffix}`));
+  }
+  return destination;
 }
 
 // ---------------------------------------------------------------------------
@@ -370,19 +578,28 @@ export function readOrgState(file: string): OrgState | undefined {
   const adminToken = record?.admin_token;
   const pid = record?.pid;
   const dataDir = record?.data_dir;
+  const platformId = record?.platform_id;
   if (
     typeof url !== 'string' ||
     typeof token !== 'string' ||
     typeof adminToken !== 'string' ||
     typeof pid !== 'number' ||
-    typeof dataDir !== 'string'
+    typeof dataDir !== 'string' ||
+    (platformId !== undefined && platformId !== null && typeof platformId !== 'string')
   ) {
     throw new OrgStartError(
-      `${file} does not look like an org record (need url, token, admin_token, pid, data_dir). ` +
-        `Restore it or delete it to start a new one.`,
+      `${file} does not look like an org record (need url, token, admin_token, pid, data_dir, ` +
+        `optional platform_id). Restore it or delete it to start a new one.`,
     );
   }
-  return { url, token, admin_token: adminToken, pid, data_dir: dataDir };
+  return {
+    url,
+    token,
+    admin_token: adminToken,
+    pid,
+    data_dir: dataDir,
+    ...(typeof platformId === 'string' && platformId !== '' ? { platform_id: platformId } : {}),
+  };
 }
 
 function writeOrgState(file: string, state: OrgState): void {
@@ -480,22 +697,30 @@ function launchPlatform(opts: {
   port: number;
   dataDir: string;
   adminToken: string;
+  /** Absent only for a record written before platform ids existed. */
+  platformId?: string;
+  logFile: string;
   env: NodeJS.ProcessEnv;
 }): LaunchedPlatform {
   mkdirSync(opts.dataDir, { recursive: true, mode: 0o700 });
-  const logFile = join(opts.dataDir, 'platform.log');
-  const log = openSync(logFile, 'a', 0o600);
+  mkdirSync(dirname(opts.logFile), { recursive: true, mode: 0o700 });
+  const log = openSync(opts.logFile, 'a', 0o600);
+  const env: NodeJS.ProcessEnv = {
+    ...opts.env,
+    PORT: String(opts.port),
+    PIGROUPS_DATA: opts.dataDir,
+    PIGROUPS_ADMIN_TOKEN: opts.adminToken,
+  };
+  // Do not let an unrelated value inherited from the session choose a platform:
+  // only the id recorded in org.json (or the fresh one for a new organisation) does.
+  delete env.PIGROUPS_PLATFORM_ID;
+  if (opts.platformId !== undefined) env.PIGROUPS_PLATFORM_ID = opts.platformId;
   let child: ChildProcess;
   try {
     child = spawn(process.execPath, [join(opts.platformDir, PLATFORM_ENTRY)], {
       detached: true,
       stdio: ['ignore', log, log],
-      env: {
-        ...opts.env,
-        PORT: String(opts.port),
-        PIGROUPS_DATA: opts.dataDir,
-        PIGROUPS_ADMIN_TOKEN: opts.adminToken,
-      },
+      env,
     });
   } finally {
     closeSync(log);
@@ -506,12 +731,18 @@ function launchPlatform(opts: {
   return { child, pid };
 }
 
+interface PlatformHealth {
+  status: string;
+  version: string;
+  platform_id?: string;
+}
+
 async function waitForPlatform(
   child: ChildProcess,
   url: string,
   timeoutMs: number,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<PlatformHealth> {
   let exited = child.exitCode !== null || child.signalCode !== null;
   child.once('exit', () => {
     exited = true;
@@ -521,7 +752,8 @@ async function waitForPlatform(
   for (;;) {
     if (signal?.aborted === true) throw new OrgStartError('cancelled while waiting for the platform to answer');
     if (exited) throw new OrgStartError(`the platform process at ${url} exited before answering`);
-    if (await platformAnswers(url)) {
+    const health = await platformHealth(url);
+    if (health !== undefined) {
       // Something answered at the URL, and it may not be the child we just started
       // (an old process on the same port, a leftover from a previous run). If our
       // child has already died, recording its pid in org.json would make the next
@@ -529,7 +761,7 @@ async function waitForPlatform(
       if (exited || child.exitCode !== null || child.signalCode !== null) {
         throw new OrgStartError(`the platform process at ${url} exited before answering`);
       }
-      return;
+      return health;
     }
     if (Date.now() >= deadline) {
       throw new OrgStartError(`the platform at ${url} did not answer GET /v1/health within ${timeoutMs} ms`);
@@ -539,15 +771,83 @@ async function waitForPlatform(
 }
 
 /** Health is the platform's own word. A 404 from some other service is not a platform. */
-async function platformAnswers(url: string): Promise<boolean> {
+async function platformHealth(url: string): Promise<PlatformHealth | undefined> {
   try {
     const response = await fetch(new URL('/v1/health', url), { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
-    if (!response.ok) return false;
-    const body = (await response.json()) as { status?: unknown; version?: unknown };
-    return body.status === 'ok' && typeof body.version === 'string';
+    if (!response.ok) return undefined;
+    const body = (await response.json()) as { status?: unknown; version?: unknown; platform_id?: unknown };
+    if (body.status !== 'ok' || typeof body.version !== 'string') return undefined;
+    return {
+      status: body.status,
+      version: body.version,
+      ...(typeof body.platform_id === 'string' && body.platform_id !== ''
+        ? { platform_id: body.platform_id }
+        : {}),
+    };
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+/** `p_` + 8 hex, the shape the platform itself generates. */
+function newPlatformId(): string {
+  return `p_${randomBytes(4).toString('hex')}`;
+}
+
+/** A generated id must not name a directory that already exists in the shared root. */
+function generatePlatformId(dataDir: string, source?: () => string): string {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const id = source === undefined ? newPlatformId() : source();
+    if (!existsSync(join(dataDir, 'platforms', id))) return id;
+  }
+  throw new OrgStartError(
+    `could not generate a platform id that is unused under ${join(dataDir, 'platforms')}; ` +
+      `remove the empty directories there or pass an organisation that already has a record.`,
+  );
+}
+
+function platformIdOf(health: PlatformHealth): string | undefined {
+  return health.platform_id;
+}
+
+/**
+ * A record and a health answer naming different platforms are not two views of one
+ * organisation: they are the same name attached to a different instance. Attaching
+ * would hand the session someone else's root token; bootstrapping would overwrite
+ * the recorded organisation. The same check also covers a brand-new organisation:
+ * a platform that ignores the id we passed is not the platform we asked for.
+ */
+function assertPlatformIdentity(opts: {
+  requested: string | undefined;
+  recorded: string | undefined;
+  health: PlatformHealth;
+  url: string;
+  /** Absent only for a new organisation, which has no record yet. */
+  orgFile?: string;
+}): void {
+  const actual = platformIdOf(opts.health);
+  const expected = opts.requested ?? opts.recorded;
+  if (opts.requested !== undefined && opts.recorded !== undefined && opts.requested !== opts.recorded) {
+    throw new OrgStartError(
+      `this start asked for platform_id ${opts.requested}, but ${opts.orgFile ?? 'the record'} names ` +
+        `${opts.recorded}. Refusing to start: the two identities cannot both be right.`,
+    );
+  }
+  if (expected === undefined || actual === undefined || actual === expected) return;
+  if (opts.orgFile !== undefined) {
+    throw new OrgStartError(
+      `${opts.orgFile} records platform_id ${expected}, but the platform at ${opts.url} reports ${actual}: ` +
+        `the same organisation record names a different platform instance. Refusing to attach to it or to ` +
+        `bootstrap a second one. Restore the platform with id ${expected}, or delete ${opts.orgFile} ` +
+        `to start a new organisation.`,
+    );
+  }
+  throw new OrgStartError(
+    `the platform at ${opts.url} reports platform_id ${actual}, but this organisation asked for ${expected}. ` +
+      `Refusing to bootstrap: a different platform instance would receive this organisation's root. ` +
+      `Point PIGROUPS_PLATFORM_DIR at a 0.3.0 platform that honours PIGROUPS_PLATFORM_ID, or choose a ` +
+      `free port so the platform this start launched can answer.`,
+  );
 }
 
 async function whoamiRoot(url: string, token: string): Promise<{ id: string; name: string }> {
@@ -563,7 +863,7 @@ async function whoamiRoot(url: string, token: string): Promise<{ id: string; nam
  */
 async function stopRecordedProcess(previous: OrgState, orgFile: string): Promise<void> {
   if (previous.pid <= 0 || !processExists(previous.pid)) return;
-  if (!looksLikePlatformProcess(previous.pid, previous.data_dir)) {
+  if (!looksLikePlatformProcess(previous.pid, previous.data_dir, previous.platform_id)) {
     throw new OrgStartError(
       `${orgFile} records pid ${previous.pid}, which is still running, but ${previous.url} does not ` +
         `answer /v1/health. Refusing to start a second platform on ${previous.data_dir}; ` +
@@ -618,7 +918,7 @@ function processExists(pid: number): boolean {
  * killed. Linux exposes the argv in /proc; elsewhere `ps` is the portable fallback.
  * An unreadable answer means "not proven", and the caller refuses to proceed.
  */
-function looksLikePlatformProcess(pid: number, dataDir: string): boolean {
+function looksLikePlatformProcess(pid: number, dataDir: string, platformId?: string): boolean {
   let commandLine = '';
   try {
     commandLine = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').join(' ');
@@ -633,8 +933,15 @@ function looksLikePlatformProcess(pid: number, dataDir: string): boolean {
   // On Linux the environment pins the process to the recorded data dir, which a
   // recycled pid (or another org on this machine) would not match.
   try {
-    const environ = readFileSync(`/proc/${pid}/environ`, 'utf8');
-    return environ.split('\0').includes(`PIGROUPS_DATA=${dataDir}`);
+    const entries = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0');
+    if (!entries.includes(`PIGROUPS_DATA=${dataDir}`)) return false;
+    if (platformId === undefined) return true;
+    // Every organisation in one data root has the same PIGROUPS_DATA. When the
+    // process also names itself, the id is what proves it is this organisation and
+    // not a sibling whose pid happened to be reused. A pre-id process has no entry.
+    const prefix = 'PIGROUPS_PLATFORM_ID=';
+    const recorded = entries.find((entry) => entry.startsWith(prefix));
+    return recorded === undefined || recorded.slice(prefix.length) === platformId;
   } catch {
     return true;
   }

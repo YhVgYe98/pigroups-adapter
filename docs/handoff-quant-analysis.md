@@ -11,7 +11,7 @@
 
 | | |
 |---|---|
-| 适配器 | `0.9.0+platform.0.2.0`，tag `v0.9.0+platform.0.2.0`，**220/220**，typecheck 干净（这一版的行为变更见 `CHANGELOG.md` v0.9.0） |
+| 适配器 | `0.10.0+platform.0.3.0`，**225/225**，typecheck 干净；配套平台 `0.3.0`（一个数据根装所有平台）。行为变更见 `CHANGELOG.md` v0.9.0 / v0.10.0 |
 | 平台 | `0.2.0`，tag `v0.2.0`，**57/57**，这一阶段没动过 |
 | 本地已装 | `pi install /home/yang/Documents/pigroups-adapter` → 是个**目录链接**，改代码不用重装 |
 | 组织状态 | `quant-lab`：平台仍在 39317 跑（pid 见 `org.json`），**11 个成员里只剩根**，其余被级联删除（见 §3） |

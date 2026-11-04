@@ -12,7 +12,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import pigroupsExtension from '../src/extension.ts';
 import { platformCandidates, startOrg } from '../src/org.ts';
@@ -138,6 +138,19 @@ async function waitUntilGone(url: string, timeoutMs = 5000): Promise<void> {
     await delay(50);
   }
   throw new Error(`the platform at ${url} is still answering; it was not stopped`);
+}
+
+async function waitUntilProcessGone(pid: number, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await delay(25);
+  }
+  throw new Error(`process ${pid} is still running; it was not stopped`);
 }
 
 /** Stop the platform recorded in org.json and remove both directories. */
@@ -305,7 +318,11 @@ test('pg_org_start starts a platform, bootstraps a root, wires the member tools,
   assert.equal(typeof state.token, 'string');
   assert.equal(typeof state.admin_token, 'string');
   assert.equal(state.pid, started.pid, 'org.json records the process that must outlive this session');
-  assert.ok(existsSync(join(state.data_dir, 'platform.log')), 'the detached platform writes its output to a log');
+  assert.ok(
+    existsSync(join(dirname(String(started.org_file)), 'platform.log')),
+    'the detached platform writes its output to a log beside the org record',
+  );
+  assert.equal(existsSync(join(state.data_dir, 'platform.log')), false, 'the shared data root does not mix organisation logs');
 
   const whoami = await fetch(new URL('/v1/whoami', state.url), {
     headers: { authorization: `Bearer ${state.token}` },
@@ -386,6 +403,211 @@ test('a later session reattaches to the org that outlived the root session inste
   assert.equal(again.member.is_root, true, 'the old token still names the root');
   assert.ok(second.tools.has('pg_say'), 'the reattached session got the member tools too');
   await second.fire('session_shutdown', { reason: 'quit' });
+});
+
+test('a new organisation keeps its platform under the one shared data root and records the id health reports', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+
+  const started = await startOrg({ adapterDir, name: 'shared-root', platformDir: PLATFORM_DIR });
+  t.after(() => cleanupOrg(adapterDir));
+
+  const state = JSON.parse(await readFile(started.orgFile, 'utf8')) as {
+    data_dir: string;
+    platform_id?: string;
+  };
+  assert.equal(state.data_dir, join(adapterDir, 'platform-data'), 'one data root is shared by every organisation');
+  assert.notEqual(state.data_dir, join(adapterDir, 'orgs', 'shared-root', 'platform-data'), 'the old per-org root is gone');
+  assert.match(state.platform_id ?? '', /^p_[0-9a-f]{8}$/, 'org.json records the platform id that /v1/health reported');
+
+  const health = await fetch(new URL('/v1/health', started.url)).then((r) => r.json() as Promise<any>);
+  assert.equal(health.platform_id, state.platform_id, 'the recorded id is the id the platform itself answers with');
+  assert.ok(
+    existsSync(join(state.data_dir, 'platforms', String(state.platform_id), 'pigroups.db')),
+    'the database lives under <root>/platforms/<platform_id>/',
+  );
+});
+
+test('an explicit data_dir still wins over the shared root', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const dataDir = await tempDir('pigroups-orgdata-');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+
+  const started = await startOrg({ adapterDir, name: 'explicit-data', dataDir, platformDir: PLATFORM_DIR });
+  t.after(() => cleanupOrg(adapterDir, dataDir));
+
+  const state = JSON.parse(await readFile(started.orgFile, 'utf8')) as { data_dir: string; platform_id?: string };
+  assert.equal(state.data_dir, resolve(dataDir), 'a person who names a data_dir gets that directory');
+  assert.match(state.platform_id ?? '', /^p_[0-9a-f]{8}$/, 'the platform id is still recorded');
+  assert.ok(
+    existsSync(join(state.data_dir, 'platforms', String(state.platform_id), 'pigroups.db')),
+    'the explicit root gets the same platforms/<id>/ layout',
+  );
+});
+
+test('a restart passes the recorded platform id to the platform process', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+
+  const first = await startOrg({ adapterDir, name: 'id-env', platformDir: PLATFORM_DIR });
+  t.after(() => cleanupOrg(adapterDir));
+  const state = JSON.parse(await readFile(first.orgFile, 'utf8')) as { platform_id?: string };
+  assert.match(state.platform_id ?? '', /^p_[0-9a-f]{8}$/, 'the first start recorded an id before the restart');
+
+  process.kill(first.pid, 'SIGTERM');
+  await waitUntilGone(first.url);
+  await waitUntilProcessGone(first.pid);
+
+  const second = await startOrg({ adapterDir, name: 'id-env', platformDir: PLATFORM_DIR });
+  assert.equal(second.reattached, true, 'the recorded organisation came back');
+  assert.notEqual(second.pid, first.pid, 'a new process serves the same organisation');
+
+  const environ = await readFile(`/proc/${second.pid}/environ`, 'utf8').catch(() => undefined);
+  if (environ === undefined) {
+    t.skip('/proc/<pid>/environ is unavailable on this host');
+    return;
+  }
+  assert.ok(
+    environ.split('\0').includes(`PIGROUPS_PLATFORM_ID=${state.platform_id}`),
+    'the restarted platform was pinned to the id in org.json',
+  );
+  const restarted = JSON.parse(await readFile(second.orgFile, 'utf8')) as { platform_id?: string };
+  assert.equal(restarted.platform_id, state.platform_id, 'the restart kept the same platform id');
+});
+
+test('a platform whose id differs from org.json is refused without rewriting the record or bootstrapping', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const dataDir = await tempDir('pigroups-orgdata-');
+  const checkout = await tempDir('pigroups-fake-platform-');
+  t.after(async () => {
+    await rm(adapterDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(checkout, { recursive: true, force: true });
+  });
+
+  // A platform that answers health with an id different from the recorded one. It
+  // records any bootstrap so the test can prove the adapter refused before that.
+  await mkdir(join(checkout, 'src'), { recursive: true });
+  await writeFile(join(checkout, 'package.json'), JSON.stringify({ type: 'module' }));
+  await writeFile(
+    join(checkout, 'src', 'main.ts'),
+    [
+      "import { createServer } from 'node:http';",
+      "import { writeFileSync } from 'node:fs';",
+      "import { join } from 'node:path';",
+      'const port = Number(process.env.PORT);',
+      'const server = createServer((req, res) => {',
+      "  if (req.url === '/v1/health') {",
+      "    res.writeHead(200, { 'content-type': 'application/json' });",
+      "    res.end(JSON.stringify({ status: 'ok', version: '0.3.0', uptime_ms: 0, platform_id: 'p_22222222' }));",
+      '    return;',
+      '  }',
+      "  if (req.url === '/v1/bootstrap') {",
+      "    writeFileSync(join(process.env.PIGROUPS_DATA ?? '.', 'bootstrapped'), 'yes');",
+      "    res.writeHead(200, { 'content-type': 'application/json' });",
+      "    res.end(JSON.stringify({ member: { id: 'm_fake', name: 'fake' }, token: 'fake-token' }));",
+      '    return;',
+      '  }',
+      "  res.writeHead(401, { 'content-type': 'application/json' });",
+      "  res.end(JSON.stringify({ error: { code: 'unauthorized', message: 'no' } }));",
+      '});',
+      "server.listen(port, '127.0.0.1', () => console.error('listening on ' + port));",
+    ].join('\n'),
+  );
+
+  // F1 refuses a record whose named data dir has no database before it ever spawns.
+  // This test is about the next check (the id the platform reports), so give the
+  // record a database to point at; the fake platform does not open it.
+  await mkdir(join(dataDir, 'platforms', 'p_11111111'), { recursive: true });
+  await writeFile(join(dataDir, 'platforms', 'p_11111111', 'pigroups.db'), 'placeholder');
+
+  const deadPort = await freePort();
+  const orgDir = join(adapterDir, 'orgs', 'mismatch');
+  await mkdir(orgDir, { recursive: true });
+  const orgFile = join(orgDir, 'org.json');
+  await writeFile(
+    orgFile,
+    JSON.stringify({
+      url: `http://127.0.0.1:${deadPort}`,
+      token: 'old-token',
+      admin_token: 'old-admin',
+      pid: 999999,
+      data_dir: dataDir,
+      platform_id: 'p_11111111',
+    }),
+  );
+  const before = await readFile(orgFile, 'utf8');
+
+  await assert.rejects(
+    startOrg({ adapterDir, name: 'mismatch', dataDir, platformDir: checkout }),
+    (err: Error) => {
+      assert.match(err.message, /p_11111111/, 'the error names the recorded id');
+      assert.match(err.message, /p_22222222/, 'the error names the id the platform reported');
+      assert.match(err.message, /same .*different platform instance/i, 'the error says the ids are not the same instance');
+      return true;
+    },
+  );
+
+  assert.equal(await readFile(orgFile, 'utf8'), before, 'org.json is not overwritten with the reported id');
+  assert.equal(existsSync(join(dataDir, 'bootstrapped')), false, 'no root was bootstrapped on the wrong platform');
+});
+
+test('a platform older than 0.3.0 is refused: one shared data root needs platform ids', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const dataDir = await tempDir('pigroups-orgdata-');
+  const checkout = await tempDir('pigroups-old-platform-');
+  t.after(async () => {
+    await rm(adapterDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(checkout, { recursive: true, force: true });
+  });
+
+  // A 0.2.0 platform: it answers /v1/health without a platform_id and ignores
+  // PIGROUPS_PLATFORM_ID, which today would put every organisation in one database.
+  await mkdir(join(checkout, 'src'), { recursive: true });
+  await writeFile(join(checkout, 'package.json'), JSON.stringify({ type: 'module' }));
+  await writeFile(
+    join(checkout, 'src', 'main.ts'),
+    [
+      "import { createServer } from 'node:http';",
+      "import { writeFileSync } from 'node:fs';",
+      "import { join } from 'node:path';",
+      'const port = Number(process.env.PORT);',
+      'const server = createServer((req, res) => {',
+      "  if (req.url === '/v1/health') {",
+      "    res.writeHead(200, { 'content-type': 'application/json' });",
+      "    res.end(JSON.stringify({ status: 'ok', version: '0.2.0', uptime_ms: 0 }));",
+      '    return;',
+      '  }',
+      "  if (req.url === '/v1/bootstrap') {",
+      "    writeFileSync(join(process.env.PIGROUPS_DATA ?? '.', 'bootstrapped'), 'yes');",
+      "    res.writeHead(200, { 'content-type': 'application/json' });",
+      "    res.end(JSON.stringify({ member: { id: 'm_fake', name: 'fake' }, token: 'fake-token' }));",
+      '    return;',
+      '  }',
+      "  res.writeHead(401, { 'content-type': 'application/json' });",
+      "  res.end(JSON.stringify({ error: { code: 'unauthorized', message: 'no' } }));",
+      '});',
+      "server.listen(port, '127.0.0.1', () => console.error('listening on ' + port));",
+    ].join('\n'),
+  );
+
+  await assert.rejects(
+    startOrg({ adapterDir, name: 'old-platform', dataDir, platformDir: checkout }),
+    (err: Error) => {
+      assert.match(err.message, /does not report a platform_id/, 'the error names the missing id');
+      assert.match(err.message, /0\.3\.0/, 'the error names the minimum platform version');
+      return true;
+    },
+  );
+
+  assert.equal(existsSync(join(dataDir, 'bootstrapped')), false, 'no root was bootstrapped on a platform we refuse');
+  assert.equal(existsSync(join(adapterDir, 'orgs', 'old-platform', 'org.json')), false, 'no record was written');
 });
 
 // ---------------------------------------------------------------------------
@@ -471,12 +693,21 @@ test('a failed bootstrap kills the platform it just started', async (t) => {
     await rm(dataDir, { recursive: true, force: true });
   });
 
-  // A data dir that already has a root makes the bootstrap answer 409. The point is
-  // not the 409; it is that a failure after the spawn must not leave a process behind.
+  // A data dir that already has a root makes the bootstrap answer 409. Seed one on a
+  // named platform, then record that platform with a token it will reject: the
+  // adapter restarts the same instance, fails to reattach, and falls through to the
+  // 409. The point is not the 409; it is that the spawn is stopped again.
+  const platformId = 'p_5eed0001';
   const seedPort = await freePort();
   const seedUrl = `http://127.0.0.1:${seedPort}`;
   const seed = spawn(process.execPath, [join(PLATFORM_DIR, 'src', 'main.ts')], {
-    env: { ...process.env, PORT: String(seedPort), PIGROUPS_DATA: dataDir, PIGROUPS_ADMIN_TOKEN: 'seed' },
+    env: {
+      ...process.env,
+      PORT: String(seedPort),
+      PIGROUPS_DATA: dataDir,
+      PIGROUPS_PLATFORM_ID: platformId,
+      PIGROUPS_ADMIN_TOKEN: 'seed',
+    },
     stdio: 'ignore',
   });
   t.after(() => {
@@ -499,11 +730,24 @@ test('a failed bootstrap kills the platform it just started', async (t) => {
   assert.equal(bootstrapped.status, 200, 'the seed data dir has a root before the tool runs');
   seed.kill('SIGTERM');
   await waitUntilGone(seedUrl);
+  if (seed.pid !== undefined) await waitUntilProcessGone(seed.pid);
 
-  const port = await freePort();
-  const url = `http://127.0.0.1:${port}`;
+  const orgDir = join(adapterDir, 'orgs', 'seed-org');
+  await mkdir(orgDir, { recursive: true });
+  await writeFile(
+    join(orgDir, 'org.json'),
+    JSON.stringify({
+      url: seedUrl,
+      token: 'wrong-token',
+      admin_token: 'old-admin',
+      pid: 999999,
+      data_dir: dataDir,
+      platform_id: platformId,
+    }),
+  );
+
   await assert.rejects(
-    startOrg({ adapterDir, dataDir, port, platformDir: PLATFORM_DIR }),
+    startOrg({ adapterDir, name: 'seed-org', dataDir, port: seedPort, platformDir: PLATFORM_DIR }),
     (err: Error) => {
       assert.match(err.message, /already_bootstrapped/i, 'the platform error code is reported');
       assert.match(err.message, /platform\.log|stopped/i, 'the message says the started platform was dealt with');
@@ -511,8 +755,8 @@ test('a failed bootstrap kills the platform it just started', async (t) => {
     },
   );
 
-  await waitUntilGone(url, 5000);
-  assert.equal(orgRecords(adapterDir).length, 0, 'a failed start leaves no org record');
+  await waitUntilGone(seedUrl, 5000);
+  assert.equal(orgRecords(adapterDir).length, 1, 'the failed start did not add or rewrite the record');
 });
 
 // Two roots on one machine are two organisations. Before the per-name keying they shared one
@@ -532,6 +776,13 @@ test('two organisations with different names are two platforms and two records',
     assert.ok(await answers(first.url), 'the first organisation still answers');
     assert.ok(await answers(second.url), 'the second organisation answers too');
     assert.equal(orgRecords(adapterDir).length, 2, 'two records, one per name');
+    assert.equal(resolve(first.dataDir), resolve(adapterDir, 'platform-data'), 'both organisations share one data root');
+    assert.equal(resolve(second.dataDir), resolve(adapterDir, 'platform-data'), 'the second uses the same root');
+    const firstState = JSON.parse(await readFile(first.orgFile, 'utf8')) as { platform_id?: string };
+    const secondState = JSON.parse(await readFile(second.orgFile, 'utf8')) as { platform_id?: string };
+    assert.match(firstState.platform_id ?? '', /^p_[0-9a-f]{8}$/, 'each organisation records its platform id');
+    assert.match(secondState.platform_id ?? '', /^p_[0-9a-f]{8}$/, 'each organisation records its platform id');
+    assert.notEqual(firstState.platform_id, secondState.platform_id, 'the shared root did not collapse them into one platform');
   } finally {
     for (const org of [first, second]) {
       try {

@@ -1,3 +1,25 @@
+## v0.10.0（2026-11-04，与平台 0.3.0 配套）
+
+次版本。**要求平台 ≥ 0.3.0**：数据库从"一个组织一个数据目录"改成"一个数据根装所有平台"，
+适配器靠平台 id 把它们区分开。
+
+- **一个共享数据根**：平台数据默认放 `<adapterDir>/platform-data`（原来是 `<adapterDir>/orgs/<key>/platform-data`），
+  平台自己在里面按 `platform_id` 分目录。第二个组织不能再靠"数据目录不同"来隔离。
+- **`org.json` 新增 `platform_id`**：新建组织时写进去（平台在共享根里会复用唯一的那个平台，
+  不点名就会挂到别人的库上——所以新组织的 id 由适配器生成并显式传给平台）；
+  重启时把它作为 `PIGROUPS_PLATFORM_ID` 传给平台进程，确保接回同一个实例。
+- **两条硬校验**（都在 whoami / bootstrap 之前）：`org.json` 的 `platform_id` 与 `/v1/health`
+  报的不同 → 报错，不静默改写记录、不 bootstrap；`/v1/health` **没有** `platform_id`
+  （平台早于 0.3.0）→ 报错，因为老平台会忽略 id、把两个组织放进同一个库。
+- `SUPPORTED_PLATFORM_MINORS` 改为 `['0.3']`：0.2 会打一条兼容性警告；而组织启动那条路对 0.2 是**硬拒绝**
+  （平台不报 `platform_id`，适配器无法用它把共享根里的组织分开）。
+- 升级（一条组织）：把 `orgs/<key>/platform-data/platforms/<id>/`（或 0.2.0 留下的平铺 `pigroups.db`）
+  搬到 `<adapterDir>/platform-data/`，重启。
+  - 记录里的 `data_dir` 若仍是**旧的默认路径**、而共享根里已经有那个 `platform_id`，适配器会自己改用共享根并改写记录；
+  - 若记录里的 `data_dir` 是**显式**设过的，它仍然优先——请一并在 `org.json` 里改成新路径；
+  - 记录里有 `platform_id`、而生效的 `data_dir` 里没有 `platforms/<id>/pigroups.db` → **拒绝启动**，不会新建空库；
+  - 0.2.0 平台留下的平铺 `pigroups.db` 会被挪到 `refused-0.2.0-<时间戳>/`，不会留在共享根里挡住别的组织。
+
 ## v0.9.0（2026-11-04，与平台 0.2.0 配套）
 
 次版本。这一版把 2026-11-03 那场真实运行的测量结果变成了行为变更，并补上"进程死了怎么接回来"。
