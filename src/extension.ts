@@ -192,6 +192,8 @@ export default function pigroupsExtension(pi: PiLike): void {
     });
   }
 
+  pi.on('session_tree', (_event, ctx) => session?.start(ctx));
+
   pi.on('session_shutdown', async () => {
     const active = session;
     session = undefined;
@@ -221,8 +223,16 @@ function openMemberSession(pi: PiLike, config: LoopConfig): MemberSession {
 
   return {
     start(ctx: PiContext): void {
-      if (loop) return;
+      // `session_start` installs the first context; a `session_tree` jump replaces it
+      // with a fresh one. Attach before deciding whether the loop exists: a delivery
+      // that is queued during a jump must never reach the invalidated context.
       surface.attachContext(ctx);
+      if (loop) {
+        // Idempotent. If the first startup never became ready, this also retries the
+        // identity/records handshake; a tree jump is a new chance to repair the session.
+        loop.start();
+        return;
+      }
       // The one startup line: which adapter this member is running, and against what.
       console.log(`[pigroups] adapter ${ADAPTER_VERSION} starting against ${config.url}`);
       loop = new AdapterLoop({ pg, surface, herdr, config, now: () => Date.now(), sessionFile: sessionFileOf(ctx) });

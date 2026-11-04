@@ -1,3 +1,35 @@
+## v0.11.1（2026-11-05，与平台 0.4.0 配套）
+
+补丁位：只修缺陷，不改契约。**修的是"适配器一声不响地什么都不做"。**
+
+### 会话树跳转后不再静默失效
+
+`pi --session <旧会话>` 可能落在**旧分支**上；把对话定位到最新分支是一次 `session_tree`，而那次跳转
+**作废**适配器在 `session_start` 抓到的 `PiContext`。之后所有 `pi.sendMessage` / `ctx.isIdle()` 都打在
+死对象上。之前没有任何代码订阅这个事件，于是故障表现是：pane 显示 idle，没有子进程、没有写入、没有一行
+`[pigroups]`——用户只看到"没拉起来"。
+
+- 订阅 `session_tree`：先 `attachContext(ctx)`（**在**判断循环是否存在之前，避免排队中的投递打到旧上下文），
+  再 `loop.start()`。后者幂等：只有从未 ready 的循环会重跑身份/记录握手；水位保证 brief 不重复注入。
+
+### 启动礼数失败不再挡住修复路径
+
+`init()` 原来的顺序是 `whoami` → 写记录 → 四个礼数步骤 → `ready = true` → `maybeAutoRespawn()`。
+**任何一步**抛错都会冒到 `pollOnce`，被 `run()` 当成"平台不可达"退避重试，于是 `ready` 永远 false、
+`maybeAutoRespawn()` 永远不到，而重试是静默的。
+
+改成两类：
+
+- 前提（`whoami`、写 `sessions/` 记录）：失败就是没身份，照旧重试；
+- 礼数（`injectBrief`、`reconcileObligations`、`replayJournal`、`pruneUnanswerableDms`）：
+  失败**只打一条具名 warn 并继续**（`startup step <name> failed: …; continuing`），`ready = true`
+  与 `maybeAutoRespawn()` 照常到达。状态各自可自补：`journal` 没动过下次重放，`owed` 没动过下次重新对账。
+
+> 一个坏掉的对账不该顺手把"把整棵子树拉起来"这件事也关掉。
+
+260 条测试，新增 4 条钉住这两个行为（`session_tree` 重接新上下文且仍能投递、二次跳转不重复注入 brief、
+brief 抛错仍 ready 且 respawn 真跑了、对账抛错同理）。
+
 ## v0.11.0（2026-11-05，与平台 0.4.0 配套）
 
 次版本。**要求平台 ≥ 0.4.0**：投递载荷的 `preview`（正文切到 200 code points、不标记）改成 `body`（完整正文）。

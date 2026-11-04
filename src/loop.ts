@@ -486,7 +486,18 @@ export class AdapterLoop {
 
   /** Start the three tasks (poll / tick / settle reaction). Idempotent. */
   start(): void {
-    if (this.started) return;
+    if (this.started) {
+      // A session-tree jump can arrive while startup is still failing (the platform was
+      // down when the session opened). The poll loop retries on a backoff; a jump is a
+      // fresh reason to try the identity/records handshake now, and `ensureReady()`
+      // shares any init already in flight. A finished startup is a no-op.
+      if (!this.ready) {
+        void this.ensureReady().catch((err: unknown) => {
+          console.warn(`[pigroups] startup retry failed: ${errorText(err)}`);
+        });
+      }
+      return;
+    }
     this.started = true;
     this.stopped = false;
     this.subscribeSettled();
@@ -1710,23 +1721,39 @@ export class AdapterLoop {
     const hadInjected = await this.watermark.load(who.member.id);
     this.journal.load(who.member.id);
     const hadOwedFile = await this.owed.load(who.member.id);
-    await this.injectBrief(!hadInjected);
+    // Identity and the on-disk records above are the prerequisites for respawn. The
+    // rest are courtesies: one failing read must be reported, must not keep the member
+    // from becoming usable, and must leave its state (journal, owed ledger) for the
+    // next start instead of turning startup into an endless poll error.
+    await this.startupStep('injectBrief', () => this.injectBrief(!hadInjected));
     // §4.2: the flags on disk are the answer. Only a missing file (first start, or an
     // upgrade from the history-derived version) is reconciled — once, from history.
     // Deriving on every start is what made a debt impossible to confirm: the history can
     // only say who spoke last, so a conversation confirmed with `pg_ack` came back owed.
-    if (!hadOwedFile) await this.reconcileObligations();
-    await this.replayJournal();
+    if (!hadOwedFile) await this.startupStep('reconcileObligations', () => this.reconcileObligations());
+    await this.startupStep('replayJournal', () => this.replayJournal());
     // §4.1: a peer that died while this member was down is still in the ledger (or in the
     // history the fallback just read). Prune it once here, at the end of startup, so
     // `idle_owed`/`pg_inspect` do not name an unanswerable conversation until the first
     // settle. The roster is read after both, so its absence is conclusive even for a debt
     // the reconciliation has only just marked.
-    await this.pruneUnanswerableDms(true);
+    await this.startupStep('pruneUnanswerableDms', () => this.pruneUnanswerableDms(true));
     this.ready = true;
     // §12.5: identity is known and the platform answered whoami above. Start the repair
     // after `ready` so the normal startup path is already usable while it runs.
     this.maybeAutoRespawn();
+  }
+
+  /**
+   * A startup courtesy: log one warning naming the step and the error, then continue.
+   * The step's own files are not marked done, so a later start attempts it again.
+   */
+  private async startupStep(step: string, run: () => Promise<void>): Promise<void> {
+    try {
+      await run();
+    } catch (err) {
+      console.warn(`[pigroups] startup step ${step} failed: ${errorText(err)}; continuing`);
+    }
   }
 
   /**
@@ -2942,6 +2969,11 @@ function processIsAlive(pid: number): boolean {
 /** Keep a platform error's status/code: 401 and 429 are facts the caller must see. */
 function respawnError(err: unknown): string {
   if (err instanceof PgError) return `${err.status} ${err.code}: ${err.message}`;
+  return errorText(err);
+}
+
+/** The message a log line can show without inventing a shape for an unknown throw. */
+function errorText(err: unknown): string {
   return (err as Error)?.message ?? String(err);
 }
 

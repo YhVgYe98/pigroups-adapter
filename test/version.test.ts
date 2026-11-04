@@ -22,8 +22,8 @@ function readJson(relative: string): Record<string, any> {
   return JSON.parse(readFileSync(new URL(relative, import.meta.url), 'utf8'));
 }
 
-test('this release is 0.11.0 for platform 0.4 full bodies', () => {
-  assert.equal(ADAPTER_VERSION, '0.11.0+platform.0.4.0', 'the release records the platform it was exercised against');
+test('this release is 0.11.1 for platform 0.4 full bodies', () => {
+  assert.equal(ADAPTER_VERSION, '0.11.1+platform.0.4.0', 'the release records the platform it was exercised against');
 });
 
 test('ADAPTER_VERSION is the version package.json and its lockfile publish', () => {

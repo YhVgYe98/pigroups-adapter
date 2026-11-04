@@ -193,6 +193,9 @@ test('with no ledger file the adapter reconciles once from history and persists 
 // read has succeeded. Writing as it went turned one failed read into a permanent skip — the
 // file existed on the retry, so `load()` returned true and the conversation whose read had
 // thrown was never reconciled again (Q9).
+//
+// A failed courtesy is reported, not fatal: startup still becomes ready and keeps the
+// journal/ledger for the next process to retry (the respawn repair must not be disabled).
 test('a failed reconciliation writes no flags and is retried by the next startup', async (t) => {
   const s = await scenario({ siblings: 2 });
   t.after(() => s.close());
@@ -220,7 +223,21 @@ test('a failed reconciliation writes no flags and is retried by the next startup
     s.pg.messages = original;
   });
 
-  await assert.rejects(() => s.loop.pollOnce(), /history read failed/, 'the read failure must reach the caller');
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]): void => {
+    warnings.push(args.map(String).join(' '));
+  };
+  t.after(() => {
+    console.warn = originalWarn;
+  });
+
+  await s.loop.pollOnce(); // the courtesy failure is reported, not thrown to run()
+  assert.equal(
+    warnings.filter((warning) => /reconcileObligations/.test(warning)).length,
+    1,
+    `exactly one warning must name the step: ${JSON.stringify(warnings)}`,
+  );
   assert.equal(
     await readLedger(s),
     undefined,
@@ -228,15 +245,21 @@ test('a failed reconciliation writes no flags and is retried by the next startup
   );
   assert.deepEqual(s.loop.state().owed, [], 'and no flag may survive in memory either');
 
-  // The failure is gone: the same startup reads history again and this time writes it all.
+  // The failure is gone: the next process's startup reads history again and writes it all.
   s.pg.messages = original;
-  await s.loop.pollOnce();
+  await s.loop.stop();
+  const restarted = await createLoop(s.platform, s.me, { adapterDir: s.adapterDir });
+  try {
+    await restarted.loop.pollOnce();
 
-  const written = await readLedger(s);
-  assert.ok(written, 'the retry must persist what it found');
-  const expected = [dmId(s.me.id, first.id), dmId(s.me.id, second.id)].sort();
-  assert.deepEqual(Object.keys(written.owed).sort(), expected, 'both debts are written, not just the first');
-  assert.deepEqual(s.loop.state().owed.slice().sort(), expected, 'and the loop agrees with the file');
+    const written = await readLedger(s);
+    assert.ok(written, 'the retry must persist what it found');
+    const expected = [dmId(s.me.id, first.id), dmId(s.me.id, second.id)].sort();
+    assert.deepEqual(Object.keys(written.owed).sort(), expected, 'both debts are written, not just the first');
+    assert.deepEqual(restarted.loop.state().owed.slice().sort(), expected, 'and the loop agrees with the file');
+  } finally {
+    await restarted.stop();
+  }
 });
 
 // §4.2's fallback, for the other way a file can be absent: half a file. A crash mid-write

@@ -99,6 +99,17 @@ export interface PiLike {
   /** Carries every finished message; only assistant messages are kept (概念稿 §8.5). */
   on(event: 'message_end', handler: (event: { message: unknown }) => void): () => void;
   on(event: 'session_start', handler: (event: { reason: string }, ctx: PiContext) => void): () => void;
+  /**
+   * Navigation in the session tree. Every jump invalidates the context captured at
+   * `session_start`; the handler receives the fresh one that replaces it.
+   */
+  on(
+    event: 'session_tree',
+    handler: (
+      event: { newLeafId: string | null; oldLeafId: string | null; fromExtension?: boolean },
+      ctx: PiContext,
+    ) => void,
+  ): () => void;
   on(event: 'session_shutdown', handler: (event: { reason: string }) => void): () => void;
 }
 
