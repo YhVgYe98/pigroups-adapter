@@ -44,6 +44,10 @@ export interface LoopConfigOverrides {
   nudgeMax?: number;
   deliveryWindowMs?: number;
   spawnReadyMs?: number;
+  autoRespawn?: boolean;
+  respawnFreshMs?: number;
+  /** The pi session file a real extension reads from ctx.sessionManager (§12.3). */
+  sessionFile?: string;
 }
 
 /** A loop plus its fakes, all pointed at one platform and one member identity. */
@@ -84,11 +88,13 @@ export async function createLoop(
     remindWindowMs: opts.remindWindowMs ?? DEFAULT_REMIND_WINDOW_MS,
     nudgeMax: opts.nudgeMax ?? DEFAULT_NUDGE_MAX,
     deliveryWindowMs: opts.deliveryWindowMs ?? DEFAULT_DELIVERY_WINDOW_MS,
-    spawnReadyMs: 5000,
+    spawnReadyMs: opts.spawnReadyMs ?? 5000,
     spawnCmd: 'pi',
+    autoRespawn: opts.autoRespawn ?? false,
+    respawnFreshMs: opts.respawnFreshMs,
   };
   const pg = new PgClient({ url: config.url, token: config.token });
-  const loop = new AdapterLoop({ pg, surface, herdr, config, now: clock.now });
+  const loop = new AdapterLoop({ pg, surface, herdr, config, now: clock.now, sessionFile: opts.sessionFile });
 
   return {
     surface,

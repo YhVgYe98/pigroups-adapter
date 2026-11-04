@@ -16,15 +16,21 @@ import { join, resolve } from 'node:path';
 
 import pigroupsExtension from '../src/extension.ts';
 import { platformCandidates, startOrg } from '../src/org.ts';
+import { writeSessionRecords } from '../src/records.ts';
 import type { PiContext, PiLike, PiToolDefinition } from '../src/surface.ts';
 
-import { bootPlatform, bootstrapRoot, delay } from './support.ts';
+import { bootPlatform, bootstrapRoot, createMember, delay } from './support.ts';
 
 const PLATFORM_DIR = resolve(
   process.env.PIGROUPS_PLATFORM_DIR ?? join(import.meta.dirname, '..', '..', 'PiGroups'),
 );
 
 const CTX: PiContext = { isIdle: () => true, abort: () => undefined, shutdown: () => undefined };
+
+/** The seam pi supplies on session_start; the fake context in the other tests predates it. */
+function ctxWithSession(sessionFile: string): PiContext {
+  return { ...CTX, sessionManager: { getSessionFile: () => sessionFile } };
+}
 
 type Handler = (event: unknown, ctx?: unknown) => unknown;
 
@@ -168,7 +174,7 @@ async function cleanupOrg(adapterDir: string, ...extraDirs: string[]): Promise<v
 // The two registration paths
 // ---------------------------------------------------------------------------
 
-test('a session with no identity gets exactly one tool: pg_org_start, and nothing starts by itself', async (t) => {
+test('a session with no identity and no session record gets exactly one tool: pg_org_start', async (t) => {
   isolateEnv(t);
   const adapterDir = await tempDir('pigroups-orgstart-');
   t.after(() => rm(adapterDir, { recursive: true, force: true }));
@@ -186,14 +192,10 @@ test('a session with no identity gets exactly one tool: pg_org_start, and nothin
   const fake = fakePi();
   pigroupsExtension(fake.pi);
 
-  assert.deepEqual(
-    [...fake.tools.keys()],
-    ['pg_org_start'],
-    'without an identity the only door is starting an organisation; no member tool exists yet',
-  );
+  assert.deepEqual([...fake.tools.keys()], [], 'the surface waits for session_start, which is where a session file appears');
 
   await fake.fire('session_start', { reason: 'startup' }, CTX);
-  assert.deepEqual([...fake.tools.keys()], ['pg_org_start'], 'session_start must not register anything on its own');
+  assert.deepEqual([...fake.tools.keys()], ['pg_org_start'], 'without a record the only door is starting an organisation');
   assert.deepEqual(logged, [], 'an unconfigured session announces nothing and starts no loop');
 
   const description = fake.tools.get('pg_org_start')!.description;
@@ -202,7 +204,7 @@ test('a session with no identity gets exactly one tool: pg_org_start, and nothin
   assert.match(description, /reattach/i, 'idempotence is part of the contract the model reads');
 });
 
-test('a session with an identity gets the eleven member tools and is not offered pg_org_start', async (t) => {
+test('a session with an identity gets the twelve member tools and is not offered pg_org_start', async (t) => {
   isolateEnv(t);
   const platform = await bootPlatform();
   const adapterDir = await tempDir('pigroups-orgstart-');
@@ -221,7 +223,39 @@ test('a session with an identity gets the eleven member tools and is not offered
   await fake.fire('session_start', { reason: 'startup' }, CTX);
 
   assert.equal(fake.tools.has('pg_org_start'), false, 'a member already belongs to a platform; conjuring a second org is not an offer');
-  assert.equal(fake.tools.size, 11, 'the configured surface is still the eleven member tools');
+  assert.equal(fake.tools.size, 12, 'the configured surface is still the twelve member tools');
+});
+
+test('a session with no env identity recovers it from sessions/<sha1(sessionFile)>.json', async (t) => {
+  isolateEnv(t);
+  const platform = await bootPlatform();
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const root = await bootstrapRoot(platform);
+  const me = await createMember(platform, root, 'recovered');
+  const sessionFile = join(adapterDir, 'pi-session.jsonl');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+  writeSessionRecords(adapterDir, {
+    memberId: me.id,
+    orgUrl: platform.url,
+    token: me.token,
+    parentId: root.id,
+    sessionFile,
+  });
+
+  const fake = fakePi();
+  t.after(async () => {
+    await fake.fire('session_shutdown', { reason: 'quit' }).catch(() => undefined);
+    await platform.stop();
+    await rm(adapterDir, { recursive: true, force: true });
+  });
+
+  pigroupsExtension(fake.pi);
+  await fake.fire('session_start', { reason: 'resume' }, ctxWithSession(sessionFile));
+
+  assert.equal(fake.tools.has('pg_org_start'), false, 'a recovered member must not be offered a second organisation');
+  assert.equal(fake.tools.size, 12, 'a recovered identity gets the same twelve member tools as an env-configured one');
+  const who = await callTool(fake, 'pg_whoami');
+  assert.equal(who.who.member.id, me.id, 'the record supplied the platform and token');
 });
 
 // ---------------------------------------------------------------------------
@@ -289,13 +323,14 @@ test('pg_org_start starts a platform, bootstraps a root, wires the member tools,
       'pg_members',
       'pg_org_start',
       'pg_read',
+      'pg_respawn',
       'pg_say',
       'pg_schedule',
       'pg_spawn',
       'pg_terminate',
       'pg_whoami',
     ],
-    'after success the eleven member tools appear next to the door tool',
+    'after success the twelve member tools appear next to the door tool',
   );
 
   const live = await callTool(fake, 'pg_whoami');

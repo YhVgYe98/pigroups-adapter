@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { loopConfig } from '../src/extension.ts';
 import { member, poll, send } from './support.ts';
 import { scenario } from './scenario.ts';
 
@@ -29,4 +30,26 @@ test('missing PIGROUPS_TOKEN means the adapter does nothing at all: no poll, no 
 
   const untouched = await poll(s.platform, s.me.token, { wait: 0, types: 'message' });
   assert.equal(untouched.items.length, 1, 'the message is still queued: nothing polled');
+});
+
+
+test('PIGROUPS_AUTO_RESPAWN defaults on and 0/false turn the startup repair off', () => {
+  const base = loopConfig('http://127.0.0.1:1', 'token', {});
+  assert.equal(base.autoRespawn, true, 'the automatic repair is on unless the operator says otherwise');
+  assert.equal(loopConfig('http://127.0.0.1:1', 'token', { PIGROUPS_AUTO_RESPAWN: '1' }).autoRespawn, true);
+  assert.equal(loopConfig('http://127.0.0.1:1', 'token', { PIGROUPS_AUTO_RESPAWN: '0' }).autoRespawn, false);
+  assert.equal(loopConfig('http://127.0.0.1:1', 'token', { PIGROUPS_AUTO_RESPAWN: 'false' }).autoRespawn, false);
+});
+
+test('PIGROUPS_RESPAWN_FRESH_MS is read from the environment', () => {
+  assert.equal(
+    loopConfig('http://127.0.0.1:1', 'token', {}).respawnFreshMs,
+    120_000,
+    'the documented default is two minutes',
+  );
+  assert.equal(
+    loopConfig('http://127.0.0.1:1', 'token', { PIGROUPS_RESPAWN_FRESH_MS: '5000' }).respawnFreshMs,
+    5_000,
+    'the freshness window and the startup grace are configurable together',
+  );
 });

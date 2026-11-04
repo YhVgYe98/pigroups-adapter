@@ -9,6 +9,16 @@ import { randomUUID } from 'node:crypto';
 
 import { Journal } from './journal.ts';
 import { OwedLedger } from './owed.ts';
+import {
+  createRespawnLock,
+  markChildrenTerminated,
+  readChildRecords,
+  readRespawnLock,
+  readSessionFileForMember,
+  removeRespawnLock,
+  writeChildRecord,
+  writeSessionRecords,
+} from './records.ts';
 import { NudgeBudget, TelemetryTable } from './state.ts';
 import { Watermarks } from './watermark.ts';
 import type {
@@ -49,6 +59,10 @@ export interface LoopConfig {
   deliveryWindowMs: number;
   /** How long a spawned child gets to authenticate before the parent is told it never did. */
   spawnReadyMs: number;
+  /** §12.4: a member seen inside this window is already running and is not restarted. */
+  respawnFreshMs?: number;
+  /** §12.5: run respawn once at startup when this member has child records. Tests turn it off. */
+  autoRespawn?: boolean;
 }
 
 export interface InspectResult {
@@ -119,6 +133,8 @@ export interface LoopDeps {
   herdr: Herdr;
   config: LoopConfig;
   now: () => number;
+  /** `ctx.sessionManager.getSessionFile()`; absent when pi has not created a file yet. */
+  sessionFile?: string;
 }
 
 interface PendingDelivery {
@@ -223,6 +239,14 @@ interface RosterSnapshot {
   directChildren: Set<string>;
 }
 
+/** `pg_respawn`'s answer (§12.4): readable even when the repair was partial. */
+export interface RespawnResult {
+  restarted: string[];
+  alreadyRunning: string[];
+  skipped: Array<{ id: string; reason: string }>;
+  failed: Array<{ id: string; error: string }>;
+}
+
 /** What `terminate()` did: the delete, and what happened to the panes it took with it (§5.3). */
 export interface TerminateResult {
   /** The platform's cascade answer (`DELETE /v1/members/{id}`). */
@@ -248,6 +272,12 @@ function yieldOnce(): Promise<void> {
 const DEFAULT_INSPECT_TIMEOUT_MS = 10_000;
 /** Default for `spawnReadyMs`; tests override it through the config. */
 const SPAWN_READY_MS = 120_000;
+/** §12.4: how recently a member must have authenticated to count as already running. */
+const DEFAULT_RESPAWN_FRESH_MS = 120_000;
+/** §12.4: a lock younger than this, held by a live pid, still means "another process is starting it". */
+const RESPAWN_LOCK_TTL_MS = 300_000;
+/** §12.4: a failed start is retried only after `2 × freshMs`, not never. */
+const RESPAWN_FAILURE_COOLDOWN_FACTOR = 2;
 /** How often D1 is checked while a child starts. Its first poll lands in well under a second. */
 const READY_POLL_MS = 150;
 /** Only used to word the failure: "process never appeared" vs "it started and cannot reach us". */
@@ -261,6 +291,7 @@ export class AdapterLoop {
   private readonly herdr: Herdr;
   private readonly config: LoopConfig;
   private readonly now: () => number;
+  private readonly sessionFile: string | undefined;
 
   private readonly journal: Journal;
   private readonly watermark: Watermarks;
@@ -397,6 +428,21 @@ export class AdapterLoop {
    * with a new trigger. Memory only: what survives a restart is Q7's problem, not this one.
    */
   private readonly goneReported = new Set<string>();
+  /**
+   * Failed respawn attempts, keyed by child id (§12.4). A failed start is not "already
+   * running": after `2 × freshMs` the same process may try again. The timestamp is on the
+   * loop's clock, so a test can cross the cooldown without sleeping.
+   */
+  private readonly respawnAttempts = new Map<string, number>();
+  /** Starts in flight in this process; prevents two concurrent calls from sharing one stale timestamp. */
+  private readonly respawnStarting = new Set<string>();
+  /** §12.5 skip reasons already logged by this process; startup runs must not repeat them forever. */
+  private readonly respawnSkipWarned = new Set<string>();
+  /** §12.5: when the startup grace ends and the automatic path may actually start processes. */
+  private autoRespawnDueAt: number | undefined;
+  private autoRespawnDone = false;
+  /** When this loop was constructed, which is when the session's startup grace begins. */
+  private readonly startedAt: number;
   /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
   private aborting = false;
   /** Ends an in-flight abort wait when `stop()` runs (§3.2). */
@@ -413,6 +459,8 @@ export class AdapterLoop {
     this.herdr = deps.herdr;
     this.config = deps.config;
     this.now = deps.now;
+    this.sessionFile = deps.sessionFile;
+    this.startedAt = deps.now();
     this.journal = new Journal(deps.config.adapterDir);
     this.watermark = new Watermarks(deps.config.adapterDir);
     this.owed = new OwedLedger(deps.config.adapterDir);
@@ -488,6 +536,9 @@ export class AdapterLoop {
   async pollOnce(): Promise<void> {
     try {
       await this.ensureReady();
+      // A poll is also a drive: if the startup grace expired while the loop was idle,
+      // repair this layer now rather than waiting for the next 5 s timer scan.
+      this.fireDueAutoRespawn(this.now());
       // The poll loop keeps running while the member is idle, which makes it the one
       // path that can notice an ancestor's delete between settles (§5.3, §5.1 path 3).
       // Bounded by `PANE_CHECK_TTL_MS`, and it returns at once when neither a pane nor
@@ -720,6 +771,7 @@ export class AdapterLoop {
     if (this.stopped) return;
     const now = this.now();
     this.fireDueSchedules(now);
+    this.fireDueAutoRespawn(now);
     this.evaluateAttention(now);
     this.queueReminder(now);
     if (!this.windowDue(now)) return;
@@ -882,6 +934,11 @@ export class AdapterLoop {
     /** Esc in the parent's session: stop waiting, not the child that is already started. */
     signal?: AbortSignal;
   }): Promise<{ id: string; name: string }> {
+    // `children/<childId>.json` must name this member as its parent (§12.3), so the
+    // identity has to exist before the record is written.
+    await this.ensureReady();
+    const parentId = this.selfId;
+    if (parentId === undefined) throw new Error('pigroups adapter has no identity yet; cannot spawn a child');
     const requestId = randomUUID();
     const created = await this.pg.createMember({ name: opts.name, request_id: requestId });
     const id = created.member.id;
@@ -898,6 +955,23 @@ export class AdapterLoop {
       PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
     };
     const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd, args: opts.args, signal: opts.signal });
+    try {
+      // §12.3: the parent knows the token and the launch recipe, but not the child's
+      // session file (the child writes that itself). The record is enough to reopen it.
+      writeChildRecord(this.config.adapterDir, {
+        parentId,
+        childId: id,
+        name,
+        cwd: opts.cwd ?? null,
+        args: opts.args ?? [],
+        token,
+        intent: 'spawned',
+      });
+    } catch (err) {
+      // The child is already running; a failed record write is a repair problem, not a
+      // reason to report the spawn itself as failed.
+      console.warn(`[pigroups] could not write the respawn record for ${id}: ${(err as Error)?.message ?? String(err)}`);
+    }
     this.panes.set(id, pane);
     this.paneCheckedAt.set(id, this.now());
     // Handing work to someone is not waiting for them to start: the child has its brief and a
@@ -1093,6 +1167,13 @@ export class AdapterLoop {
     const known = this.telemetry.snapshot().find((entry) => entry.child === member);
     const { terminated } = await this.pg.deleteMember(member);
     // The delete has committed as of this line. Everything below is cleanup of a fact:
+    try {
+      // §12.3: `intent:terminated` is what keeps "run automatically at startup" from
+      // turning a terminate into a suggestion. The record stays; only its intent changes.
+      markChildrenTerminated(this.config.adapterDir, [member, ...terminated]);
+    } catch (err) {
+      console.warn(`[pigroups] could not mark terminated members in children/: ${(err as Error)?.message ?? String(err)}`);
+    }
     // it must not be able to turn a successful `pg_terminate` into a tool error.
     //
     // The members are gone, so their private debts are unpayable. Prune them now rather
@@ -1108,6 +1189,285 @@ export class AdapterLoop {
       if (outcome.forced !== undefined) pane_close_forced.push(outcome.forced);
     }
     return { terminated, pane_close_failed, pane_close_forced };
+  }
+
+  /**
+   * §12.4: reopen this member's direct children and tell each one to repair its own
+   * layer. It never calls `POST /v1/members/:id/token`: reissuing a token overwrites
+   * `token_hash`, which logs a living child out. The recorded token is used as-is.
+   *
+   * Idempotence has independent guards, because neither is enough alone:
+   * - `last_seen_at` answers "is it already running?" across processes and restarts;
+   * - `respawnStarting` answers "did this process already start it?" inside the window
+   *   before the child's first authenticated request updates `last_seen_at`;
+   * - the on-disk lock answers the same question across processes;
+   * - `respawnAttempts` answers "did a start fail recently?" so a failure is not
+   *   permanently mistaken for a running process.
+   *
+   * `allowStart:false` is §12.5's startup grace: herdr restarts every `pi --session`
+   * at once, and a member that has been up for three seconds still carries the old
+   * `last_seen_at`. Time cannot distinguish "not started" from "just started", so the
+   * automatic path may notify but must not start processes until the grace is over.
+   */
+  async respawn(scope?: string, opts: { allowStart?: boolean } = {}): Promise<RespawnResult> {
+    const result: RespawnResult = { restarted: [], alreadyRunning: [], skipped: [], failed: [] };
+    // The filter needs this member's id; a direct call (a test, or a control that won
+    // the race with the first poll) may arrive before `init()` has run.
+    await this.ensureReady();
+    const selfId = this.selfId;
+    if (selfId === undefined) {
+      result.skipped.push({ id: scope ?? 'self', reason: 'this adapter has no identity yet; nothing to respawn' });
+      return result;
+    }
+    const freshMs = this.config.respawnFreshMs ?? DEFAULT_RESPAWN_FRESH_MS;
+    let records = readChildRecords(this.config.adapterDir, selfId);
+    if (scope !== undefined && scope !== '') {
+      const selected = records.filter((record) => record.childId === scope);
+      if (selected.length === 0) {
+        result.skipped.push({
+          id: scope,
+          reason: 'not a direct child of this member; respawn only handles children recorded by pg_spawn',
+        });
+        return result;
+      }
+      records = selected;
+    }
+
+    for (const record of records) {
+      const id = record.childId;
+      if (record.intent === 'terminated' && scope !== id) {
+        result.skipped.push({ id, reason: 'intent is terminated; a terminated member is never started automatically' });
+        continue;
+      }
+      // Mark the attempt before the first await that can start a process. A concurrent
+      // call must not read the same stale timestamp and start a second process.
+      if (this.respawnStarting.has(id)) {
+        result.alreadyRunning.push(id);
+        continue;
+      }
+
+      let detail: Awaited<ReturnType<PgClient['getMember']>>;
+      try {
+        detail = await this.pg.getMember(id);
+      } catch (err) {
+        result.failed.push({ id, error: respawnError(err) });
+        continue;
+      }
+      // Re-check after the await: another call may have entered while this one was
+      // waiting for the platform, and only one of them may spawn.
+      if (this.respawnStarting.has(id)) {
+        result.alreadyRunning.push(id);
+        continue;
+      }
+      if (detail.status === 'gone') {
+        result.skipped.push({
+          id,
+          reason: 'member is gone; its identity cannot be restored (the platform will not reissue a gone token)',
+        });
+        continue;
+      }
+
+      const lastSeen = typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null;
+      const fresh = lastSeen !== null && this.now() - lastSeen < freshMs;
+      if (fresh) {
+        try {
+          await this.sendRespawnControl(id);
+          result.alreadyRunning.push(id);
+        } catch (err) {
+          result.failed.push({ id, error: respawnError(err) });
+        }
+        continue;
+      }
+
+      if (opts.allowStart === false) {
+        // §12.5 grace: "只通报、不起进程". The control waits in the child's queue and is
+        // acted on after that child has authenticated; it is also what a fresh child gets.
+        try {
+          await this.sendRespawnControl(id);
+          result.skipped.push({
+            id,
+            reason: `startup grace period (${freshMs} ms): not starting a process yet`,
+          });
+        } catch (err) {
+          result.failed.push({ id, error: respawnError(err) });
+        }
+        continue;
+      }
+
+      const failedAt = this.respawnAttempts.get(id);
+      if (failedAt !== undefined && this.now() - failedAt < freshMs * RESPAWN_FAILURE_COOLDOWN_FACTOR) {
+        result.skipped.push({
+          id,
+          reason: `a previous respawn attempt failed; cooling down for ${freshMs * RESPAWN_FAILURE_COOLDOWN_FACTOR} ms`,
+        });
+        continue;
+      }
+
+      const sessionFile = readSessionFileForMember(this.config.adapterDir, id);
+      if (sessionFile === undefined) {
+        result.skipped.push({
+          id,
+          reason: 'no session record for this member; cannot reopen it without a session file (no path is guessed)',
+        });
+        continue;
+      }
+
+      const lock = this.acquireRespawnLock(id);
+      if (!lock.acquired) {
+        result.skipped.push({
+          id,
+          reason: `another process is starting it (lock held by pid ${lock.pid} at ${lock.at})`,
+        });
+        continue;
+      }
+
+      this.respawnStarting.add(id);
+      let pane: string | undefined;
+      try {
+        const spawned = await this.herdr.spawn({
+          label: record.name,
+          env: {
+            PIGROUPS_URL: this.config.url,
+            PIGROUPS_TOKEN: record.token,
+            PIGROUPS_ADAPTER_DIR: this.config.adapterDir,
+            PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
+          },
+          cwd: record.cwd ?? undefined,
+          // §12.4/§D-13: `--session` comes first. Caller args may contain `--`, which
+          // would otherwise turn the flag into a positional argument.
+          args: ['--session', sessionFile, ...record.args],
+        });
+        pane = spawned.pane;
+        // Track the pane this process created, so `pg_terminate` and the gone-member
+        // recheck can close it later just like a pane from `pg_spawn`.
+        this.panes.set(id, pane);
+        this.paneCheckedAt.set(id, this.now());
+        // D1: do not tell it to repair its own children until it has authenticated.
+        // A member that has not connected can only produce a string of failures.
+        await this.waitForRespawnConnection(id, lastSeen);
+        await this.sendRespawnControl(id);
+        this.respawnAttempts.delete(id);
+        result.restarted.push(id);
+      } catch (err) {
+        // A spawn can fail after the pane exists (the session never authenticates, or
+        // the recursive control cannot be sent). Close it before reporting the failed
+        // attempt: leaving it behind is the shell a dead child's parent must not keep.
+        if (pane !== undefined) await this.closePane(id);
+        this.respawnAttempts.set(id, this.now());
+        result.failed.push({ id, error: respawnError(err) });
+      } finally {
+        this.respawnStarting.delete(id);
+        // Always remove our own lock: success, failure and a thrown close all end the
+        // "another process is starting it" claim. A lock left behind would block the
+        // next repair for five minutes.
+        removeRespawnLock(this.config.adapterDir, id);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Claim `<adapterDir>/respawn/<childId>.lock` (§12.4). A fresh lock held by a live pid
+   * belongs to another process; an expired one, a dead pid, or a corrupt file is cleaned
+   * up and retried once, so a crashed starter cannot block the repair forever.
+   */
+  private acquireRespawnLock(id: string): { acquired: true } | { acquired: false; pid: number; at: number } {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const now = this.now();
+      if (createRespawnLock(this.config.adapterDir, id, { pid: process.pid, at: now })) return { acquired: true };
+      const existing = readRespawnLock(this.config.adapterDir, id);
+      if (existing !== undefined && now - existing.at < RESPAWN_LOCK_TTL_MS && processIsAlive(existing.pid)) {
+        return { acquired: false, pid: existing.pid, at: existing.at };
+      }
+      removeRespawnLock(this.config.adapterDir, id);
+    }
+    const existing = readRespawnLock(this.config.adapterDir, id);
+    return { acquired: false, pid: existing?.pid ?? 0, at: existing?.at ?? 0 };
+  }
+
+  /** One parent-to-child `pg.respawn`; the child runs §12.4 for its own layer. */
+  private async sendRespawnControl(member: string): Promise<void> {
+    await this.pg.sendControl({
+      to: member,
+      id: randomUUID(),
+      cmd: 'pg.respawn',
+      payload: { v: 1 },
+    });
+  }
+
+  /** Wait for `last_seen_at` to advance past what the member had before this launch. */
+  private async waitForRespawnConnection(member: string, before: number | null): Promise<void> {
+    // §12.4/F10: the deadline is on the loop's clock. Production injects `Date.now`;
+    // tests inject a fake clock and can end the wait by advancing it, not by sleeping.
+    const deadline = this.now() + this.config.spawnReadyMs;
+    for (;;) {
+      try {
+        const detail = await this.pg.getMember(member);
+        const seen = typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null;
+        if (seen !== null && (before === null || seen > before)) return;
+      } catch {
+        // Not a verdict; the next read may succeed.
+      }
+      if (this.now() >= deadline) {
+        throw new Error(`session started but did not authenticate within ${this.config.spawnReadyMs} ms`);
+      }
+      await sleep(READY_POLL_MS);
+    }
+  }
+
+  /**
+   * §12.5: startup repairs this layer in the background; it must not block `init()`.
+   * Inside the grace period it only notifies (no process starts). `tick()` runs the real
+   * repair when the grace expires, so herdr's simultaneously restarted sessions have
+   * time to authenticate first.
+   */
+  private maybeAutoRespawn(): void {
+    if (this.config.autoRespawn !== true || this.autoRespawnDone) return;
+    const selfId = this.selfId;
+    if (selfId === undefined) return;
+    if (readChildRecords(this.config.adapterDir, selfId).length === 0) {
+      this.autoRespawnDone = true;
+      return;
+    }
+    const freshMs = this.config.respawnFreshMs ?? DEFAULT_RESPAWN_FRESH_MS;
+    const graceEndsAt = this.startedAt + freshMs;
+    if (this.now() < graceEndsAt) {
+      this.autoRespawnDueAt = graceEndsAt;
+      this.runRespawnInBackground(undefined, { allowStart: false });
+      return;
+    }
+    this.autoRespawnDone = true;
+    this.autoRespawnDueAt = undefined;
+    this.runRespawnInBackground();
+  }
+
+  /** The grace has expired: run the automatic repair for real. Called by `tick()`. */
+  private fireDueAutoRespawn(now: number): void {
+    if (this.autoRespawnDueAt === undefined || now < this.autoRespawnDueAt) return;
+    this.autoRespawnDueAt = undefined;
+    this.autoRespawnDone = true;
+    this.runRespawnInBackground();
+  }
+
+  /** A control or startup repair is a background job: the loop must keep handling abort/terminate. */
+  private runRespawnInBackground(scope?: string, opts: { allowStart?: boolean } = {}): void {
+    void this.respawn(scope, opts)
+      .then((result) => {
+        // §12.5/F8: a skip in the background is invisible unless it is logged. Dedup per
+        // process: startup runs on every session start, and a tombstone must not fill the log.
+        for (const skipped of result.skipped) {
+          const key = `${skipped.id}\u0000${skipped.reason}`;
+          if (this.respawnSkipWarned.has(key)) continue;
+          this.respawnSkipWarned.add(key);
+          console.warn(`[pigroups] respawn skipped ${skipped.id}: ${skipped.reason}`);
+        }
+        for (const failed of result.failed) {
+          console.warn(`[pigroups] respawn of ${failed.id} failed: ${failed.error}`);
+        }
+      })
+      .catch((err: unknown) => {
+        console.warn(`[pigroups] respawn failed: ${respawnError(err)}`);
+      });
   }
 
   /**
@@ -1211,6 +1571,21 @@ export class AdapterLoop {
     this.selfId = who.member.id;
     this.selfName = who.member.name;
     this.parentId = who.member.parent_id;
+    // §12.3: a session that has an identity records it under the one key it will still
+    // know after a restart. No session file means there is no honest key — do not invent one.
+    if (this.sessionFile !== undefined && this.sessionFile !== '') {
+      writeSessionRecords(this.config.adapterDir, {
+        memberId: who.member.id,
+        orgUrl: this.config.url,
+        token: this.config.token,
+        parentId: who.member.parent_id,
+        sessionFile: this.sessionFile,
+      });
+    } else {
+      console.warn(
+        '[pigroups] not writing session respawn records: pi did not provide a session file for this session',
+      );
+    }
     // All three records are this member's (§3.4, §4.2), so they are keyed only now — and
     // read before the first injection point below can decide anything. `hadInjected`
     // separates a fresh spawn from a restart: only a process that has never delivered
@@ -1232,6 +1607,9 @@ export class AdapterLoop {
     // the reconciliation has only just marked.
     await this.pruneUnanswerableDms(true);
     this.ready = true;
+    // §12.5: identity is known and the platform answered whoami above. Start the repair
+    // after `ready` so the normal startup path is already usable while it runs.
+    this.maybeAutoRespawn();
   }
 
   /**
@@ -1414,6 +1792,17 @@ export class AdapterLoop {
         }
         const text = typeof payload.text === 'string' ? payload.text : '';
         this.enqueue({ text, kind: 'control', journalId });
+        return;
+      }
+
+      case 'pg.respawn': {
+        // §12.6: same trust rule as pg.abort/pg.steer; and it never enters context.
+        if (!this.fromHigherUp(item)) {
+          this.logIgnored(item);
+          return;
+        }
+        const scope = typeof payload.scope === 'string' && payload.scope !== '' ? payload.scope : undefined;
+        this.runRespawnInBackground(scope);
         return;
       }
 
@@ -2390,6 +2779,23 @@ function truncate(text: string, max: number): string {
 
 function isAbort(err: unknown): boolean {
   return (err as Error)?.name === 'AbortError';
+}
+
+/** `kill(pid, 0)` asks "can this pid be signalled"; EPERM still means the process exists. */
+function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
+/** Keep a platform error's status/code: 401 and 429 are facts the caller must see. */
+function respawnError(err: unknown): string {
+  if (err instanceof PgError) return `${err.status} ${err.code}: ${err.message}`;
+  return (err as Error)?.message ?? String(err);
 }
 
 function sleep(ms: number): Promise<void> {

@@ -20,11 +20,13 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { defaultAdapterDir } from './datadir.ts';
 import { PgClient, PgError } from './pgclient.ts';
+
+export { defaultAdapterDir } from './datadir.ts';
 
 /** What `<adapterDir>/org.json` records. `pid` is the process we started, not a promise it is still that process. */
 export interface OrgState {
@@ -56,7 +58,7 @@ export interface OrgStartOptions {
   port?: number;
   dataDir?: string;
   platformDir?: string;
-  /** The adapter directory holding `orgs/`; defaults to `PIGROUPS_ADAPTER_DIR` or `~/.pigroups-adapter`. */
+  /** The adapter directory holding `orgs/`; defaults to `PIGROUPS_ADAPTER_DIR` or `~/.pi/pigroups`. */
   adapterDir?: string;
   /** Working directory used to derive the organisation key when no name is given. */
   cwd?: string;
@@ -103,11 +105,7 @@ export function defaultAdapterRoot(): string {
   return dirname(dirname(fileURLToPath(import.meta.url)));
 }
 
-/** `PIGROUPS_ADAPTER_DIR`, or the per-user default. `org.json` and the journal live side by side. */
-export function defaultAdapterDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.PIGROUPS_ADAPTER_DIR ?? join(homedir(), '.pigroups-adapter');
-}
-
+/** `org.json` and the journal live side by side under the adapter directory (§12.1). */
 /**
  * Where the platform checkout may be, in the order the tool tries them. The two
  * relative candidates are resolved from the adapter's own location (the repository

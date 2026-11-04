@@ -534,6 +534,10 @@ export class FakeHerdr implements Herdr {
   authenticate = true;
   /** When set, `close` rejects with this after recording the attempt (herdr down / a timeout). */
   failClose: Error | undefined;
+  /** When set, `spawn` records the attempt and then rejects with this (herdr down / shell not ready). */
+  failSpawn: Error | undefined;
+  /** Runs after the attempt is recorded and before it returns, so a test can inspect the lock. */
+  onSpawn: ((opts: { label: string; env: Record<string, string>; cwd?: string; args?: string[] }) => Promise<void> | void) | undefined;
   /** When set, `close` reports that it cut off an agent still running at the bound. */
   forceClose = false;
   /** Runs before a close is recorded: lets a test read platform state at that exact moment. */
@@ -541,6 +545,8 @@ export class FakeHerdr implements Herdr {
 
   async spawn(opts: { label: string; env: Record<string, string>; cwd?: string; args?: string[] }): Promise<{ pane: string }> {
     this.spawns.push(opts);
+    if (this.failSpawn !== undefined) throw this.failSpawn;
+    if (this.onSpawn !== undefined) await this.onSpawn(opts);
     // A real child's first act is one authenticated request, and that is what D1 waits for
     // (the platform's `last_seen_at`). A fake that only returns a pane name leaves the member
     // permanently unseen, which is not a shape that happens outside the tests.

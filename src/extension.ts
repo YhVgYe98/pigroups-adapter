@@ -14,7 +14,8 @@ import type { LoopConfig } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
 import { defaultAdapterDir, startOrg } from './org.ts';
 import type { OrgHandle } from './org.ts';
-import { PgClient } from './pgclient.ts';
+import { PgClient, PgError } from './pgclient.ts';
+import { readSessionRecord } from './records.ts';
 import { PiSurfaceAdapter } from './surface.ts';
 import type { PiContext, PiLike, PiToolDefinition } from './surface.ts';
 import { ADAPTER_VERSION } from './version.ts';
@@ -46,13 +47,17 @@ export function resolveSpawnCmd(
 }
 
 export default function pigroupsExtension(pi: PiLike): void {
-  // Two entry paths, one member session.
+  // Three entry paths, one member session.
   //
-  // Configured (概念稿 §7.4): the session was handed an identity, so the eleven member
+  // Configured (概念稿 §7.4): the session was handed an identity, so the twelve member
   // tools exist and `session_start` starts the loop. `pg_org_start` is deliberately
   // NOT registered here: this session already belongs to a platform, and a tool that
   // could conjure a second organisation from inside a member would be a way to end up
   // polling two platforms with one identity (or to orphan the one it belongs to).
+  //
+  // Recovered (§12.3, §12.5): no environment identity, but this pi session file has a
+  // `sessions/<sha1(sessionFile)>.json` record from an earlier start. The tool surface
+  // is decided on `session_start`, the first moment `ctx.sessionManager` exists.
   //
   // Unconfigured: exactly one tool, `pg_org_start`. Nothing polls, nothing calls out,
   // and no other tool exists until that tool has succeeded. On success it builds the
@@ -61,63 +66,96 @@ export default function pigroupsExtension(pi: PiLike): void {
   const config = readConfig();
   let session: MemberSession | undefined;
   let org: OrgHandle | undefined;
+  let orgToolRegistered = false;
 
   if (config !== null) {
     session = openMemberSession(pi, config);
     pi.on('session_start', (_event, ctx) => session?.start(ctx));
   } else {
-    pi.registerTool({
-      name: 'pg_org_start',
-      label: 'PiGroups start organisation',
-      description:
-        'Start a PiGroups organisation and make this session its root. This tool exists only in a ' +
-        'session that has no identity yet: a session started with PIGROUPS_URL and PIGROUPS_TOKEN already ' +
-        'belongs to a platform, so it is not given this tool at all. It finds the platform checkout ' +
-        '(`platform_dir`, else PIGROUPS_PLATFORM_DIR, else ../PiGroups next to the adapter, else ' +
-        '../../PiGroups) and verifies it by src/main.ts; a failed lookup lists every candidate it tried. ' +
-        'If <adapter dir>/org.json records a healthy organisation it reattaches to that one instead of ' +
-        'starting a second platform. Otherwise it starts the platform detached (the organisation outlives ' +
-        'this session), waits for /v1/health, bootstraps a root and writes org.json. Idempotent: a second ' +
-        'call, from this session or a later one, reattaches. After success the member tools (pg_say, ' +
-        'pg_members, pg_spawn, ...) appear and this session is the root; if it fails, the platform it ' +
-        'started is stopped again.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Name for the root member (the organisation\u2019s first name).' },
-          port: { type: 'number', description: 'Local port for the platform; a free port by default.' },
-          data_dir: {
-            type: 'string',
-            description:
-              'Where the platform keeps its database and log. Defaults to <adapter dir>/platform-data; ' +
-              'reuse the recorded one when the platform process is gone but its organisation should return.',
+    const registerOrgStart = (): void => {
+      if (orgToolRegistered) return;
+      orgToolRegistered = true;
+      pi.registerTool({
+        name: 'pg_org_start',
+        label: 'PiGroups start organisation',
+        description:
+          'Start a PiGroups organisation and make this session its root. This tool exists only in a ' +
+          'session that has no identity yet: a session started with PIGROUPS_URL and PIGROUPS_TOKEN already ' +
+          'belongs to a platform, so it is not given this tool at all. It finds the platform checkout ' +
+          '(`platform_dir`, else PIGROUPS_PLATFORM_DIR, else ../PiGroups next to the adapter, else ' +
+          '../../PiGroups) and verifies it by src/main.ts; a failed lookup lists every candidate it tried. ' +
+          'If <adapter dir>/org.json records a healthy organisation it reattaches to that one instead of ' +
+          'starting a second platform. Otherwise it starts the platform detached (the organisation outlives ' +
+          'this session), waits for /v1/health, bootstraps a root and writes org.json. Idempotent: a second ' +
+          'call, from this session or a later one, reattaches. After success the member tools (pg_say, ' +
+          'pg_members, pg_spawn, ...) appear and this session is the root; if it fails, the platform it ' +
+          'started is stopped again.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Name for the root member (the organisation\u2019s first name).' },
+            port: { type: 'number', description: 'Local port for the platform; a free port by default.' },
+            data_dir: {
+              type: 'string',
+              description:
+                'Where the platform keeps its database and log. Defaults to <adapter dir>/platform-data; ' +
+                'reuse the recorded one when the platform process is gone but its organisation should return.',
+            },
+            platform_dir: {
+              type: 'string',
+              description: 'PiGroups checkout containing src/main.ts. Overrides PIGROUPS_PLATFORM_DIR and the defaults.',
+            },
           },
-          platform_dir: {
-            type: 'string',
-            description: 'PiGroups checkout containing src/main.ts. Overrides PIGROUPS_PLATFORM_DIR and the defaults.',
-          },
+          additionalProperties: false,
         },
-        additionalProperties: false,
-      },
-      execute: async (_id, params, signal, _update, ctx) => {
-        if (session !== undefined && org !== undefined) {
-          // The loop already runs; a second start would create a second polling
-          // identity against the same token (platform poll is single-consumer).
-          return text(JSON.stringify({ already_member: true, ...orgAnswer(org, true) }, null, 2));
+        execute: async (_id, params, signal, _update, ctx) => {
+          if (session !== undefined && org !== undefined) {
+            // The loop already runs; a second start would create a second polling
+            // identity against the same token (platform poll is single-consumer).
+            return text(JSON.stringify({ already_member: true, ...orgAnswer(org, true) }, null, 2));
+          }
+          const started = await startOrg({
+            name: typeof params.name === 'string' && params.name !== '' ? params.name : undefined,
+            port: optionalPort(params.port),
+            dataDir: typeof params.data_dir === 'string' && params.data_dir !== '' ? params.data_dir : undefined,
+            platformDir:
+              typeof params.platform_dir === 'string' && params.platform_dir !== '' ? params.platform_dir : undefined,
+            signal,
+          });
+          org = started;
+          session = openMemberSession(pi, loopConfig(started.url, started.token));
+          session.start(ctx);
+          return text(JSON.stringify({ already_member: false, ...orgAnswer(started, started.reattached) }, null, 2));
+        },
+      });
+    };
+
+    pi.on('session_start', async (_event, ctx) => {
+      if (session !== undefined) return;
+      // §12.3: the session file is the only identity a manually resumed pi knows.
+      // A record found here is the third startup path, and it is a full member: the
+      // same twelve tools, no pg_org_start.
+      const sessionFile = sessionFileOf(ctx);
+      const saved = sessionFile === undefined ? undefined : readSessionRecord(defaultAdapterDir(), sessionFile);
+      if (saved !== undefined) {
+        // §12.3: a record is a claim, not proof. A token that the platform no longer
+        // accepts (or a member whose status is gone) must not trap this session behind
+        // twelve tools that cannot talk to anything. Fall back to the no-identity path
+        // and say exactly what happened, so a person can start over or a parent can
+        // reissue the token.
+        const verdict = await recoveryVerdict(saved.orgUrl, saved.token, saved.memberId);
+        if (verdict.ok) {
+          session = openMemberSession(pi, loopConfig(saved.orgUrl, saved.token));
+          session.start(ctx);
+          return;
         }
-        const started = await startOrg({
-          name: typeof params.name === 'string' && params.name !== '' ? params.name : undefined,
-          port: optionalPort(params.port),
-          dataDir: typeof params.data_dir === 'string' && params.data_dir !== '' ? params.data_dir : undefined,
-          platformDir:
-            typeof params.platform_dir === 'string' && params.platform_dir !== '' ? params.platform_dir : undefined,
-          signal,
-        });
-        org = started;
-        session = openMemberSession(pi, loopConfig(started.url, started.token));
-        session.start(ctx);
-        return text(JSON.stringify({ already_member: false, ...orgAnswer(started, started.reattached) }, null, 2));
-      },
+        console.warn(
+          `[pigroups] session record for ${saved.memberId} is no longer usable (${verdict.reason}); ` +
+            'the token is invalid/expired or the member is gone. Falling back to pg_org_start: ' +
+            'start a new organisation, or ask the parent to reissue the token.',
+        );
+      }
+      registerOrgStart();
     });
   }
 
@@ -130,7 +168,7 @@ export default function pigroupsExtension(pi: PiLike): void {
 }
 
 /**
- * One member session: the PiSurface, the platform client, the herdr CLI, the ten
+ * One member session: the PiSurface, the platform client, the herdr CLI, the twelve
  * member tools, and the loop. Building it twice would register the same tools twice
  * and run two polls of one identity, so `start()` is idempotent.
  */
@@ -154,7 +192,7 @@ function openMemberSession(pi: PiLike, config: LoopConfig): MemberSession {
       surface.attachContext(ctx);
       // The one startup line: which adapter this member is running, and against what.
       console.log(`[pigroups] adapter ${ADAPTER_VERSION} starting against ${config.url}`);
-      loop = new AdapterLoop({ pg, surface, herdr, config, now: () => Date.now() });
+      loop = new AdapterLoop({ pg, surface, herdr, config, now: () => Date.now(), sessionFile: sessionFileOf(ctx) });
       loop.start();
     },
     async stop(): Promise<void> {
@@ -190,6 +228,12 @@ function optionalPort(raw: unknown): number | undefined {
   return port;
 }
 
+/** `ReadonlySessionManager.getSessionFile()`; absent in old pi versions and before a file exists. */
+function sessionFileOf(ctx: PiContext): string | undefined {
+  const file = ctx.sessionManager?.getSessionFile();
+  return typeof file === 'string' && file !== '' ? file : undefined;
+}
+
 function readConfig(): LoopConfig | null {
   const url = process.env.PIGROUPS_URL;
   const token = process.env.PIGROUPS_TOKEN;
@@ -198,29 +242,64 @@ function readConfig(): LoopConfig | null {
 }
 
 /** The same wiring for both paths: a configured member and one that just started an org. */
-function loopConfig(url: string, token: string): LoopConfig {
+export function loopConfig(url: string, token: string, env: NodeJS.ProcessEnv = process.env): LoopConfig {
   return {
     url,
     token,
-    adapterDir: defaultAdapterDir(),
-    pollLimit: envInt('PIGROUPS_POLL_LIMIT', 20),
-    pollWait: envInt('PIGROUPS_POLL_WAIT', 25),
-    attentionToolMs: envInt('PIGROUPS_ATTENTION_TOOL_MS', 300_000),
-    remindWindowMs: envInt('PIGROUPS_REMIND_WINDOW_MS', 300_000),
-    nudgeMax: envInt('PIGROUPS_NUDGE_MAX', 3),
+    adapterDir: defaultAdapterDir(env),
+    pollLimit: envInt(env, 'PIGROUPS_POLL_LIMIT', 20),
+    pollWait: envInt(env, 'PIGROUPS_POLL_WAIT', 25),
+    attentionToolMs: envInt(env, 'PIGROUPS_ATTENTION_TOOL_MS', 300_000),
+    remindWindowMs: envInt(env, 'PIGROUPS_REMIND_WINDOW_MS', 300_000),
+    nudgeMax: envInt(env, 'PIGROUPS_NUDGE_MAX', 3),
     // 概念稿 §8.1 / §13.3: the tumbling delivery window. 60 s covers two 25 s polls, so
     // a window usually sees a whole batch; `tick()` (5 s) checks when it expires.
-    deliveryWindowMs: envInt('PIGROUPS_DELIVERY_WINDOW_MS', 60_000),
-    spawnReadyMs: envInt('PIGROUPS_SPAWN_READY_MS', 120_000),
-    spawnCmd: resolveSpawnCmd(),
+    deliveryWindowMs: envInt(env, 'PIGROUPS_DELIVERY_WINDOW_MS', 60_000),
+    spawnReadyMs: envInt(env, 'PIGROUPS_SPAWN_READY_MS', 120_000),
+    // §7/§12.5: one number is both the "already running" window and the startup grace.
+    respawnFreshMs: envInt(env, 'PIGROUPS_RESPAWN_FRESH_MS', 120_000),
+    autoRespawn: envBool(env, 'PIGROUPS_AUTO_RESPAWN', true),
+    spawnCmd: resolveSpawnCmd(env),
   };
 }
 
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
+function envInt(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const raw = env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
   const value = Number(raw);
   return Number.isFinite(value) ? value : fallback;
+}
+
+function envBool(env: NodeJS.ProcessEnv, name: string, fallback: boolean): boolean {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = raw.trim().toLowerCase();
+  if (value === '0' || value === 'false') return false;
+  if (value === '1' || value === 'true') return true;
+  return fallback;
+}
+
+type RecoveryVerdict = { ok: true } | { ok: false; reason: string };
+
+/**
+ * §12.3: a recorded identity is usable only while the platform still recognises it.
+ * 401/404/410 and `status:'gone'` are answers, not transport failures: retrying them
+ * forever would leave the session with a dead member's tool surface. Anything else
+ * (an unreachable platform, a 5xx) keeps the old path, because the loop already owns
+ * backoff and the identity may still be fine.
+ */
+async function recoveryVerdict(orgUrl: string, token: string, memberId: string): Promise<RecoveryVerdict> {
+  try {
+    const who = await new PgClient({ url: orgUrl, token }).whoami();
+    if (who.member.status === 'gone') return { ok: false, reason: 'member is gone' };
+    if (who.member.id !== memberId) return { ok: false, reason: 'the record names a different member' };
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof PgError && (err.status === 401 || err.status === 404 || err.status === 410)) {
+      return { ok: false, reason: `${err.status} ${err.code}` };
+    }
+    return { ok: true };
+  }
 }
 
 /**
@@ -497,6 +576,28 @@ function buildTools(
         // that were closed while their agent was still running. Reporting both in the
         // same answer keeps the tool honest without pretending the delete failed (§5.3).
         return text(JSON.stringify(result));
+      },
+    },
+    {
+      name: 'pg_respawn',
+      label: 'PiGroups respawn',
+      description:
+        'Reopen this member’s direct children whose platform rows are still alive but whose processes are gone ' +
+        '(§12). For each recorded child: a gone member is reported as unrecoverable; a terminated one is skipped; ' +
+        'one seen by the platform recently is left running and is only sent a pg.respawn so it repairs its own ' +
+        'children; a stale one is started from its recorded session file with the recorded token, then sent the ' +
+        'same control. A live token is never reissued. No member is started twice, and no session path is guessed. ' +
+        'With no `scope`, every direct child is considered; with a member id, only that child is.',
+      parameters: {
+        type: 'object',
+        properties: {
+          scope: { type: 'string', description: 'Only this direct child member id; omit for every recorded child.' },
+        },
+        additionalProperties: false,
+      },
+      execute: async (_id, params) => {
+        const scope = typeof params.scope === 'string' && params.scope !== '' ? params.scope : undefined;
+        return text(JSON.stringify(await requireLoop().respawn(scope), null, 2));
       },
     },
     {

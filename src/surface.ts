@@ -61,11 +61,18 @@ export interface PiMessage {
   details?: unknown;
 }
 
+/** The one read-only session-manager member this adapter uses (`ReadonlySessionManager` in pi). */
+export interface PiSessionManager {
+  getSessionFile(): string | undefined;
+}
+
 /** The context members this adapter touches (`ExtensionContext` in pi). */
 export interface PiContext {
   isIdle(): boolean;
   abort(): void;
   shutdown(): void;
+  /** pi supplies this on `session_start`; optional because older fakes and versions do not. */
+  sessionManager?: PiSessionManager;
 }
 
 /**

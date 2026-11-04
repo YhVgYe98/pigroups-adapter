@@ -1,5 +1,5 @@
 // 概念稿 §7: the tool surface is the whole of what the model can do. This file pins
-// the eleven tools and the things the spec says about their text: there is no
+// the twelve tools and the things the spec says about their text: there is no
 // `pg_steer`, `pg_members` must say what `last_seen_at` is not, and `pg_ack` must say
 // that clearing everything is explicit (§4.3).
 
@@ -42,7 +42,7 @@ function fakePi(): { pi: PiLike; tools: Map<string, PiToolDefinition>; fire(even
 
 const CTX = { isIdle: () => true, abort: () => undefined, shutdown: () => undefined };
 
-test('the registered tool surface is exactly the eleven tools, with no pg_steer', async () => {
+test('the registered tool surface is exactly the twelve tools, with no pg_steer', async () => {
   const platform = await bootPlatform();
   const adapterDir = await mkdtemp(join(tmpdir(), 'pigroups-toolsurface-'));
   const saved = {
@@ -64,8 +64,8 @@ test('the registered tool surface is exactly the eleven tools, with no pg_steer'
 
     assert.deepEqual(
       [...tools.keys()].sort(),
-      ['pg_abort', 'pg_ack', 'pg_children', 'pg_inspect', 'pg_members', 'pg_read', 'pg_say', 'pg_schedule', 'pg_spawn', 'pg_terminate', 'pg_whoami'],
-      '概念稿 §7 + §4.3: eleven tools, and steering is pg_say + pg_abort, never a pg_steer',
+      ['pg_abort', 'pg_ack', 'pg_children', 'pg_inspect', 'pg_members', 'pg_read', 'pg_respawn', 'pg_say', 'pg_schedule', 'pg_spawn', 'pg_terminate', 'pg_whoami'],
+      '概念稿 §7 + §4.3: twelve tools, and steering is pg_say + pg_abort, never a pg_steer',
     );
     assert.equal(tools.has('pg_steer'), false, 'pg_steer is gone: only pg_abort can change a member inside a tool');
 

@@ -36,7 +36,7 @@
    - **steer 排队中被 abort = 整条消息丢失**（session 文件里 0 次出现）。
    所以：abort 后关窗立即投；被切断那一轮的批次要重投（已实现，见 `unacknowledged`）。
 3. **工具面**：删 `pg_steer`；保留 `pg_abort`；加 `pg_members`、`pg_schedule`、`pg_org_start`。
-   十个成员工具 + 一个"进门"工具。（本轮设计修订再加 `pg_ack` → 十一个，见 §6.1 P5；**代码未动**。）
+   十个成员工具 + 一个"进门"工具。（本轮设计修订再加 `pg_ack`、`pg_respawn` → 十二个，见 §6.1 P5/P10。）
 4. **根自己开组织**：无身份会话只注册 `pg_org_start`，调它 → 找平台代码、detached 起平台、
    bootstrap、注册其余工具并起循环。记录在 `<adapterDir>/orgs/<key>/org.json`（**按组织名分目录**）。
 5. **成员进新 tab**（同一 workspace）、`agent start` 失败会重试、失败**绝不**往 pane 里打字。
@@ -202,6 +202,7 @@
 | P7 | 注入给模型的文本全改英文 | 注入的是 prompt，不是给人读的报告 | 全文 | **done** |
 | P8 | nudge 去重：与本会话上一条文本相同则不投，**但跳过仍计一次预算** | 62 条逐字重复注入里 61 条是 nudge；不计预算会让冻结的债永不触发 `blocked` | §4.3 | **done** |
 | P9 | **删掉 `pg.report`**：`exiting` → `pg.attention{state:'gone'}`；`blocked` / `silent_acking` 变成 attention 的两个账本态 | 它从来没装过“成员的结论”（成员汇报走 `pg_say`），两个真实生产者都有进入/离开的生命周期 | §5.1 §5.2 §6 §8.6 | **待实现**（文档已改） |
+| P10 | **`pg_respawn` + 数据目录迁到 `~/.pi/pigroups`**：`sessions/` 与 `children/` 两份记录、`pg.respawn` 控制项、启动时自动跑自己这一层；目录根按 Pi 插件惯例 | 机器重启/进程死后成员仍在平台里（`alive`），缺的只是 sessionFile 与 token；被删的（`gone`）身份不可复原 | §12 | **本轮实现** |
 
 验证口径：`npm test` 163/163、`npm run typecheck` 干净（本轮实现者实际跑出来的数）；"只回退 `src/`"能让 6 条新测试变红。
 

@@ -25,7 +25,9 @@ test('starting against a supported platform logs no compatibility warning', asyn
     warnings.push(args.map(String).join(' '));
   };
 
-  const s = await scenario();
+  // A real pi session has a session file; supplying one keeps the startup warning
+  // stream about compatibility only, which is what this test is measuring.
+  const s = await scenario({ sessionFile: '/tmp/pigroups-compat-supported.jsonl' });
   t.after(async () => {
     console.warn = original;
     await s.close();
@@ -36,7 +38,7 @@ test('starting against a supported platform logs no compatibility warning', asyn
 });
 
 test('an unsupported platform warns once at startup and the loop keeps working', async (t) => {
-  const s = await scenario();
+  const s = await scenario({ sessionFile: '/tmp/pigroups-compat-unsupported.jsonl' });
   const realWhoami = s.pg.whoami.bind(s.pg);
   s.pg.whoami = async () => ({ ...(await realWhoami()), server: { version: '0.3.7' } });
 
