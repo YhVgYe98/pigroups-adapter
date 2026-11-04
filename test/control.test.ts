@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { command, poll, removeMember, send, waitFor, within } from './support.ts';
+import { command, createMember, poll, removeMember, send, waitFor, within } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, scenario } from './scenario.ts';
 
 test('pg.abort cuts, then closes the window and delivers the steer queued behind it at once', async (t) => {
@@ -266,18 +266,17 @@ test('an unknown cmd and a pg.* payload with v:2 are injected, not dropped', asy
   assert.equal(answers.length, 0, 'a v:2 pg.inspect is not understood: it must not be answered as if it were v:1');
 });
 
-// §3.2/§6: a `pg.report` that is not `exiting` is "一行可读控制" — a conclusion a member
-// reached, not a state. Dumping the payload as JSON buries the one line the parent has to
-// read (`no output after 3 nudges`) inside `{"v":1,…}`.
-test('a pg.report is injected as one readable line, not as a payload dump', async (t) => {
-  const s = await scenario();
+// §6: `pg.report` no longer exists. A control item with that cmd is an unknown control:
+// it reaches the model verbatim and changes no telemetry state at all.
+test('a pg.report is an unknown control line and changes no state', async (t) => {
+  const s = await scenario({ role: 'root' });
   t.after(() => s.close());
-  await s.cycle();
+  const child = await createMember(s.platform, s.me, 'reporter');
 
-  await command(s.platform, s.parent!.token, s.me.id, 'pg.report', {
+  await command(s.platform, child.token, s.me.id, 'pg.report', {
     v: 1,
     status: 'blocked',
-    text: 'no output after 3 nudges (g:quant)',
+    text: 'exiting',
   });
   await s.cycle();
   await s.timer(WINDOW); // controls take the same window as messages
@@ -285,10 +284,20 @@ test('a pg.report is injected as one readable line, not as a payload dump', asyn
   const control = s.surface.textsOfKind('control').join('\n');
   assert.match(
     control,
-    /^\[report m_[A-Za-z0-9_]+\] blocked: no output after 3 nudges \(g:quant\)$/m,
-    `the parent reads the conclusion itself: ${control}`,
+    /^\[control m_[A-Za-z0-9_]+\] pg\.report /m,
+    `an unknown command is injected verbatim: ${control}`,
   );
-  assert.ok(!control.includes('"status"'), `a report is a line, not a JSON dump: ${control}`);
+  assert.ok(control.includes('"text":"exiting"'), `the payload is not dropped: ${control}`);
+  assert.equal(
+    s.surface.textsOfKind('nudge').length,
+    0,
+    `a pg.report must not produce a telemetry reminder: ${JSON.stringify(s.surface.texts())}`,
+  );
+  assert.notEqual(
+    (await s.loop.children()).find((row) => row.id === child.id)?.state,
+    'gone',
+    'a pg.report text exiting no longer moves the sender to gone',
+  );
 });
 
 // §9: "`poll` 401 | 停循环，注入一条'token 失效'给 agent，等人工". The line has to leave *before*

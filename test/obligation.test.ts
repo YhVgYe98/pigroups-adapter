@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 import { AdapterLoop } from '../src/loop.ts';
 import { PgClient, PgGone } from '../src/pgclient.ts';
-import { FakeClock, FakeSurface, createMember, dmId, poll, removeMember, send, waitFor } from './support.ts';
+import { FakeClock, FakeSurface, createMember, delay, dmId, poll, removeMember, send, waitFor } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, payloads, scenario, type Scenario } from './scenario.ts';
 
 /**
@@ -22,6 +22,11 @@ async function nudgeRound(s: Scenario, text: string): Promise<void> {
   await s.timer(WINDOW); // the message goes out
   await s.settle(); // the turn ends, so a nudge becomes due
   await s.timer(WINDOW); // the nudge goes out
+}
+
+/** §5.1: `blocked` is an attention state now, not the old `pg.report`. */
+function blockedAttention(items: Array<{ cmd: string; payload: unknown }>): Array<Record<string, any>> {
+  return payloads(items as never, 'pg.attention').filter((payload) => payload.state === 'blocked');
 }
 
 test('an owed reply is nudged on the window after the turn settles; after replying it is not', async (t) => {
@@ -177,10 +182,10 @@ test('three nudges without an outbound message produce an adapter-authored block
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(nudges.length, s.config.nudgeMax, `nudging must stop at ${s.config.nudgeMax}, got ${nudges.length}`);
 
-  const reports = payloads(await s.controlsToParent(), 'pg.report');
-  const blocked = reports.filter((payload) => payload.status === 'blocked');
-  assert.equal(blocked.length, 1, `the adapter must report blocked once, got ${JSON.stringify(reports)}`);
-  assert.ok(String(blocked[0].text ?? '').length > 0, 'the blocked report carries a text');
+  const blocked = blockedAttention(await s.controlsToParent());
+  assert.equal(blocked.length, 1, `the adapter must report blocked once, got ${JSON.stringify(blocked)}`);
+  assert.deepEqual(blocked[0].owed, [s.dm], 'the blocked state names the conversation whose budget is spent');
+  assert.match(String(blocked[0].note ?? ''), /no output after 3 nudges/, 'the blocked state carries its reason');
 });
 
 // §4.3 (design decision): a verbatim repeat is not delivered, but it is still a nudge that
@@ -216,8 +221,8 @@ test('a skipped verbatim nudge spends the budget, so a frozen debt still reports
   assert.equal(s.loop.state().nudges[s.dm], 3, 'every skipped due spends one unit of the budget');
 
   await s.settle(); // the spent budget is seen at this settle
-  const blocked = payloads(await s.controlsToParent(), 'pg.report').filter(
-    (payload) => payload.status === 'blocked' && payload.text === `no output after 3 nudges (${s.dm})`,
+  const blocked = blockedAttention(await s.controlsToParent()).filter(
+    (payload) => payload.note === `no output after 3 nudges (${s.dm})`,
   );
   assert.equal(
     blocked.length,
@@ -243,7 +248,7 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
     s.config.nudgeMax,
     `the budget stops at ${s.config.nudgeMax}`,
   );
-  const firstEpisode = payloads(await s.controlsToParent(), 'pg.report').filter((p) => p.status === 'blocked');
+  const firstEpisode = blockedAttention(await s.controlsToParent());
   assert.equal(firstEpisode.length, 1, `the exhausted episode reports blocked once, got ${JSON.stringify(firstEpisode)}`);
 
   // The parent asks again: that is inbound traffic, not the member speaking.
@@ -263,9 +268,9 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
   );
   assert.equal(s.surface.since(afterArrival).length, 0, 'settles inside a blocked episode deliver nothing');
   assert.equal(
-    payloads(await s.controlsToParent(), 'pg.report').filter((p) => p.status === 'blocked').length,
+    blockedAttention(await s.controlsToParent()).length,
     0,
-    'the parent must not receive a second blocked report for the same episode',
+    'the parent must not receive a second blocked state for the same episode',
   );
 
   // The member speaks: that closes the episode and everything it held.
@@ -287,7 +292,7 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
     'a new episode gets a full nudge budget of its own',
   );
   assert.equal(
-    payloads(await s.controlsToParent(), 'pg.report').filter((p) => p.status === 'blocked').length,
+    blockedAttention(await s.controlsToParent()).length,
     1,
     'a new episode may report blocked once more',
   );
@@ -340,7 +345,7 @@ test('an exhausted conversation reports blocked once while the live one keeps be
 
   assert.equal(s.surface.textsOfKind('nudge').length, s.config.nudgeMax, 'the DM spends its whole budget');
   assert.equal(
-    payloads(await s.controlsToParent(), 'pg.report').filter((p) => p.status === 'blocked').length,
+    blockedAttention(await s.controlsToParent()).length,
     1,
     'the exhausted DM reports blocked once',
   );
@@ -368,7 +373,7 @@ test('an exhausted conversation reports blocked once while the live one keeps be
   assert.ok(live[0].includes(s.group), `the live conversation must be named: ${live[0]}`);
   assert.ok(!live[0].includes(s.dm), `the exhausted conversation must not be nudged again: ${live[0]}`);
   assert.equal(
-    payloads(await s.controlsToParent(), 'pg.report').filter((p) => p.status === 'blocked').length,
+    blockedAttention(await s.controlsToParent()).length,
     0,
     'the still-live conversation must not produce another blocked report',
   );
@@ -390,9 +395,102 @@ test('an exhausted conversation reports blocked once while the live one keeps be
     'the live conversation gets a full budget of its own, not a share of the spent one',
   );
   assert.equal(
-    payloads(await s.controlsToParent(), 'pg.report').filter((p) => p.status === 'blocked').length,
+    blockedAttention(await s.controlsToParent()).length,
     1,
     'only the newly exhausted conversation reports blocked',
+  );
+});
+
+// §5.1/§5.2: `blocked` is one state per child whose value is a set of conversations.
+// A second conversation re-sends the same state with the whole set; `say(conv)` shrinks
+// it; only an empty set is `recovered`. The parent should never have to union anything.
+test('two blocked conversations are one state whose set shrinks as each is answered', async (t) => {
+  const s = await scenario({ nudgeMax: 1 });
+  t.after(() => s.close());
+  await s.cycle();
+
+  // First conversation spends its single nudge and reaches blocked.
+  await nudgeRound(s, 'the dm that never gets answered');
+  await s.settle(); // the spent budget enters blocked [dm]
+  await delay(50);
+
+  // A second conversation becomes blocked later: the state is re-sent with both.
+  await send(s.platform, s.parent!.token, s.group, 'the group task', [s.me.id]);
+  await s.cycle();
+  await s.timer(WINDOW); // the group message is delivered, so it is owed
+  await s.settle(); // its nudge becomes due
+  await s.timer(WINDOW); // the group-only nudge is delivered
+  await s.settle(); // the spent budget adds the group to blocked
+  await delay(50);
+
+  const blocked = blockedAttention(await s.controlsToParent());
+  assert.equal(blocked.length, 2, `a set change is a re-send, got ${JSON.stringify(blocked)}`);
+  assert.deepEqual(blocked[0].owed, [s.dm], 'entering blocked names the first conversation');
+  assert.deepEqual(blocked[1].owed, [s.dm, s.group].sort(), 'the re-send carries the whole set');
+  assert.equal(blocked[1].since, blocked[0].since, 'the set changed; the state was not re-entered');
+
+  // Answering one conversation takes only that conversation out of the set.
+  const said = await s.loop.say(s.parent!.id, 'one answer');
+  assert.equal(said.conv, s.dm);
+  await delay(50);
+  const afterOne = payloads(await s.controlsToParent(), 'pg.attention');
+  const smaller = afterOne.filter((payload) => payload.state === 'blocked');
+  assert.equal(smaller.length, 1, `a smaller set is new information: ${JSON.stringify(afterOne)}`);
+  assert.deepEqual(smaller[0].owed, [s.group], 'the parent replaces the set with what remains');
+  assert.equal(
+    afterOne.filter((payload) => payload.state === 'recovered' && payload.of === 'blocked').length,
+    0,
+    'a non-empty set is not recovered',
+  );
+
+  // Answering the last conversation empties the set: now, and only now, recovered.
+  const saidGroup = await s.loop.say(s.group, 'the group answer');
+  assert.equal(saidGroup.conv, s.group);
+  await delay(50);
+  const afterBoth = payloads(await s.controlsToParent(), 'pg.attention');
+  const recovered = afterBoth.filter((payload) => payload.state === 'recovered' && payload.of === 'blocked');
+  assert.equal(recovered.length, 1, `an empty set is recovered: ${JSON.stringify(afterBoth)}`);
+});
+
+// §4.3/§5.2: `pg_ack` clears the flag but not the blocked episode. Silence is exactly
+// what `blocked` exists to expose, so only `say()` may leave it.
+test('pg_ack does not leave the blocked state; only say does', async (t) => {
+  const s = await scenario({ nudgeMax: 1 });
+  t.after(() => s.close());
+  await s.cycle();
+
+  await nudgeRound(s, 'the dm that will be acked');
+  await s.settle(); // spent budget -> blocked
+  await delay(50);
+  const before = payloads(await s.controlsToParent(), 'pg.attention');
+  assert.equal(
+    before.filter((payload) => payload.state === 'blocked').length,
+    1,
+    'precondition: the conversation is blocked',
+  );
+
+  const acked = await s.loop.ack({ conv: s.dm });
+  assert.deepEqual(acked.remaining, [], 'the ack clears the owed flag');
+  await delay(50);
+  const afterAck = payloads(await s.controlsToParent(), 'pg.attention');
+  assert.equal(
+    afterAck.filter((payload) => payload.state === 'recovered' && payload.of === 'blocked').length,
+    0,
+    'pg_ack must not recover the blocked state',
+  );
+  assert.equal(
+    afterAck.filter((payload) => payload.state === 'blocked').length,
+    0,
+    'the blocked set did not change, so there is nothing new to send',
+  );
+
+  await s.loop.say(s.parent!.id, 'now I actually speak');
+  await delay(50);
+  const afterSay = payloads(await s.controlsToParent(), 'pg.attention');
+  assert.equal(
+    afterSay.filter((payload) => payload.state === 'recovered' && payload.of === 'blocked').length,
+    1,
+    'say() is what leaves the blocked state',
   );
 });
 

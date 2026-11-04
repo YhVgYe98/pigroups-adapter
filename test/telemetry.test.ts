@@ -312,6 +312,174 @@ test('the parent sees a child’s last round in its snapshot and in the consolid
   );
 });
 
+// §5.2: one child is one line, and that line carries every state the child is in.
+// `error` and `blocked` are a real combination: the provider failed and the member is
+// also stuck owing replies in two conversations.
+test('a child that is both error and blocked is rendered on one line with both states', async (t) => {
+  const s = await scenario({ role: 'root', remindWindowMs: 60_000 });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'coder');
+
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'error',
+    since: s.clock.now(),
+    note: 'provider 429 x7',
+  });
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'blocked',
+    since: s.clock.now() + 1_000,
+    owed: ['dm:m_a_m_d', 'dm:m_b_m_d'],
+    note: 'no output after 3 nudges (dm:m_b_m_d)',
+  });
+  await s.cycle();
+  await s.timer(60_000); // the reminder window expires
+  await s.timer(WINDOW); // the delivery window closes
+
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, `one child means one line, got ${JSON.stringify(s.surface.texts())}`);
+  const lines = nudges[0].split('\n').filter((line) => line.startsWith('- '));
+  assert.equal(lines.length, 1, `the two states share the child's line: ${nudges[0]}`);
+  assert.match(lines[0], /error: provider 429 x7/);
+  assert.match(lines[0], /blocked \(2 convs: dm:m_a_m_d, dm:m_b_m_d\)/);
+  assert.equal(
+    (await s.loop.children()).find((row) => row.id === child.id)?.state,
+    'blocked',
+    'the snapshot keeps the latest applied state while both remain in the table',
+  );
+});
+
+// §5.2: `idle_owed` is reported but never summarized. When the child also has a state the
+// parent can act on, the line must not carry the unactionable one along.
+test('idle_owed beside blocked is left out of the summary entirely', async (t) => {
+  const s = await scenario({ role: 'root', remindWindowMs: 60_000 });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'coder');
+
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'idle_owed',
+    since: s.clock.now(),
+    owed: ['g:someone-else'],
+  });
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'blocked',
+    since: s.clock.now() + 1_000,
+    owed: ['dm:m_a_m_d'],
+  });
+  await s.cycle();
+  await s.timer(60_000);
+  await s.timer(WINDOW);
+
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, `blocked is actionable, so it is summarized: ${JSON.stringify(s.surface.texts())}`);
+  assert.match(nudges[0], /blocked \(1 conv: dm:m_a_m_d\)/);
+  assert.ok(!nudges[0].includes('idle_owed'), `idle_owed never joins a summary: ${nudges[0]}`);
+});
+
+// §5.2: a state entry is reminded once. A different `owed` set is new information (the
+// parent replaces the whole set); the same set is not.
+test('a repeated blocked set is not re-reported, while a larger or smaller set is', async (t) => {
+  const s = await scenario({ role: 'root', remindWindowMs: 60_000 });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'coder');
+  const blocked = async (owed: string[]): Promise<void> => {
+    await command(s.platform, child.token, s.me.id, 'pg.attention', {
+      v: 1,
+      child: child.id,
+      name: child.name,
+      state: 'blocked',
+      since: s.clock.now(),
+      owed,
+    });
+    await s.cycle();
+    await s.timer(60_000);
+    await s.timer(WINDOW);
+  };
+
+  await blocked(['dm:m_a_m_d']);
+  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'precondition: the first blocked set is reported');
+
+  await blocked(['dm:m_a_m_d']);
+  assert.equal(
+    s.surface.textsOfKind('nudge').length,
+    1,
+    `the same set is the same state entry: no second reminder: ${JSON.stringify(s.surface.texts())}`,
+  );
+
+  await blocked(['dm:m_a_m_d', 'dm:m_b_m_d']);
+  let nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 2, `a larger set is new information: ${JSON.stringify(s.surface.texts())}`);
+  assert.match(nudges[1], /blocked \(2 convs: dm:m_a_m_d, dm:m_b_m_d\)/);
+
+  await blocked(['dm:m_b_m_d']);
+  nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 3, `a smaller set is news too: ${JSON.stringify(s.surface.texts())}`);
+  assert.match(nudges[2], /blocked \(1 conv: dm:m_b_m_d\)/);
+  assert.ok(!nudges[2].includes('dm:m_a_m_d'), `the parent replaces the set, never unions it: ${nudges[2]}`);
+
+  // Recovering the state removes it; recovery on its own is not a reminder.
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'recovered',
+    of: 'blocked',
+    since: s.clock.now(),
+  });
+  await s.cycle();
+  await s.timer(60_000);
+  await s.timer(WINDOW);
+  assert.equal(s.surface.textsOfKind('nudge').length, 3, 'a recovery is not a new summary by itself');
+  assert.equal(
+    (await s.loop.children()).find((row) => row.id === child.id)?.states.some((state) => state.state === 'blocked'),
+    false,
+    'recovered removes the state from the table',
+  );
+});
+
+// §5.1: `gone` is terminal and is not an `of:` value. A bogus `recovered{of:'gone'}`
+// must not remove anything from the table.
+test('recovered never accepts gone as the state it left', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'coder');
+
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'error',
+    since: s.clock.now(),
+    note: 'provider 429',
+  });
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'recovered',
+    of: 'gone',
+    since: s.clock.now(),
+  });
+  await s.cycle();
+
+  const row = (await s.loop.children()).find((entry) => entry.id === child.id);
+  assert.ok(
+    row?.states.some((state) => state.state === 'error'),
+    `a recovered of gone changes nothing: ${JSON.stringify(row)}`,
+  );
+});
+
 // §5.1: only a direct child may change what its parent believes about it. A parent is
 // higher up, not a direct child: its `pg.attention` must be injected as an ordinary
 // control line (nothing may be dropped) but must not touch the telemetry table.
@@ -401,22 +569,25 @@ test('a child missing from the startup roster is accepted after one report refre
   );
 });
 
-// §5.1 path 2: a child that says it is exiting is a state change, not a line of text.
-// The control reaches the parent as `pg.report{status:'blocked', text:'exiting'}`; leaving it
-// in the default branch would inject the payload and leave the child in its last state forever.
-test('a pg.report with text exiting puts the sender in the table as gone instead of injecting it', async (t) => {
+// §5.1 path 2: a child that is exiting sends `pg.attention{state:'gone'}`, not a report.
+// The exit path is the same channel as every other state: it puts the sender in the table
+// as gone and is never injected as a control line.
+test('an exiting child arrives as attention gone and is reported without a control line', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
   const child = await createMember(s.platform, s.me, 'leaver');
 
-  await command(s.platform, child.token, s.me.id, 'pg.report', {
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
     v: 1,
-    status: 'blocked',
-    text: 'exiting',
+    child: child.id,
+    name: child.name,
+    state: 'gone',
+    since: s.clock.now(),
+    note: 'exiting',
   });
   await s.cycle();
 
-  assert.equal(s.surface.deliveries.length, 0, 'an exit report is not a line of text for the parent');
+  assert.equal(s.surface.deliveries.length, 0, 'an exit is not a line of text for the parent');
   const rows = await s.loop.children();
   assert.equal(
     rows.find((row) => row.id === child.id)?.state,
@@ -429,6 +600,51 @@ test('a pg.report with text exiting puts the sender in the table as gone instead
   const nudges = s.surface.textsOfKind('nudge');
   assert.equal(nudges.length, 1, `gone must be reported once, got ${JSON.stringify(s.surface.texts())}`);
   assert.ok(nudges[0].includes(child.id), `the report must name the child that left: ${nudges[0]}`);
+  assert.match(nudges[0], /gone: exiting/, `the exit note is the one fact the parent gets: ${nudges[0]}`);
+});
+
+// §5.2: gone is urgent (it skips the reminder merge window) but it is still delivered once.
+// A crash cascade removes many children at the same instant; fifteen injections here is the
+// 6.5 hour replay in miniature.
+test('two children gone in one window produce one reminder with one line each', async (t) => {
+  const s = await scenario({ role: 'root', remindWindowMs: 3_600_000 });
+  t.after(() => s.close());
+  const a = await createMember(s.platform, s.me, 'first');
+  const b = await createMember(s.platform, s.me, 'second');
+
+  for (const child of [a, b]) {
+    await command(s.platform, child.token, s.me.id, 'pg.attention', {
+      v: 1,
+      child: child.id,
+      name: child.name,
+      state: 'gone',
+      since: s.clock.now(),
+      note: 'exiting',
+    });
+  }
+  await s.cycle();
+  assert.deepEqual(
+    (await s.loop.children()).map((row) => [row.id, row.state]).sort(),
+    [
+      [a.id, 'gone'],
+      [b.id, 'gone'],
+    ].sort(),
+    'both children are gone in the table before the reminder is queued',
+  );
+
+  await s.timer(0); // the merge window is bypassed, but the delivery window is not
+  assert.equal(s.surface.textsOfKind('nudge').length, 0, 'one delivery, not one per gone child');
+
+  await s.timer(WINDOW);
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, `two gone children are one delivery, got ${JSON.stringify(s.surface.texts())}`);
+  const lines = nudges[0].split('\n').filter((line) => line.startsWith('- '));
+  assert.equal(lines.length, 2, `one line per gone child: ${nudges[0]}`);
+  assert.ok(lines.some((line) => line.includes(a.id)), `the first child is named: ${nudges[0]}`);
+  assert.ok(lines.some((line) => line.includes(b.id)), `the second child is named: ${nudges[0]}`);
+
+  await s.timer(WINDOW);
+  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'a gone state is reported once, never again');
 });
 
 // §5.1 path 3: the liveness recheck must cover the telemetry table, not the pane map.
@@ -585,7 +801,14 @@ test('a gone child is dropped from the table once the reminder is delivered', as
   t.after(() => s.close());
   const child = await createMember(s.platform, s.me, 'departed');
 
-  await command(s.platform, child.token, s.me.id, 'pg.report', { v: 1, status: 'blocked', text: 'exiting' });
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'gone',
+    since: s.clock.now(),
+    note: 'exiting',
+  });
   await s.cycle();
   await s.timer(0);
   await s.timer(WINDOW);

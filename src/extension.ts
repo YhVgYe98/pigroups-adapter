@@ -223,7 +223,12 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
 }
 
-/** §8: best effort, two seconds, then give up. */
+/**
+ * §8.6: best effort, two seconds, then give up. The exit is a `gone` telemetry state on
+ * the same channel as every other child-to-parent state — there is no `pg.report` any
+ * more. It goes directly through PgClient because the loop is stopping and must not be
+ * involved in this last send.
+ */
 async function reportExiting(pg: PgClient): Promise<void> {
   try {
     const who = await withTimeout(pg.whoami(), EXIT_REPORT_TIMEOUT_MS);
@@ -233,8 +238,15 @@ async function reportExiting(pg: PgClient): Promise<void> {
       pg.sendControl({
         to: parent,
         id: randomUUID(),
-        cmd: 'pg.report',
-        payload: { v: 1, status: 'blocked', text: 'exiting' },
+        cmd: 'pg.attention',
+        payload: {
+          v: 1,
+          child: who.member.id,
+          name: who.member.name,
+          state: 'gone',
+          since: Date.now(),
+          note: 'exiting',
+        },
       }),
       EXIT_REPORT_TIMEOUT_MS,
     );

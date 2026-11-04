@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { dmId, history, poll, quiet, send, waitFor } from './support.ts';
+import { delay, dmId, history, poll, quiet, send, waitFor } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, payloads, scenario, type Scenario } from './scenario.ts';
 
 interface LedgerFile {
@@ -29,9 +29,11 @@ async function readLedger(s: { adapterDir: string; me: { id: string } }): Promis
   }
 }
 
-/** The conversations named in a `pg.report` with this text (§4.3's audit trail). */
-function reportsWithText(items: Array<{ cmd: string; payload: unknown }>, text: string): Array<Record<string, any>> {
-  return payloads(items as never, 'pg.report').filter((payload) => payload.text === text);
+/** §5.1: the blocked attention whose note names this episode's reason (§4.3's audit trail). */
+function blockedWithNote(items: Array<{ cmd: string; payload: unknown }>, text: string): Array<Record<string, any>> {
+  return payloads(items as never, 'pg.attention').filter(
+    (payload) => payload.state === 'blocked' && payload.note === text,
+  );
 }
 
 test('a delivered message writes its owed flag to <adapterDir>/owed/<memberId>.json, and a reply removes it', async (t) => {
@@ -370,7 +372,7 @@ test('pg_ack clears the flag without sending anything, and leaves the nudge budg
   assert.equal(s.loop.state().nudges[s.dm], 1, 'precondition: one nudge was delivered');
   await s.settle(); // the spent budget reports blocked
   await s.timer(WINDOW);
-  const blockedBefore = reportsWithText(await s.controlsToParent(), `no output after 1 nudges (${s.dm})`);
+  const blockedBefore = blockedWithNote(await s.controlsToParent(), `no output after 1 nudges (${s.dm})`);
   assert.equal(blockedBefore.length, 1, 'precondition: this conversation was reported blocked');
 
   const before = await history(s.platform, s.me.token, s.dm, { limit: 200 });
@@ -406,7 +408,7 @@ test('pg_ack clears the flag without sending anything, and leaves the nudge budg
     'an ack must not hand out a fresh nudge budget',
   );
   assert.equal(
-    reportsWithText(await s.controlsToParent(), `no output after 1 nudges (${s.dm})`).length,
+    blockedWithNote(await s.controlsToParent(), `no output after 1 nudges (${s.dm})`).length,
     0,
     'and it must not end the blocked episode, so the parent is not told again',
   );
@@ -554,15 +556,19 @@ test('pg_ack rejects a seq that is not a positive integer', async (t) => {
   assert.deepEqual(s.loop.state().owed, [s.dm], 'a rejected ack leaves the debt where it was');
 });
 
-// §4.3: "同一会话连续 ack ≥3 次且期间没有任何回复时" — acking is not doing the work, and the
-// parent is the only one who can act on that. The report is de-duplicated, and a reply
-// clears both the count and the marker, or the same episode would keep reporting.
-test('three consecutive acks with no reply report silent acking once; a reply opens a new episode', async (t) => {
+// §4.3/§5.1: "同一会话连续 ack ≥3 次且期间没有任何回复时" — acking is not doing the work,
+// and the parent is the only one who can act on that. The state is per conversation:
+// a no-op ack does not count, the entry is sent once, and `pg_say` leaves it.
+test('three real acks enter silent_acking once; a no-op ack does not count and say() leaves', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
 
-  // Each ack needs a fresh flag; no settle, so no nudge is in flight while this runs.
+  // A no-op ack has no flag to clear, so it is not one of the three confirmations.
+  const noop = await s.loop.ack({ conv: s.group, seq: 71 });
+  assert.deepEqual(noop.cleared, [], 'precondition: the no-op ack cleared nothing');
+
+  // Each counting ack needs a fresh flag; no settle, so no nudge is in flight.
   const ackRound = async (round: number): Promise<void> => {
     await send(s.platform, s.parent!.token, s.me.id, `round ${round}`);
     await s.cycle();
@@ -570,25 +576,40 @@ test('three consecutive acks with no reply report silent acking once; a reply op
     await s.loop.ack({ conv: s.dm });
   };
 
-  for (let i = 0; i < 3; i += 1) await ackRound(i);
-  const first = reportsWithText(await s.controlsToParent(), 'silent acking');
-  assert.equal(first.length, 1, `three acks and no reply must be reported once, got ${JSON.stringify(first)}`);
-  assert.equal(first[0].status, 'blocked', 'the report says the member is blocked, not merely noisy');
-
-  // A fourth ack is the same episode: the report is not repeated.
-  await ackRound(3);
+  for (let i = 0; i < 2; i += 1) await ackRound(i);
   assert.equal(
-    reportsWithText(await s.controlsToParent(), 'silent acking').length,
+    payloads(await s.controlsToParent(), 'pg.attention').filter((payload) => payload.state === 'silent_acking').length,
     0,
-    'the report must not repeat inside one episode',
+    'two real acks (plus a no-op) are not yet three',
   );
 
-  // A reply is the member speaking: it clears the count and the marker together.
+  await ackRound(2);
+  const first = payloads(await s.controlsToParent(), 'pg.attention').filter(
+    (payload) => payload.state === 'silent_acking',
+  );
+  assert.equal(first.length, 1, `three real acks enter silent_acking once, got ${JSON.stringify(first)}`);
+  assert.deepEqual(first[0].owed, [s.dm], 'the state names the conversation it is about');
+
+  // A fourth ack is the same set: the state is not re-sent.
+  await ackRound(3);
+  assert.equal(
+    payloads(await s.controlsToParent(), 'pg.attention').filter((payload) => payload.state === 'silent_acking').length,
+    0,
+    'the same set must not repeat inside one episode',
+  );
+
+  // A reply is the member speaking: it leaves silent_acking and resets the run.
   await s.loop.say(s.parent!.id, 'here is the actual answer');
+  await delay(50);
+  const left = payloads(await s.controlsToParent(), 'pg.attention').filter(
+    (payload) => payload.state === 'recovered' && payload.of === 'silent_acking',
+  );
+  assert.equal(left.length, 1, 'pg_say is the exit from silent_acking');
+
   for (let i = 0; i < 3; i += 1) await ackRound(4 + i);
   assert.equal(
-    reportsWithText(await s.controlsToParent(), 'silent acking').length,
+    payloads(await s.controlsToParent(), 'pg.attention').filter((payload) => payload.state === 'silent_acking').length,
     1,
-    'after a reply, a new run of three acks is a new episode and reports again',
+    'after a reply, a new run of three acks is a new episode and enters again',
   );
 });

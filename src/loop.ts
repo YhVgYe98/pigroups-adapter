@@ -11,7 +11,15 @@ import { Journal } from './journal.ts';
 import { OwedLedger } from './owed.ts';
 import { NudgeBudget, TelemetryTable } from './state.ts';
 import { Watermarks } from './watermark.ts';
-import type { AttentionEvent, AttentionState, AttentionTool, LastRound, LastTool } from './state.ts';
+import type {
+  AttentionEvent,
+  AttentionState,
+  AttentionTool,
+  LastRound,
+  LastTool,
+  RecoverableAttentionState,
+  StateSnapshot,
+} from './state.ts';
 import type { OwedFlag } from './owed.ts';
 import { PgError, PgGone, PgPollBusy, PgUnavailable } from './pgclient.ts';
 import type {
@@ -56,12 +64,18 @@ export interface InspectResult {
 export interface ChildSnapshot {
   id: string;
   name: string;
-  state: 'ok' | 'stalled' | 'slow_turn' | 'error' | 'idle_owed' | 'gone';
+  /** The state of the latest event; the full picture is `states` (§5.1). */
+  state: 'ok' | AttentionState;
   since: number;
   tool?: { name: string; elapsed_ms: number; preview: string };
+  owed?: string[];
+  note?: string;
+  busy_ms?: number;
   count: number;
   /** What that child's last round did (概念稿 §8.5). */
   last?: LastRound;
+  /** Every state the child is in: `error` and `blocked` can be true at once (§5.1). */
+  states: StateSnapshot[];
 }
 
 /** One row of the live roster behind `pg_members` (概念稿 §7.1). */
@@ -297,8 +311,18 @@ export class AdapterLoop {
    * leave its pane behind at a shell prompt (§5.3, 概念稿 §5.1).
    */
   private readonly panes = new Map<string, string>();
-  /** Child-side edge-triggered attention state (§5.1): one at a time. */
-  private attention: { state: AttentionState } | undefined;
+  /**
+   * Child-side edge-triggered running state (§5.1): stalled / slow_turn / error /
+   * idle_owed are one at a time, with the precedence in `desiredAttention`.
+   */
+  private activeRun: { state: AttentionState; since: number; extra: AttentionExtra } | undefined;
+  /**
+   * Child-side ledger states (`blocked`, `silent_acking`), keyed by state name. Their
+   * value is a set of conversations; a set change re-sends the same state (§5.1).
+   */
+  private readonly ownStates = new Map<AttentionState, { since: number; extra: AttentionExtra }>();
+  /** Why each blocked conversation entered the state, so a shrinking set keeps a note. */
+  private readonly blockedNotes = new Map<string, string>();
   /** Sticky until a turn ends without a provider error. */
   private errorNote: string | undefined;
   /**
@@ -719,12 +743,19 @@ export class AdapterLoop {
     // §4.2: replying clears the flag. This is also the one event that ends a blocked
     // episode (§4.3) and the run of silent confirmations that reports it, because the
     // member has spoken: the next debt starts with a clean budget and no marker.
+    const now = this.now();
     await this.owed.clear(sent.to);
     this.nudges.clear(sent.to);
     this.blockedReported.delete(sent.to);
+    this.blockedNotes.delete(sent.to);
     this.silentAcks.delete(sent.to);
     this.silentAckReported.delete(sent.to);
-    this.evaluateAttention(this.now());
+    // §5.2: `blocked` and `silent_acking` are per-conversation sets. `say(conv)` removes
+    // only that conversation; a non-empty set is re-sent with what remains, and only an
+    // empty set is `recovered{of}`. `pg_ack` deliberately does none of this.
+    await this.syncOwnState('blocked', now);
+    await this.syncOwnState('silent_acking', now);
+    this.evaluateAttention(now);
     return { conv: sent.to, seq: sent.seq };
   }
 
@@ -813,8 +844,10 @@ export class AdapterLoop {
     const count = (this.silentAcks.get(conv) ?? 0) + 1;
     this.silentAcks.set(conv, count);
     if (count < SILENT_ACK_LIMIT || this.silentAckReported.has(conv)) return;
+    // §5.2: this is an activity state, not a one-shot notice. It enters when the third
+    // real ack lands in this conversation and leaves only when `say(conv)` succeeds.
     this.silentAckReported.add(conv);
-    await this.reportBlocked('silent acking');
+    await this.syncOwnState('silent_acking', this.now());
   }
 
   /**
@@ -830,8 +863,14 @@ export class AdapterLoop {
     await this.owed.clear(conv);
     this.nudges.clear(conv);
     this.blockedReported.delete(conv);
+    this.blockedNotes.delete(conv);
     this.silentAcks.delete(conv);
     this.silentAckReported.delete(conv);
+    // The conversation is gone, so it cannot remain in a state that only `say(conv)`
+    // could leave. A state that is now empty recovers; a non-empty one is re-sent.
+    const now = this.now();
+    await this.syncOwnState('blocked', now);
+    await this.syncOwnState('silent_acking', now);
   }
 
   async spawnMember(opts: {
@@ -944,7 +983,7 @@ export class AdapterLoop {
         const entry = known.get(node.id);
         if (entry === undefined) {
           // Alive, and nothing has gone wrong that it has reported: that is `ok`.
-          return { id: node.id, name: node.name, state: 'ok' as const, since: node.last_seen_at ?? 0, count: 0 };
+          return { id: node.id, name: node.name, state: 'ok' as const, since: node.last_seen_at ?? 0, count: 0, states: [] };
         }
         return {
           id: entry.child,
@@ -952,8 +991,12 @@ export class AdapterLoop {
           state: entry.state === 'recovered' ? ('ok' as const) : entry.state,
           since: entry.stateSince,
           tool: entry.tool,
+          owed: entry.owed,
+          note: entry.note,
+          busy_ms: entry.busy_ms,
           count: entry.count,
           last: entry.last,
+          states: entry.states,
         };
       });
   }
@@ -1109,7 +1152,7 @@ export class AdapterLoop {
   private async reconcileMembers(): Promise<void> {
     const candidates = new Set<string>(this.panes.keys());
     for (const entry of this.telemetry.snapshot()) {
-      if (entry.state !== 'gone') candidates.add(entry.child);
+      if (!entry.states.some((state) => state.state === 'gone')) candidates.add(entry.child);
     }
     if (candidates.size === 0) return;
     const now = this.now();
@@ -1393,18 +1436,6 @@ export class AdapterLoop {
         this.applyAttention(payload);
         return;
 
-      // §6: a member's conclusion. `text:"exiting"` is not a conclusion but a state
-      // change — the child is on its way out and will never report anything again, so
-      // the parent writes `gone` (§5.1 path 2). Every other text stays a readable
-      // control line: it is something the member said, not a state.
-      case 'pg.report':
-        if (payload.text === 'exiting') {
-          this.markGone(item.from_id);
-          return;
-        }
-        await this.injectReport(item, payload, journalId);
-        return;
-
       default:
         await this.injectUnknownControl(item, payload, journalId);
         return;
@@ -1412,26 +1443,6 @@ export class AdapterLoop {
 
     // A `sys.` command that did not come from `sys` is just an ordinary control.
     await this.injectUnknownControl(item, payload, journalId);
-  }
-
-  /**
-   * §3.2/§6: a member's conclusion is "一行可读控制" — `status: text` — not a payload dump.
-   * The parent has to read the line ("no output after 3 nudges"); `{"v":1,"status":…}` buries
-   * it. The JSON stays only as the fallback for a report that carries no text at all, where
-   * nothing readable exists to render.
-   */
-  private async injectReport(
-    item: PollControlItem,
-    payload: Record<string, unknown>,
-    journalId?: string,
-  ): Promise<void> {
-    const status = typeof payload.status === 'string' ? payload.status.trim() : '';
-    const text = typeof payload.text === 'string' ? payload.text.trim() : '';
-    const line =
-      text === ''
-        ? `[report ${item.from_id}] ${status === '' ? item.cmd : status} ${JSON.stringify(payload)}`
-        : `[report ${item.from_id}] ${status === '' ? '' : `${status}: `}${text}`;
-    this.enqueue({ text: line, kind: 'control', journalId });
   }
 
   /**
@@ -1562,6 +1573,9 @@ export class AdapterLoop {
   }
 
   private isKnownDirectChild(member: string): boolean {
+    // A child already reported gone is still ours, so a late queued event is silently
+    // ignored by `applyAttention` instead of being injected as an unknown control.
+    if (this.goneReported.has(member)) return true;
     if (this.panes.has(member)) return true;
     if (this.telemetry.snapshot().some((entry) => entry.child === member)) return true;
     return this.roster?.directChildren.has(member) ?? false;
@@ -1660,12 +1674,16 @@ export class AdapterLoop {
       name: typeof payload.name === 'string' ? payload.name : child,
       state,
       since: typeof payload.since === 'number' ? payload.since : this.now(),
-      of: attentionStateOf(payload.of),
+      of: recoverableAttentionStateOf(payload.of),
       tool: isAttentionTool(payload.tool) ? payload.tool : undefined,
       owed: Array.isArray(payload.owed) ? payload.owed.filter((c): c is string => typeof c === 'string') : undefined,
       note: typeof payload.note === 'string' ? payload.note : undefined,
+      busy_ms: typeof payload.busy_ms === 'number' ? payload.busy_ms : undefined,
       last: isLastRound(payload.last) ? payload.last : undefined,
     };
+    // §5.1 path 2: the child said it is exiting. That is the same terminal fact as the
+    // adapter's own delete, so no later queued event may replace it.
+    if (state === 'gone') this.goneReported.add(child);
     this.telemetry.apply(event, this.now());
   }
 
@@ -1810,9 +1828,17 @@ export class AdapterLoop {
       // The `blocked` episode also ends here: the parent was told this member cannot
       // answer, and that stopped being true the moment the conversation did.
       this.blockedReported.delete(entry.conv);
+      this.blockedNotes.delete(entry.conv);
+      this.silentAcks.delete(entry.conv);
+      this.silentAckReported.delete(entry.conv);
       changed = true;
     }
-    if (changed) this.evaluateAttention(this.now());
+    if (changed) {
+      const now = this.now();
+      await this.syncOwnState('blocked', now);
+      await this.syncOwnState('silent_acking', now);
+      this.evaluateAttention(now);
+    }
   }
 
   /**
@@ -1883,17 +1909,22 @@ export class AdapterLoop {
     }
 
     let due = 0;
+    let blockedChanged = false;
     for (const entry of owed) {
       const spent = this.nudges.count(entry.conv);
       if (spent >= this.config.nudgeMax) {
         if (!this.blockedReported.has(entry.conv)) {
           this.blockedReported.add(entry.conv);
-          await this.reportBlocked(`no output after ${spent} nudges (${entry.conv})`);
+          this.blockedNotes.set(entry.conv, `no output after ${spent} nudges (${entry.conv})`);
+          blockedChanged = true;
         }
         continue;
       }
       due += 1;
     }
+    // §5.1: entering `blocked` (or adding a conversation to it) is an attention state
+    // change, not a one-shot `pg.report`. A set that did not change is not re-sent.
+    if (blockedChanged) await this.syncOwnState('blocked', this.now());
     if (due === 0) {
       this.nudgeDue = false;
       return;
@@ -1918,16 +1949,30 @@ export class AdapterLoop {
     this.enqueue({ text: decision.text, kind: 'nudge' });
   }
 
+  /**
+   * §9: the platform itself is unreachable after the retry budget. This is not a ledger
+   * state (there is no conversation set), but `blocked` is still the word §9 uses, so it
+   * travels on the same `pg.attention` channel with an empty owed set.
+   */
   private async reportBlocked(text: string): Promise<void> {
     const parent = this.parentId;
-    if (!parent) return;
+    const self = this.selfId;
+    if (!parent || !self) return;
     try {
       await withTimeout(
         this.pg.sendControl({
           to: parent,
           id: randomUUID(),
-          cmd: 'pg.report',
-          payload: { v: 1, status: 'blocked', text },
+          cmd: 'pg.attention',
+          payload: {
+            v: 1,
+            child: self,
+            name: this.selfName,
+            state: 'blocked',
+            since: this.now(),
+            owed: [...this.blockedReported].sort(),
+            note: text,
+          },
         }),
         REPORT_TIMEOUT_MS,
       );
@@ -2021,9 +2066,10 @@ export class AdapterLoop {
   }
 
   /**
-   * The parent keeps one state per child (§5.2), so the child reports one state
-   * at a time. Precedence: a stalled tool is the concrete fact, then a provider
-   * error, then a long turn, then owed replies while idle.
+   * The child-side running state. The parent keys its table by state name (§5.1), so
+   * these four are still mutually exclusive within the child: a stalled tool is the
+   * concrete fact, then a provider error, then a long turn, then owed replies while idle.
+   * `blocked` and `silent_acking` live beside them in `ownStates`.
    */
   private desiredAttention(now: number): { state: AttentionState; extra: AttentionExtra } | undefined {
     const tool = this.tool;
@@ -2050,30 +2096,69 @@ export class AdapterLoop {
 
   private evaluateAttention(now: number): void {
     const desired = this.desiredAttention(now);
-    const current = this.attention;
+    const current = this.activeRun;
     if (current && current.state !== desired?.state) {
-      this.attention = undefined;
-      this.publishAttention({ state: 'recovered', of: current.state, since: now });
+      this.activeRun = undefined;
+      void this.publishAttention({ state: 'recovered', of: current.state, since: now });
     }
-    if (desired && this.attention?.state !== desired.state) {
-      this.attention = { state: desired.state };
-      this.publishAttention({ state: desired.state, since: now, ...desired.extra });
+    if (desired === undefined) return;
+    if (this.activeRun === undefined) {
+      this.activeRun = { state: desired.state, since: now, extra: desired.extra };
+      void this.publishAttention({ state: desired.state, since: now, ...desired.extra });
+      return;
+    }
+    // Same state: it is still the same entry. `idle_owed` is an exception because its
+    // value is a conversation set — a changed set is new information and is re-sent
+    // with the original `since` (§5.1).
+    const previousOwed = this.activeRun.extra.owed;
+    this.activeRun.extra = desired.extra;
+    if (desired.state === 'idle_owed' && !sameStrings(previousOwed, desired.extra.owed ?? [])) {
+      void this.publishAttention({ state: desired.state, since: this.activeRun.since, ...desired.extra });
     }
   }
 
-  private publishAttention(event: Record<string, unknown>): void {
+  /**
+   * §5.1/§5.2: synchronise one of the child's ledger states (`blocked`,
+   * `silent_acking`) with the conversations that belong to it. A set change re-sends
+   * the same state with the original `since`; an empty set sends `recovered{of}`.
+   */
+  private async syncOwnState(state: 'blocked' | 'silent_acking', now: number): Promise<void> {
+    const members = state === 'blocked' ? this.blockedReported : this.silentAckReported;
+    const owed = [...members].sort();
+    const prev = this.ownStates.get(state);
+    if (owed.length === 0) {
+      if (prev === undefined) return;
+      this.ownStates.delete(state);
+      await this.publishAttention({ state: 'recovered', of: state, since: now });
+      return;
+    }
+    const note = state === 'blocked' ? this.blockedNote() : undefined;
+    if (prev !== undefined && sameStrings(prev.extra.owed, owed) && prev.extra.note === note) return;
+    const since = prev?.since ?? now;
+    const extra: AttentionExtra = { owed, ...(note === undefined ? {} : { note }) };
+    this.ownStates.set(state, { since, extra });
+    await this.publishAttention({ state, since, ...extra });
+  }
+
+  private blockedNote(): string | undefined {
+    const notes = [...this.blockedNotes.values()];
+    return notes.length === 0 ? undefined : notes[notes.length - 1];
+  }
+
+  private publishAttention(event: Record<string, unknown>): Promise<void> {
     const parent = this.parentId;
     const self = this.selfId;
-    if (!parent || !self) return;
+    if (!parent || !self) return Promise.resolve();
     // §8.5: every attention report carries what the last round did, so the state line
     // is never the only thing the parent has to decide with.
-    void this.pg
+    return this.pg
       .sendControl({
         to: parent,
         id: randomUUID(),
         cmd: 'pg.attention',
         payload: { v: 1, child: self, name: this.selfName, ...event, last: this.lastRound() },
       })
+      .then(() => undefined)
       .catch(() => {
         // Telemetry is best effort; the loop must not stop on a failed report.
       });
@@ -2227,10 +2312,18 @@ function attentionStateOf(value: unknown): AttentionState | undefined {
     value === 'slow_turn' ||
     value === 'error' ||
     value === 'idle_owed' ||
+    value === 'blocked' ||
+    value === 'silent_acking' ||
     value === 'recovered' ||
     value === 'gone'
     ? value
     : undefined;
+}
+
+/** `of:` names one of the six states; `gone` is terminal and never appears there (§6). */
+function recoverableAttentionStateOf(value: unknown): RecoverableAttentionState | undefined {
+  const state = attentionStateOf(value);
+  return state === undefined || state === 'recovered' || state === 'gone' ? undefined : state;
 }
 
 function isAttentionTool(value: unknown): value is AttentionTool {
@@ -2271,6 +2364,13 @@ function relationOf(
   if (typeof node.parent_id === 'string' && node.parent_id === self) return 'child';
   if (parent !== null && typeof node.parent_id === 'string' && node.parent_id === parent) return 'sibling';
   return 'peer';
+}
+
+/** Compare two conversation sets (order is not meaningful; both callers normalize). */
+function sameStrings(left: string[] | undefined, right: string[] | undefined): boolean {
+  const a = [...new Set(left ?? [])].sort();
+  const b = [...new Set(right ?? [])].sort();
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 /**
