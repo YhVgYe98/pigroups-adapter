@@ -33,6 +33,19 @@ test('missing PIGROUPS_TOKEN means the adapter does nothing at all: no poll, no 
 });
 
 
+test('PIGROUPS_DELIVERY_MAX_CHARS defaults to 4096 code points and can be moved', () => {
+  assert.equal(
+    loopConfig('http://127.0.0.1:1', 'token', {}).deliveryMaxChars,
+    4096,
+    'the measured default is 4096 code points',
+  );
+  assert.equal(
+    loopConfig('http://127.0.0.1:1', 'token', { PIGROUPS_DELIVERY_MAX_CHARS: '800' }).deliveryMaxChars,
+    800,
+    'an operator can move the context cap',
+  );
+});
+
 test('PIGROUPS_AUTO_RESPAWN defaults on and 0/false turn the startup repair off', () => {
   const base = loopConfig('http://127.0.0.1:1', 'token', {});
   assert.equal(base.autoRespawn, true, 'the automatic repair is on unless the operator says otherwise');

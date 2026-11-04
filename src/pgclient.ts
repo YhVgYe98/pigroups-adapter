@@ -105,7 +105,8 @@ export interface PollMessageItem {
   from_id: string;
   from_name: string;
   from_kind: 'member' | 'human';
-  preview: string;
+  /** The full body. Platform 0.4 always sends it; a payload without it is malformed. */
+  body?: string;
   mentions_me: boolean;
   from_parent: boolean;
   at: number;

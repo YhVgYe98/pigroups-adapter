@@ -39,6 +39,7 @@ export interface LoopConfigOverrides {
   pollLimit?: number;
   /** Seconds. 0 in tests: `pollOnce()` then never blocks on a quiet platform. */
   pollWait?: number;
+  deliveryMaxChars?: number;
   attentionToolMs?: number;
   remindWindowMs?: number;
   nudgeMax?: number;
@@ -87,6 +88,7 @@ export async function createLoop(
     adapterDir,
     pollLimit: opts.pollLimit ?? 20,
     pollWait: opts.pollWait ?? 0,
+    deliveryMaxChars: opts.deliveryMaxChars ?? 4096,
     attentionToolMs: opts.attentionToolMs ?? DEFAULT_ATTENTION_TOOL_MS,
     remindWindowMs: opts.remindWindowMs ?? DEFAULT_REMIND_WINDOW_MS,
     nudgeMax: opts.nudgeMax ?? DEFAULT_NUDGE_MAX,

@@ -11,7 +11,7 @@
  * change that needs no adapter change is answered by republishing the same numeric
  * version with new metadata, not by moving the number.
  */
-export const ADAPTER_VERSION = '0.10.0+platform.0.3.0';
+export const ADAPTER_VERSION = '0.11.0+platform.0.4.0';
 
 /**
  * Platform major.minor versions this adapter is built for. The list itself is a
@@ -23,7 +23,7 @@ export const ADAPTER_VERSION = '0.10.0+platform.0.3.0';
  * older than 0.3.0 reports no id and ignores `PIGROUPS_PLATFORM_ID`, so `startOrg`
  * refuses it. Extend this list when a new platform minor has been exercised.
  */
-export const SUPPORTED_PLATFORM_MINORS = ['0.3'];
+export const SUPPORTED_PLATFORM_MINORS = ['0.3', '0.4'];
 
 /** The major.minor part of a platform version, or `undefined` when it cannot be read. */
 export function platformMajorMinor(version: string): string | undefined {

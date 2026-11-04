@@ -28,7 +28,7 @@ test('a DM from the parent waits for its window, then arrives with the conversat
   assert.equal(delivery.kind, 'message');
   assert.ok(delivery.text.includes(s.dm), `injected text must carry the conversation id, got: ${delivery.text}`);
   assert.ok(delivery.text.includes('#1'), `injected text must carry the message seq, got: ${delivery.text}`);
-  assert.ok(delivery.text.includes('implement X'), 'injected text must carry the preview');
+  assert.ok(delivery.text.includes('implement X'), 'injected text must carry the body');
 });
 
 test('items that arrive inside one window share a single delivery, in arrival order', async (t) => {

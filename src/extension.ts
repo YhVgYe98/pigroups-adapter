@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { shellQuote } from './command.ts';
-import { AdapterLoop } from './loop.ts';
+import { AdapterLoop, DEFAULT_DELIVERY_MAX_CHARS } from './loop.ts';
 import type { LoopConfig } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
 import { defaultAdapterDir, findOrgKeyByUrl, isRecordedOrg, startOrg } from './org.ts';
@@ -284,6 +284,7 @@ export function loopConfig(url: string, token: string, env: NodeJS.ProcessEnv = 
     ...(key === undefined || key === '' ? {} : { orgKey: key }),
     pollLimit: envInt(env, 'PIGROUPS_POLL_LIMIT', 20),
     pollWait: envInt(env, 'PIGROUPS_POLL_WAIT', 25),
+    deliveryMaxChars: envInt(env, 'PIGROUPS_DELIVERY_MAX_CHARS', DEFAULT_DELIVERY_MAX_CHARS),
     attentionToolMs: envInt(env, 'PIGROUPS_ATTENTION_TOOL_MS', 300_000),
     remindWindowMs: envInt(env, 'PIGROUPS_REMIND_WINDOW_MS', 300_000),
     nudgeMax: envInt(env, 'PIGROUPS_NUDGE_MAX', 3),

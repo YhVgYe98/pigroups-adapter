@@ -53,6 +53,8 @@ export interface LoopConfig {
   orgKey?: string;
   pollLimit: number;
   pollWait: number;
+  /** PIGROUPS_DELIVERY_MAX_CHARS: code points of one message body allowed into the context. */
+  deliveryMaxChars: number;
   attentionToolMs: number;
   remindWindowMs: number;
   nudgeMax: number;
@@ -194,6 +196,12 @@ const DELIVER_BATCH = 10;
 const UNACKNOWLEDGED_BATCH_LIMIT = 8;
 /** §13.5: the last assistant text travels truncated; the tool preview is already 200. */
 const LAST_TEXT_CHARS = 500;
+/**
+ * 概念稿 §3.3/§8.4: the platform now delivers the full body, so the context budget is
+ * owned here. 4096 code points was measured on the live organisation: 94.9% of member
+ * messages fit, while 1024 would cut half of them.
+ */
+export const DEFAULT_DELIVERY_MAX_CHARS = 4096;
 /** §7.5 / §13.2: the bounds of `pg_schedule`. */
 const SCHEDULE_MIN_SECONDS = 5;
 const SCHEDULE_MAX_SECONDS = 86_400;
@@ -1743,7 +1751,7 @@ export class AdapterLoop {
     if (!brief || brief.sender_id !== parent) return;
     this.brief = { conv, seq: brief.seq };
     this.enqueue({
-      text: `[${conv}#${brief.seq}] ${brief.sender_name}: ${brief.body}`,
+      text: this.messageText(conv, brief.seq, brief.sender_name, brief.body),
       kind: 'message',
       // 概念稿 §8.4: the brief is the one source that does not wait for a window.
       windowless: true,
@@ -1827,6 +1835,15 @@ export class AdapterLoop {
     // queue still holds for it is the same message, not new input. `enqueue` then holds
     // the same line for a seq an earlier process already injected (§3.4).
     if (this.brief?.conv === item.to && this.brief.seq === item.seq) return;
+    // Platform 0.4 sends the full body under `body`; there is no `preview` shim. A
+    // payload without it is a protocol error, not an empty message: report it and do
+    // not inject `undefined` or '' into the model's context.
+    if (typeof item.body !== 'string') {
+      console.warn(
+        `[pigroups] poll message ${item.to}#${item.seq} from ${item.from_name} has no body field; skipping it`,
+      );
+      return;
+    }
     if (
       !owesReply({
         conv: item.to,
@@ -1839,12 +1856,27 @@ export class AdapterLoop {
       return;
     }
     this.enqueue({
-      text: `[${item.to}#${item.seq}] ${item.from_name}: ${item.preview}`,
+      text: this.messageText(item.to, item.seq, item.from_name, item.body),
       kind: 'message',
       journalId,
       conv: item.to,
       seq: item.seq,
     });
+  }
+
+  /**
+   * §3.3/§8.4: the one place a message body becomes injected context. The body is cut by
+   * code points, and a cut body names the exact `pg_read` call that returns the rest.
+   * `before=seq+1` because `/v1/messages` selects `seq < before`.
+   */
+  private messageText(conv: string, seq: number, fromName: string, body: string): string {
+    const max = Math.max(1, Math.floor(this.config.deliveryMaxChars));
+    const chars = Array.from(body);
+    if (chars.length <= max) return `[${conv}#${seq}] ${fromName}: ${body}`;
+    return (
+      `[${conv}#${seq}] ${fromName}: ${chars.slice(0, max).join('')}` +
+      `…[truncated: first ${max} of ${chars.length} chars; pg_read ${conv} before=${seq + 1} limit=1]`
+    );
   }
 
   private classifyGap(item: PollGapItem, journalId?: string): void {

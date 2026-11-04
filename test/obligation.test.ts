@@ -789,6 +789,7 @@ async function makeLoop(tree: (signal?: AbortSignal) => Promise<unknown>): Promi
       adapterDir: dir,
       pollLimit: 20,
       pollWait: 0,
+      deliveryMaxChars: 4096,
       attentionToolMs: 300_000,
       remindWindowMs: 300_000,
       nudgeMax: 3,
