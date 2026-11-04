@@ -95,6 +95,65 @@ test('close() treats pane_not_found as a closed pane', async () => {
   }
 });
 
+test('listPanes() keeps the session file herdr attributes to each pane', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  try {
+    // The real shape, captured from a live `herdr pane list`: `agent_session.kind` is
+    // `path` and its `value` is the pi session file the pane is running. That value is
+    // how a restarted adapter recognises a pane it never spawned in this process.
+    const command = join(dir, 'herdr-fake');
+    await writeFile(
+      command,
+      `#!/bin/sh
+case "$1 $2" in
+  "pane list")
+    printf '%s\n' '{"id":"cli:pane:list","result":{"panes":[{"pane_id":"wE:p1","agent_session":{"kind":"path","source":"herdr:pi","value":"/tmp/sessions/a.jsonl"},"agent_status":"idle","tab_id":"wE:t1","terminal_title":"\\u03c0 - runner - /tmp"},{"pane_id":"wE:p2","agent_status":"unknown","tab_id":"wE:t1","terminal_title":"shell"}]}}'
+    ;;
+esac
+`,
+    );
+    await chmod(command, 0o755);
+
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    assert.deepEqual(await herdr.listPanes(), [
+      {
+        pane_id: 'wE:p1',
+        agent_session: { kind: 'path', source: 'herdr:pi', value: '/tmp/sessions/a.jsonl' },
+        agent_status: 'idle',
+        tab_id: 'wE:t1',
+        title: 'π - runner - /tmp',
+      },
+      { pane_id: 'wE:p2', agent_status: 'unknown', tab_id: 'wE:t1', title: 'shell' },
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('listPanes() returns no panes instead of throwing when herdr cannot answer', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  try {
+    // Reading the list is how a committed delete finds its panes. A broken answer must
+    // leave the caller with an empty list, not an exception that turns a successful
+    // DELETE into a tool error.
+    const command = await fakeHerdr(dir, 'not json at all', 0);
+    console.warn = (...args: unknown[]): void => {
+      warnings.push(args.map(String).join(' '));
+    };
+    const herdr = new HerdrCli({ spawnCmd: 'pi', command });
+    assert.deepEqual(await herdr.listPanes(), []);
+    assert.ok(
+      warnings.some((warning) => /pane list/i.test(warning)),
+      `a failed read must be visible in the log, got ${JSON.stringify(warnings)}`,
+    );
+  } finally {
+    console.warn = originalWarn;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('close() waits for the pane agent to exit before it runs pane close', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
   try {

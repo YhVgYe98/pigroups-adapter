@@ -40,7 +40,7 @@ import type {
   PollMessageItem,
   PollItem,
 } from './pgclient.ts';
-import type { Herdr } from './herdr.ts';
+import type { Herdr, HerdrPane } from './herdr.ts';
 import { ABORT_IDLE_TIMEOUT_MS } from './surface.ts';
 import { platformCompatibilityWarning } from './version.ts';
 import type { DeliverKind, PiEvent, PiSurface } from './surface.ts';
@@ -257,10 +257,10 @@ export interface TerminateResult {
   pane_close_forced: Array<{ member: string; pane: string }>;
 }
 
-/** One pane close: nothing to report, a retryable failure, or a close forced past a live agent. */
+/** The panes of one member: retryable failures and closes forced past a live agent. */
 interface PaneCloseOutcome {
-  failure?: { member: string; pane: string; error: string };
-  forced?: { member: string; pane: string };
+  failures: Array<{ member: string; pane: string; error: string }>;
+  forced: Array<{ member: string; pane: string }>;
 }
 
 /** Hand one macrotask back to the event loop, so timers and sockets can run. */
@@ -337,12 +337,6 @@ export class AdapterLoop {
   /** One-shot wakes, in memory only: a restart drops them (§7.5). */
   private schedules: ScheduledWake[] = [];
   /**
-   * The pane each spawned child lives in. `terminate()` closes it after the platform
-   * has marked the subtree gone: a pi process can exit on `sys.terminated` and still
-   * leave its pane behind at a shell prompt (§5.3, 概念稿 §5.1).
-   */
-  private readonly panes = new Map<string, string>();
-  /**
    * Child-side edge-triggered running state (§5.1): stalled / slow_turn / error /
    * idle_owed are one at a time, with the precedence in `desiredAttention`.
    */
@@ -417,7 +411,7 @@ export class AdapterLoop {
    * request per `ROSTER_TTL_MS`, and a failed refresh does not retry inside that TTL either.
    */
   private childRosterCheckedAt = Number.NEGATIVE_INFINITY;
-  /** When each mapped child's status was last confirmed with `GET /v1/members/{id}` (§5.3). */
+  /** When each child's status was last confirmed with `GET /v1/members/{id}` (§5.3). */
   private readonly paneCheckedAt = new Map<string, number>();
   /**
    * Members this process already reported `gone` (§5.1). The telemetry row is deleted as soon
@@ -541,8 +535,8 @@ export class AdapterLoop {
       this.fireDueAutoRespawn(this.now());
       // The poll loop keeps running while the member is idle, which makes it the one
       // path that can notice an ancestor's delete between settles (§5.3, §5.1 path 3).
-      // Bounded by `PANE_CHECK_TTL_MS`, and it returns at once when neither a pane nor
-      // a telemetry entry names a member.
+      // Bounded by `PANE_CHECK_TTL_MS`, and it returns at once when neither a children
+      // record nor a telemetry entry names a member.
       await this.reconcileMembers();
       await this.flush();
 
@@ -972,7 +966,6 @@ export class AdapterLoop {
       // reason to report the spawn itself as failed.
       console.warn(`[pigroups] could not write the respawn record for ${id}: ${(err as Error)?.message ?? String(err)}`);
     }
-    this.panes.set(id, pane);
     this.paneCheckedAt.set(id, this.now());
     // Handing work to someone is not waiting for them to start: the child has its brief and a
     // pane, so the caller gets its answer now. Whether it ever connects is a fact that arrives
@@ -1185,8 +1178,8 @@ export class AdapterLoop {
     const pane_close_forced: TerminateResult['pane_close_forced'] = [];
     for (const id of new Set([member, ...terminated])) {
       const outcome = await this.closePane(id);
-      if (outcome.failure !== undefined) pane_close_failed.push(outcome.failure);
-      if (outcome.forced !== undefined) pane_close_forced.push(outcome.forced);
+      pane_close_failed.push(...outcome.failures);
+      pane_close_forced.push(...outcome.forced);
     }
     return { terminated, pane_close_failed, pane_close_forced };
   }
@@ -1338,9 +1331,8 @@ export class AdapterLoop {
           args: ['--session', sessionFile, ...record.args],
         });
         pane = spawned.pane;
-        // Track the pane this process created, so `pg_terminate` and the gone-member
-        // recheck can close it later just like a pane from `pg_spawn`.
-        this.panes.set(id, pane);
+        // `pane` stays local: no pane id is stored. The session record and `pane list`
+        // are what a later close uses, exactly as for `pg_spawn`.
         this.paneCheckedAt.set(id, this.now());
         // D1: do not tell it to repair its own children until it has authenticated.
         // A member that has not connected can only produce a string of failures.
@@ -1471,46 +1463,125 @@ export class AdapterLoop {
   }
 
   /**
-   * Close the pane of a member that is already gone, and keep the mapping only while a
-   * retry could still succeed (§5.3).
+   * Close every pane of a member that is already gone (§5.3).
+   *
+   * The adapter stores no pane id: it does not survive a restart, and a cached id can
+   * point at a pane that no longer exists. The identity that does survive is the session
+   * file `sessions/by-member/<id>.json`, which `pane list` reports as
+   * `agent_session.value`; every pane carrying that file is this member's (respawn and
+   * herdr's own restore can leave more than one).
+   *
+   * Only when there is no session record does the label become a fallback. It is weaker,
+   * so a pane carrying another living member's session file is excluded; that set is
+   * computed now from `children/` and `sessions/by-member/`, never cached.
    *
    * A `pane_not_found` is success: the shell the child left behind is already gone, or
-   * someone closed it by hand. Any other failure (herdr down, a timeout) leaves the
-   * mapping in place so the next `terminate()`/settle tries again, and is reported as
-   * `pane_close_failed` instead of failing the committed delete. A close that had to
-   * cut a still-working agent is a success too, but it is reported as forced.
+   * someone closed it by hand. Any other failure (herdr down, a timeout) is reported as
+   * `pane_close_failed` instead of failing the committed delete. A close that had to cut
+   * a still-working agent is a success too, but it is reported as forced. A list that
+   * cannot be read, or names no pane, closes nothing and is not a failure: the delete is
+   * already a fact.
    */
   private async closePane(member: string): Promise<PaneCloseOutcome> {
-    const pane = this.panes.get(member);
-    if (pane === undefined) return {};
+    const sessionFile = readSessionFileForMember(this.config.adapterDir, member);
+
+    // `listPanes()` is promised not to throw, but a fake or an older implementation may;
+    // a committed delete must not fail here.
+    let listed: HerdrPane[] = [];
     try {
-      const result = await this.herdr.close(pane);
-      this.panes.delete(member);
-      this.paneCheckedAt.delete(member);
-      return result.forced ? { forced: { member, pane } } : {};
+      listed = await this.herdr.listPanes();
     } catch (err) {
-      return { failure: { member, pane, error: (err as Error)?.message ?? String(err) } };
+      console.warn(`[pigroups] could not list herdr panes for ${member}: ${(err as Error)?.message ?? String(err)}`);
     }
+
+    const targets = new Set<string>();
+    if (sessionFile !== undefined) {
+      for (const pane of listed) {
+        if (pane.agent_session?.value === sessionFile) targets.add(pane.pane_id);
+      }
+    } else {
+      // No session record: the label is the only handle. It is weaker than the file, so
+      // never close a pane that another living member's session file names.
+      const name = this.memberName(member);
+      if (name !== undefined) {
+        const otherSessions = this.otherLiveSessionFiles(member);
+        for (const pane of listed) {
+          if (!paneMatchesName(pane, name)) continue;
+          const paneSession = pane.agent_session?.value;
+          if (paneSession !== undefined && otherSessions.has(paneSession)) continue;
+          targets.add(pane.pane_id);
+        }
+      }
+    }
+
+    const failures: PaneCloseOutcome['failures'] = [];
+    const forced: PaneCloseOutcome['forced'] = [];
+    for (const pane of targets) {
+      try {
+        const result = await this.herdr.close(pane);
+        if (result.forced) forced.push({ member, pane });
+      } catch (err) {
+        failures.push({ member, pane, error: (err as Error)?.message ?? String(err) });
+      }
+    }
+    return { failures, forced };
+  }
+
+  /** The name this adapter knows for a member, for the session-file-less fallback. */
+  private memberName(member: string): string | undefined {
+    // The child record is the label `spawnMember` actually passed to herdr. Prefer it:
+    // `markGone()` may already have put an entry in telemetry whose name is the id.
+    if (this.selfId !== undefined) {
+      const record = readChildRecords(this.config.adapterDir, this.selfId).find((entry) => entry.childId === member);
+      if (record !== undefined) return record.name;
+    }
+    const known = this.telemetry.snapshot().find((entry) => entry.child === member);
+    if (known !== undefined && known.name !== '' && known.name !== member) return known.name;
+    return undefined;
   }
 
   /**
-   * Confirm the members in the pane map and in the telemetry table are still alive, and
-   * close the panes of the ones that are not (§5.3, §5.1 path 3).
+   * Session files of every other member this adapter still considers alive. Used only by
+   * the name fallback: a pane is that member's when herdr says its agent runs that file.
+   * Both sources are durable (`children/`) or written by the member itself
+   * (`sessions/by-member/`); nothing here comes from a pane id cache.
+   */
+  private otherLiveSessionFiles(member: string): Set<string> {
+    const files = new Set<string>();
+    const others = new Set<string>();
+    if (this.selfId !== undefined) {
+      for (const record of readChildRecords(this.config.adapterDir, this.selfId)) others.add(record.childId);
+    }
+    for (const entry of this.telemetry.snapshot()) others.add(entry.child);
+    for (const other of others) {
+      if (other === member || this.goneReported.has(other)) continue;
+      const file = readSessionFileForMember(this.config.adapterDir, other);
+      if (file !== undefined) files.add(file);
+    }
+    return files;
+  }
+
+  /**
+   * Confirm every child the adapter knows from disk or telemetry is still alive, and close
+   * the panes of the ones that are not (§5.3, §5.1 path 3).
    *
    * `terminate()` only sees deletes this adapter issued. A grandparent deleting this
-   * adapter's direct child is a legal `DELETE` that never reaches this process, so the
-   * map would keep the pane — and the shell in it — forever. `GET /v1/tree` cannot
-   * answer this: it is a 30 s snapshot, and absence from a stale snapshot is exactly
-   * the false-prune this file now guards against. Ask about each member directly; only
-   * an explicit `status:'gone'` closes a pane, so a failed read keeps everything.
+   * adapter's direct child is a legal `DELETE` that never reaches this process; the
+   * `children/` record survives a restart, so it keeps that child in the recheck even
+   * when telemetry is empty. `GET /v1/tree` cannot answer this: it is a 30 s snapshot,
+   * and absence from a stale snapshot is exactly the false-prune this file guards
+   * against. Ask about each member directly; only an explicit `status:'gone'` closes a
+   * pane, so a failed read keeps everything.
    *
-   * The telemetry table is checked on its own, never through the pane map: `panes` is
-   * only filled by `spawnMember()`, so a parent that restarted has none and a child
-   * created by an ancestor never had one. Those are precisely the children whose
-   * `error` state has no other way of leaving the table (§5.1: `error` cannot self-clear).
+   * Telemetry contributes the children this member did not spawn or record (a child
+   * created by an ancestor), whose `error` state has no other way of leaving the table
+   * (§5.1: `error` cannot self-clear).
    */
   private async reconcileMembers(): Promise<void> {
-    const candidates = new Set<string>(this.panes.keys());
+    const candidates = new Set<string>();
+    if (this.selfId !== undefined) {
+      for (const record of readChildRecords(this.config.adapterDir, this.selfId)) candidates.add(record.childId);
+    }
     for (const entry of this.telemetry.snapshot()) {
       if (!entry.states.some((state) => state.state === 'gone')) candidates.add(entry.child);
     }
@@ -1522,7 +1593,7 @@ export class AdapterLoop {
       // Stamped before the request, not after the answer: "每个成员最多每 30 秒查一次" is a
       // bound on the question, not on the reply. A failed read used to leave the timestamp
       // untouched, so an unreachable platform turned every poll (25 s) and every settle into
-      // another attempt for every mapped child. It also keeps two concurrent callers apart.
+      // another attempt for every known child. It also keeps two concurrent callers apart.
       this.paneCheckedAt.set(member, now);
       try {
         // Bounded like the roster read: a platform that does not answer must not turn
@@ -1531,10 +1602,11 @@ export class AdapterLoop {
         if (detail.status === 'gone') {
           this.markGone(member, detail.name);
           const outcome = await this.closePane(member);
-          if (outcome.failure !== undefined) {
-            console.warn(`[pigroups] could not close the pane of gone member ${member}: ${outcome.failure.error}`);
-          } else if (outcome.forced !== undefined) {
-            console.warn(`[pigroups] closed the pane of gone member ${member} while its agent was still running`);
+          for (const failure of outcome.failures) {
+            console.warn(`[pigroups] could not close pane ${failure.pane} of gone member ${member}: ${failure.error}`);
+          }
+          for (const forced of outcome.forced) {
+            console.warn(`[pigroups] closed pane ${forced.pane} of gone member ${member} while its agent was still running`);
           }
           continue;
         }
@@ -1938,9 +2010,10 @@ export class AdapterLoop {
   }
 
   /**
-   * §5.1: only a direct child may change this member's view of it. Three local facts can
-   * prove that relation without a request: this process spawned it (panes), it has
-   * reported before (telemetry), or the last roster read named its parent (roster).
+   * §5.1: only a direct child may change this member's view of it. Four local facts can
+   * prove that relation without a request: it has reported before (telemetry), a durable
+   * `children/` record names it (survives a restart), this process already reported it
+   * gone, or the last roster read named its parent.
    *
    * A miss refreshes the roster at most once per TTL. That covers a child spawned after
    * the snapshot was taken, or one this process did not spawn (a parent that restarted,
@@ -1965,8 +2038,13 @@ export class AdapterLoop {
     // A child already reported gone is still ours, so a late queued event is silently
     // ignored by `applyAttention` instead of being injected as an unknown control.
     if (this.goneReported.has(member)) return true;
-    if (this.panes.has(member)) return true;
     if (this.telemetry.snapshot().some((entry) => entry.child === member)) return true;
+    if (
+      this.selfId !== undefined &&
+      readChildRecords(this.config.adapterDir, this.selfId).some((record) => record.childId === member)
+    ) {
+      return true;
+    }
     return this.roster?.directChildren.has(member) ?? false;
   }
 
@@ -2802,6 +2880,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+/**
+ * Whether a `pane list` entry carries that label. herdr's tab label survives in the
+ * terminal title as `π - <label> - <cwd>`; splitting on the spaced separators keeps
+ * `runner` from matching `runner-2`.
+ */
+function paneMatchesName(pane: HerdrPane, name: string): boolean {
+  if (pane.label === name || pane.title === name) return true;
+  if (pane.title === undefined) return false;
+  return pane.title
+    .split(/\s+[-\u2013\u2014\u00b7|:]\s+/)
+    .map((part) => part.trim())
+    .some((part) => part === name);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

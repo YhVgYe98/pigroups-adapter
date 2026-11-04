@@ -780,6 +780,7 @@ async function makeLoop(tree: (signal?: AbortSignal) => Promise<unknown>): Promi
       spawn: async () => ({ pane: 'pane-x' }),
       waitReady: async () => undefined,
       read: async () => '',
+      listPanes: async () => [],
       close: async () => ({ forced: false }),
     },
     config: {

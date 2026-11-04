@@ -1,3 +1,29 @@
+## v0.9.0（2026-11-04，与平台 0.2.0 配套）
+
+次版本。这一版把 2026-11-03 那场真实运行的测量结果变成了行为变更，并补上"进程死了怎么接回来"。
+
+- **欠回复改成持久化 flag**（`owed/<memberId>.json`）：投递置、`pg_say` 或新的 `pg_ack` 清。
+  旧规则从历史推导，结果是"只能靠说话来清"——两端互相收尾时会把对方的债重新置起来
+  （实测 17 次 ack↔ack、14 次撞上催办上限）。`pg_ack(conv, seq?, all?)` 清 flag 但不发消息，
+  也不清催办计数：`silent acking` 要能看见"只确认不干活"。
+- **`pg.report` 删除**，并进 `pg.attention`：`exiting` → `state:'gone'`；`blocked` / `silent_acking`
+  成为两个账本态。一条通道、一套去重、一套窗口。父级的遥测表从"一个子一个状态"改成
+  **每个子一张活动状态表**（`states[]`），因为一半的状态是按会话的事实。
+- **遥测提醒只一次**，删掉 30 分钟重提；`idle_owed` 上报但不触发注入。`stalled` 吞掉同一回合的
+  `slow_turn`。
+- **父级只接受直接子发来的 `pg.attention`**（panes ∪ telemetry ∪ roster，miss 时按 TTL 刷一次 roster）；
+  非子只当控制行注入，不改状态。
+- **新增 `pg_respawn`**：进程死了但成员还在时，用记录里的 session 文件与旧 token 把会话重新打开、
+  恢复平台绑定，再让每个回来的成员对它自己的下一层做同一件事。**成员 id 不变**（所以会话 id 不变、
+  老对话接着用）；被删的（`gone`）身份不可复原；`intent:terminated` 的永不自动拉起；已在跑的不重启。
+  绝不重发 token（重发会踢掉活着的成员）。
+- **数据目录迁到 `~/.pi/pigroups`**（自定义 profile 时 `<PI_CODING_AGENT_DIR>/pigroups`），
+  旧 `~/.pigroups-adapter` 只对默认路径兼容读一次，显式配置不会被它吞掉。
+- **关 pane 不再信内存映射**：每次需要关闭时去 `herdr pane list` 按 `agent_session` 的 session 文件找，
+  所以父进程重启过、一个成员有多个 pane、herdr 重启换了 pane id，都能关对。
+- 未确认批次：`aborted` 重投、**`error` 丢弃**（31 个重复投递全部追溯到 5 个会话各收到一次 `pg.abort`）。
+- 注入给模型的文本全部改成英文。
+
 ## v0.8.0（2026-11-02，与平台 0.2.0 配套）
 
 次版本：`pg_spawn` 的语义变了（立刻返回），并且修掉三个真机问题。

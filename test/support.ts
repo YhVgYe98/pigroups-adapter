@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import type { DeliverKind, PiEvent, PiSurface } from '../src/surface.ts';
-import type { Herdr } from '../src/herdr.ts';
+import type { Herdr, HerdrPane } from '../src/herdr.ts';
 
 // ---------------------------------------------------------------------------
 // Platform process
@@ -527,6 +527,14 @@ export class FakeHerdr implements Herdr {
   /** Panes close() actually returned successfully for. */
   readonly closed: string[] = [];
   readonly reads: Array<{ pane: string; lines: number }> = [];
+  /** What `pane list` reports. A test fills this to describe panes it did not spawn. */
+  readonly paneList: HerdrPane[] = [];
+  /** The same list under its earlier name; it is pane output, never an adapter cache. */
+  get panes(): HerdrPane[] {
+    return this.paneList;
+  }
+  /** When set, `listPanes` rejects: the `pane list` command itself failed. */
+  failListPanes: Error | undefined;
   paneText = '';
   /** When set, `waitReady` rejects after recording the call (the timeout path). */
   failWait = false;
@@ -555,7 +563,22 @@ export class FakeHerdr implements Herdr {
     if (this.authenticate && url !== undefined && token !== undefined) {
       void fetch(`${url}/v1/whoami`, { headers: { authorization: `Bearer ${token}` } }).catch(() => undefined);
     }
-    return { pane: `pane-${this.spawns.length}` };
+    const pane = `pane-${this.spawns.length}`;
+    // A real herdr lists the pane it just made, with the session file of the pi in it.
+    // The loop must find panes through `pane list`, never through a cached id.
+    const sessionIndex = opts.args?.indexOf('--session') ?? -1;
+    const sessionFile = sessionIndex >= 0 ? opts.args?.[sessionIndex + 1] : undefined;
+    this.paneList.push({
+      pane_id: pane,
+      agent_status: 'idle',
+      tab_id: `wE:t${this.spawns.length}`,
+      label: opts.label,
+      title: `π - ${opts.label} - ${opts.cwd ?? '/tmp'}`,
+      ...(sessionFile === undefined
+        ? {}
+        : { agent_session: { kind: 'path', source: 'herdr:pi', value: sessionFile } }),
+    });
+    return { pane };
   }
 
   async waitReady(pane: string, timeoutMs: number): Promise<void> {
@@ -566,6 +589,11 @@ export class FakeHerdr implements Herdr {
   async read(pane: string, lines: number): Promise<string> {
     this.reads.push({ pane, lines });
     return this.paneText;
+  }
+
+  async listPanes(): Promise<HerdrPane[]> {
+    if (this.failListPanes !== undefined) throw this.failListPanes;
+    return [...this.paneList];
   }
 
   async close(pane: string): Promise<{ forced: boolean }> {

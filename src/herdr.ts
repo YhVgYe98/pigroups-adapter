@@ -18,6 +18,26 @@ export interface HerdrCloseResult {
   forced: boolean;
 }
 
+/** One pane as `pane list` reports it, reduced to the fields the adapter acts on. */
+export interface HerdrPane {
+  pane_id: string;
+  /**
+   * The agent herdr attributes to this pane. For pi, `kind` is `path` and `value` is the
+   * session file the pane is running - the identity that survives a parent restart.
+   */
+  agent_session?: {
+    kind?: string;
+    source?: string;
+    value?: string;
+  };
+  agent_status?: string;
+  tab_id?: string;
+  /** The tab label when herdr supplies one; fallback identity when no session file exists. */
+  label?: string;
+  /** The terminal title, which carries the label as `π - <label> - <cwd>`. */
+  title?: string;
+}
+
 export interface Herdr {
   /** Create a tab in the workspace and start a pi in its root pane. Returns the pane id. */
   spawn(opts: {
@@ -33,6 +53,12 @@ export interface Herdr {
   waitReady(pane: string, timeoutMs: number, signal?: AbortSignal): Promise<void>;
   /** Read the raw text of that pane (diagnostics and reporting only). */
   read(pane: string, lines: number): Promise<string>;
+  /**
+   * Every pane in the workspace, with the session file herdr attributes to its agent.
+   * A list that cannot be read is an empty list plus a warning, never a throw: it is
+   * cleanup for a delete that has already committed.
+   */
+  listPanes(): Promise<HerdrPane[]>;
   /**
    * Close the pane. A pane that is already gone is a success, not an error. The result
    * says whether the close was forced past a still-working agent.
@@ -151,6 +177,63 @@ export class HerdrCli implements Herdr {
     const envelope = await this.run(['agent', 'read', pane, '--lines', String(lines)]);
     const read = asRecord(envelope?.read);
     return typeof read?.text === 'string' ? read.text : '';
+  }
+
+  async listPanes(): Promise<HerdrPane[]> {
+    let envelope: Record<string, unknown> | null;
+    try {
+      envelope = await this.run(['pane', 'list']);
+    } catch (err) {
+      // `pg_terminate` has already committed the delete by the time this runs. A herdr
+      // that cannot answer must leave the caller its mapped pane, not an exception.
+      console.warn(`[pigroups] could not read herdr pane list: ${(err as Error)?.message ?? String(err)}`);
+      return [];
+    }
+    const panes = envelope?.panes;
+    if (!Array.isArray(panes)) {
+      console.warn('[pigroups] herdr pane list returned no pane array');
+      return [];
+    }
+    const result: HerdrPane[] = [];
+    for (const item of panes) {
+      const record = asRecord(item);
+      const paneId = typeof record?.pane_id === 'string' ? record.pane_id : undefined;
+      if (paneId === undefined) continue;
+      const pane: HerdrPane = { pane_id: paneId };
+      const session = asRecord(record?.agent_session);
+      if (session !== undefined) {
+        const kind = typeof session.kind === 'string' ? session.kind : undefined;
+        const source = typeof session.source === 'string' ? session.source : undefined;
+        const value = typeof session.value === 'string' ? session.value : undefined;
+        if (kind !== undefined || source !== undefined || value !== undefined) {
+          pane.agent_session = {
+            ...(kind === undefined ? {} : { kind }),
+            ...(source === undefined ? {} : { source }),
+            ...(value === undefined ? {} : { value }),
+          };
+        }
+      }
+      if (typeof record?.agent_status === 'string') pane.agent_status = record.agent_status;
+      if (typeof record?.tab_id === 'string') pane.tab_id = record.tab_id;
+      const title =
+        typeof record?.terminal_title_stripped === 'string'
+          ? record.terminal_title_stripped
+          : typeof record?.terminal_title === 'string'
+            ? record.terminal_title
+            : typeof record?.title === 'string'
+              ? record.title
+              : undefined;
+      if (title !== undefined) pane.title = title;
+      const label =
+        typeof record?.label === 'string'
+          ? record.label
+          : typeof record?.tab_label === 'string'
+            ? record.tab_label
+            : undefined;
+      if (label !== undefined) pane.label = label;
+      result.push(pane);
+    }
+    return result;
   }
 
   async close(pane: string): Promise<HerdrCloseResult> {

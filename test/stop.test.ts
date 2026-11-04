@@ -160,6 +160,7 @@ test('stop() waits for a settle that is still reading the roster, and a stopped 
       spawn: async () => ({ pane: 'pane-x' }),
       waitReady: async () => undefined,
       read: async () => '',
+      listPanes: async () => [],
       close: async () => ({ forced: false }),
     },
     config: {

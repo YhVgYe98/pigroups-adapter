@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { command, delay, dmId, history, member, poll, removeMember, send, whoami, type ControlItem } from './support.ts';
+import { writeChildRecord, writeMemberSessionFile } from '../src/records.ts';
+import { command, createMember, delay, dmId, history, member, poll, removeMember, send, whoami, type ControlItem } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, driveUntil, pollUntil, scenario, type Scenario } from './scenario.ts';
 
 /** The parent's control queue, scanned for the `pg.inspect_result` that answers `request`. */
@@ -197,7 +198,8 @@ test('pg_terminate reports a pane close that was forced past a still-running age
 });
 
 // §5.3: the delete is the fact; closing the pane is cleanup. A herdr that is down must
-// not turn a committed delete into a tool error, and must not lose the mapping either.
+// not turn a committed delete into a tool error, and the child record still names the
+// member on the next attempt.
 test('a failed pane close is reported without failing the committed delete, and a retry closes it', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
@@ -217,11 +219,175 @@ test('a failed pane close is reported without failing the committed delete, and 
   s.herdr.failClose = undefined;
   const second = await s.loop.terminate(child.id);
   assert.deepEqual(second.pane_close_failed, [], 'the retry succeeds');
-  assert.deepEqual(s.herdr.closed, ['pane-1'], 'the mapping survived the failure, so the retry could close it');
+  assert.deepEqual(s.herdr.closed, ['pane-1'], 'the child record survived the failure, so the retry could find the pane');
+});
+
+// §5.3: pane ids are not adapter state. A parent that restarted remembers no pane, but
+// the member's own session file survives on disk — and that is what herdr puts on the
+// pane. Looking only at what this process spawned leaves a live pi holding a token the
+// platform has already deleted.
+test('pg_terminate closes a pane found by its session file after a restart', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+
+  const child = await createMember(s.platform, s.me, 'survivor');
+  const sessionFile = '/tmp/pigroups-child/survivor.jsonl';
+  writeMemberSessionFile(s.adapterDir, child.id, sessionFile);
+  s.herdr.paneList.push({
+    pane_id: 'pane-from-before-restart',
+    agent_session: { kind: 'path', source: 'herdr:pi', value: sessionFile },
+    agent_status: 'idle',
+    tab_id: 'wE:t7',
+    title: 'π - survivor - /tmp',
+  });
+
+  const result = await s.loop.terminate(child.id);
+
+  assert.deepEqual(result.terminated, [child.id], 'the delete still commits');
+  assert.deepEqual(result.pane_close_failed, [], 'the pane close succeeded');
+  assert.deepEqual(s.herdr.closed, ['pane-from-before-restart'], 'the session file names the pane to close');
+});
+
+// §5.3: respawn (`pi --session`) and herdr's own restore can leave two panes running the
+// same session. Both are the terminated member: one close is not enough.
+test("pg_terminate closes every pane that carries the member's session file", async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  const child = await s.loop.spawnMember({ name: 'twin', brief: 'implement Y' });
+  const sessionFile = '/tmp/pigroups-child/twin.jsonl';
+  writeMemberSessionFile(s.adapterDir, child.id, sessionFile);
+  s.herdr.paneList.push(
+    {
+      pane_id: 'pane-1',
+      agent_session: { kind: 'path', source: 'herdr:pi', value: sessionFile },
+      agent_status: 'idle',
+      tab_id: 'wE:t1',
+      title: 'π - twin - /tmp',
+    },
+    {
+      pane_id: 'pane-2',
+      agent_session: { kind: 'path', source: 'herdr:pi', value: sessionFile },
+      agent_status: 'working',
+      tab_id: 'wE:t2',
+      title: 'π - twin - /tmp',
+    },
+  );
+
+  const result = await s.loop.terminate(child.id);
+
+  assert.deepEqual(result.terminated, [child.id]);
+  assert.deepEqual(result.pane_close_failed, []);
+  assert.deepEqual(s.herdr.closed, ['pane-1', 'pane-2'], 'both panes of that session are closed');
+});
+
+// §5.3: labels are not identities. Another living member may carry the same label; only
+// the pane whose session file matches this member may be closed.
+test('pg_terminate does not close a same-named pane that belongs to another living member', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+
+  const other = await s.loop.spawnMember({ name: 'runner-other', brief: 'implement X' });
+  const otherSession = '/tmp/pigroups-child/other.jsonl';
+  writeMemberSessionFile(s.adapterDir, other.id, otherSession);
+
+  const victim = await createMember(s.platform, s.me, 'runner');
+  const victimSession = '/tmp/pigroups-child/victim.jsonl';
+  writeMemberSessionFile(s.adapterDir, victim.id, victimSession);
+  s.herdr.paneList.push(
+    {
+      pane_id: 'pane-victim',
+      agent_session: { kind: 'path', source: 'herdr:pi', value: victimSession },
+      agent_status: 'idle',
+      tab_id: 'wE:t1',
+      title: 'π - runner - /tmp',
+    },
+    {
+      pane_id: 'pane-1',
+      agent_session: { kind: 'path', source: 'herdr:pi', value: otherSession },
+      agent_status: 'idle',
+      tab_id: 'wE:t2',
+      title: 'π - runner - /tmp',
+    },
+  );
+
+  const result = await s.loop.terminate(victim.id);
+
+  assert.deepEqual(result.terminated, [victim.id]);
+  assert.deepEqual(s.herdr.closed, ['pane-victim'], 'the same label does not make the other member\'s pane a target');
+});
+
+// §5.3: without a session file the label is the only handle left. It is not an identity,
+// so every pane carrying another living member's session file is off limits — computed
+// from `children/` and `sessions/by-member/` at this moment, even when this process never
+// spawned that member and therefore never knew its pane id.
+test("pg_terminate falls back to the member's name when no session file exists, sparing another member's pane", async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+
+  const victim = await createMember(s.platform, s.me, 'runner');
+  writeChildRecord(s.adapterDir, {
+    parentId: s.me.id,
+    childId: victim.id,
+    name: victim.name,
+    cwd: null,
+    args: [],
+    token: victim.token,
+    intent: 'spawned',
+  });
+  const other = await createMember(s.platform, s.me, 'runner-other');
+  const otherSession = '/tmp/pigroups-child/other.jsonl';
+  writeChildRecord(s.adapterDir, {
+    parentId: s.me.id,
+    childId: other.id,
+    name: other.name,
+    cwd: null,
+    args: [],
+    token: other.token,
+    intent: 'spawned',
+  });
+  writeMemberSessionFile(s.adapterDir, other.id, otherSession);
+  s.herdr.paneList.push(
+    { pane_id: 'pane-victim', agent_status: 'idle', tab_id: 'wE:t1', title: 'π - runner - /tmp' },
+    {
+      pane_id: 'pane-other',
+      agent_session: { kind: 'path', source: 'herdr:pi', value: otherSession },
+      agent_status: 'idle',
+      tab_id: 'wE:t2',
+      title: 'π - runner - /tmp',
+    },
+  );
+  await s.cycle(); // the loop knows who it is; both children are alive
+
+  const result = await s.loop.terminate(victim.id);
+
+  assert.deepEqual(result.terminated, [victim.id]);
+  assert.deepEqual(
+    s.herdr.closed,
+    ['pane-victim'],
+    `only the victim's pane is closed: ${JSON.stringify(s.herdr.closed)}`,
+  );
+  assert.ok(!s.herdr.closed.includes('pane-other'), `the live other member keeps its pane (${other.id})`);
+});
+
+// §5.3: `pane list` is how a pane is found, not a fact the delete depends on. If it fails,
+// nothing can be identified; the committed delete still succeeds and reports no close.
+test('a failed pane list does not fail the committed delete', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+
+  const child = await s.loop.spawnMember({ name: 'runner', brief: 'implement Y' });
+  s.herdr.failListPanes = new Error('herdr: pane list failed');
+
+  const result = await s.loop.terminate(child.id);
+
+  assert.deepEqual(result.terminated, [child.id], 'the delete is a fact even when pane list cannot be read');
+  assert.deepEqual(result.pane_close_failed, [], 'a pane that cannot be identified is not a retryable close failure');
+  assert.deepEqual(s.herdr.closed, [], 'nothing was actually closed');
 });
 
 // §5.3: a grandparent's DELETE is legal and never reaches this adapter, so nothing here
-// calls terminate(). The pane map has to be reconciled against the platform instead.
+// calls terminate(). The children record has to be reconciled against the platform instead.
 test('a child deleted by an ancestor has its pane closed on a later poll', async (t) => {
   const s = await scenario();
   t.after(() => s.close());

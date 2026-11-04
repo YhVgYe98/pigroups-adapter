@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { writeChildRecord, writeMemberSessionFile } from '../src/records.ts';
 import { command, createMember, delay, removeMember, send } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, payloads, scenario } from './scenario.ts';
 
@@ -569,8 +570,8 @@ test('pg.attention from a non-child is injected but cannot change a child state'
 });
 
 // A child spawned after the startup snapshot is still a child. The first report cannot
-// hit the pane map (another process spawned it) or telemetry (it has never reported), so
-// it must refresh the stale roster once instead of staying blind until the next settle.
+// hit a children record (another process spawned it) or telemetry (it has never reported),
+// so it must refresh the stale roster once instead of staying blind until the next settle.
 test('a child missing from the startup roster is accepted after one report refreshes it', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
@@ -594,6 +595,91 @@ test('a child missing from the startup roster is accepted after one report refre
     rows.find((row) => row.id === late.id)?.state,
     'error',
     `a child after the startup snapshot must be accepted after the roster refresh: ${JSON.stringify(rows)}`,
+  );
+  assert.equal(
+    s.surface.textsOfKind('control').length,
+    0,
+    `an accepted attention is not injected as a control: ${JSON.stringify(s.surface.texts())}`,
+  );
+});
+
+// §5.1 path 3 after a restart: telemetry is empty and no pane is cached, but `children/`
+// is on disk. That record alone must keep the liveness recheck asking about the child —
+// and an explicit `gone` must make it close the pane `pane list` names.
+test('a child known only from its children record is rechecked and its pane closed when gone', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'from-record');
+  const sessionFile = '/tmp/pigroups-child/from-record.jsonl';
+  writeChildRecord(s.adapterDir, {
+    parentId: s.me.id,
+    childId: child.id,
+    name: child.name,
+    cwd: null,
+    args: [],
+    token: child.token,
+    intent: 'spawned',
+  });
+  writeMemberSessionFile(s.adapterDir, child.id, sessionFile);
+  s.herdr.paneList.push({
+    pane_id: 'pane-from-record',
+    agent_session: { kind: 'path', source: 'herdr:pi', value: sessionFile },
+    agent_status: 'idle',
+    tab_id: 'wE:t9',
+    title: `π - ${child.name} - /tmp`,
+  });
+
+  await s.cycle(); // startup: the child is alive, so nothing is closed
+  assert.equal(s.herdr.spawns.length, 0, 'precondition: this process spawned nobody and caches no pane');
+  assert.deepEqual(s.herdr.closed, [], 'an alive child keeps its pane');
+
+  await removeMember(s.platform, s.me.token, child.id); // a delete this process never issued
+  s.clock.advance(30_000);
+  await s.cycle();
+
+  assert.deepEqual(s.herdr.closed, ['pane-from-record'], 'the children record kept the member in the recheck');
+  await s.timer(0); // gone skips the reminder merge window
+  await s.timer(WINDOW);
+  const nudges = s.surface.textsOfKind('nudge');
+  assert.equal(nudges.length, 1, `a dead child must be reported gone, got ${JSON.stringify(s.surface.texts())}`);
+  assert.ok(nudges[0].includes(child.id), `the reminder names the child: ${nudges[0]}`);
+  assert.match(nudges[0], /gone/, `the reminder says the child is gone: ${nudges[0]}`);
+});
+
+// §5.1: only a direct child may change this member's state. A child created after the
+// startup roster was read, with no telemetry and no pane, is still a direct child when
+// `children/` names it — the roster is not the only durable fact.
+test('a child known only from its children record may report attention', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  await s.cycle(); // the startup roster is read before this child exists
+
+  const late = await createMember(s.platform, s.me, 'after-roster');
+  writeChildRecord(s.adapterDir, {
+    parentId: s.me.id,
+    childId: late.id,
+    name: late.name,
+    cwd: null,
+    args: [],
+    token: late.token,
+    intent: 'spawned',
+  });
+
+  await command(s.platform, late.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: late.id,
+    name: late.name,
+    state: 'error',
+    since: s.clock.now(),
+    note: 'provider 429',
+  });
+  await s.cycle();
+
+  const row = (await s.loop.children()).find((entry) => entry.id === late.id);
+  assert.equal(
+    row?.state,
+    'error',
+    `the children record makes the sender a direct child: ${JSON.stringify(row)}`,
   );
   assert.equal(
     s.surface.textsOfKind('control').length,
@@ -680,10 +766,10 @@ test('two children gone in one window produce one reminder with one line each', 
   assert.equal(s.surface.textsOfKind('nudge').length, 1, 'a gone state is reported once, never again');
 });
 
-// §5.1 path 3: the liveness recheck must cover the telemetry table, not the pane map.
-// `panes` only holds members this process spawned, so a parent that restarted (or a child
-// created by an ancestor) would never be checked, and an `error` entry would stay forever.
-test('a child that dies is rechecked from the telemetry table even when no pane is mapped', async (t) => {
+// §5.1 path 3: the liveness recheck must cover the telemetry table too. A child created
+// by an ancestor has no `children/` record here, so without telemetry its `error` entry
+// would stay forever.
+test('a child that dies is rechecked from the telemetry table without a children record', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
   const child = await createMember(s.platform, s.me, 'ghost');
@@ -697,7 +783,7 @@ test('a child that dies is rechecked from the telemetry table even when no pane 
     note: 'provider 429',
   });
   await s.cycle();
-  assert.equal(s.herdr.spawns.length, 0, 'precondition: this process spawned nobody, so its pane map is empty');
+  assert.equal(s.herdr.spawns.length, 0, 'precondition: this process spawned nobody and recorded no child');
   assert.equal(
     (await s.loop.children()).find((row) => row.id === child.id)?.state,
     'error',
@@ -857,9 +943,9 @@ test('a gone child is dropped from the table once the reminder is delivered', as
 
 // §5.1 path 2 + path 3 are two ways to learn the same fact. A child that reported `exiting`
 // and then disappeared from the platform must not be reported gone a second time — and the
-// pane map is what keeps the recheck alive, because a close that failed leaves the mapping in
-// place for a retry. Left alone, that retry rebuilt the row every poll cycle and injected a
-// fresh "1 child needs attention … gone" each time: the 6.5 hour replay with a new trigger.
+// children record keeps the recheck alive, so a failed close can be retried. Left alone, that
+// retry rebuilt the row every poll cycle and injected a fresh "1 child needs attention … gone"
+// each time: the 6.5 hour replay with a new trigger.
 test('one disappearance is reported once, even when the pane close fails and the check is retried', async (t) => {
   // A short delivery window: the 30 s liveness bound has to still be running when the next
   // poll happens, so the test cannot spend a whole 60 s window to get the reminder out.
@@ -877,7 +963,7 @@ test('one disappearance is reported once, even when the pane close fails and the
     return realGetMember(id);
   };
 
-  // herdr is down: the pane stays mapped, which is exactly the retry case (§5.3).
+  // herdr is down: the child record keeps the recheck alive, which is exactly the retry case (§5.3).
   s.herdr.failClose = new Error('herdr daemon is not running');
   await removeMember(s.platform, s.me.token, child.id);
 
