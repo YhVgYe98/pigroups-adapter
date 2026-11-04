@@ -46,6 +46,7 @@ export interface LoopConfigOverrides {
   spawnReadyMs?: number;
   autoRespawn?: boolean;
   respawnFreshMs?: number;
+  respawnGraceMs?: number;
   /** The pi session file a real extension reads from ctx.sessionManager (§12.3). */
   sessionFile?: string;
 }
@@ -92,6 +93,7 @@ export async function createLoop(
     spawnCmd: 'pi',
     autoRespawn: opts.autoRespawn ?? false,
     respawnFreshMs: opts.respawnFreshMs,
+    respawnGraceMs: opts.respawnGraceMs,
   };
   const pg = new PgClient({ url: config.url, token: config.token });
   const loop = new AdapterLoop({ pg, surface, herdr, config, now: clock.now, sessionFile: opts.sessionFile });

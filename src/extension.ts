@@ -258,6 +258,8 @@ export function loopConfig(url: string, token: string, env: NodeJS.ProcessEnv = 
     spawnReadyMs: envInt(env, 'PIGROUPS_SPAWN_READY_MS', 120_000),
     // §7/§12.5: one number is both the "already running" window and the startup grace.
     respawnFreshMs: envInt(env, 'PIGROUPS_RESPAWN_FRESH_MS', 120_000),
+    // §12.5: the automatic repair waits this long after startup before starting anything.
+    respawnGraceMs: envInt(env, 'PIGROUPS_RESPAWN_GRACE_MS', 30_000),
     autoRespawn: envBool(env, 'PIGROUPS_AUTO_RESPAWN', true),
     spawnCmd: resolveSpawnCmd(env),
   };

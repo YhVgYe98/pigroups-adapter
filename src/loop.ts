@@ -61,6 +61,8 @@ export interface LoopConfig {
   spawnReadyMs: number;
   /** §12.4: a member seen inside this window is already running and is not restarted. */
   respawnFreshMs?: number;
+  /** §12.5: startup grace for the automatic repair (default 30 s). */
+  respawnGraceMs?: number;
   /** §12.5: run respawn once at startup when this member has child records. Tests turn it off. */
   autoRespawn?: boolean;
 }
@@ -274,6 +276,14 @@ const DEFAULT_INSPECT_TIMEOUT_MS = 10_000;
 const SPAWN_READY_MS = 120_000;
 /** §12.4: how recently a member must have authenticated to count as already running. */
 const DEFAULT_RESPAWN_FRESH_MS = 120_000;
+/**
+ * §12.5: how long after this adapter started the *automatic* repair waits before it may
+ * start processes. herdr restarts every `pi --session` at once, and a member that has
+ * been up for three seconds still carries the old `last_seen_at`. Thirty seconds is
+ * several times the time such a session needs to authenticate; the freshness window is
+ * a separate, much longer question ("is that process still running?").
+ */
+const DEFAULT_RESPAWN_GRACE_MS = 30_000;
 /** §12.4: a lock younger than this, held by a live pid, still means "another process is starting it". */
 const RESPAWN_LOCK_TTL_MS = 300_000;
 /** §12.4: a failed start is retried only after `2 × freshMs`, not never. */
@@ -1279,7 +1289,9 @@ export class AdapterLoop {
           await this.sendRespawnControl(id);
           result.skipped.push({
             id,
-            reason: `startup grace period (${freshMs} ms): not starting a process yet`,
+            reason:
+              `startup grace period (${this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS} ms): ` +
+              'not starting a process yet; pg_respawn starts it now',
           });
         } catch (err) {
           result.failed.push({ id, error: respawnError(err) });
@@ -1421,8 +1433,8 @@ export class AdapterLoop {
       this.autoRespawnDone = true;
       return;
     }
-    const freshMs = this.config.respawnFreshMs ?? DEFAULT_RESPAWN_FRESH_MS;
-    const graceEndsAt = this.startedAt + freshMs;
+    const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
+    const graceEndsAt = this.startedAt + graceMs;
     if (this.now() < graceEndsAt) {
       this.autoRespawnDueAt = graceEndsAt;
       this.runRespawnInBackground(undefined, { allowStart: false });

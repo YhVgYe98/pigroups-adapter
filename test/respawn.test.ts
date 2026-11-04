@@ -245,7 +245,7 @@ test('pg.respawn from the direct parent runs this layer without injecting contex
 });
 
 test('startup respawn runs when enabled and stays off when disabled', async (t) => {
-  const enabled = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 0 });
+  const enabled = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 0, respawnGraceMs: 0 });
   t.after(() => enabled.close());
   const child = await childOf(enabled, 'auto-child');
   writeChildRecord(enabled.adapterDir, recordFor(enabled, child));
@@ -309,7 +309,7 @@ test('pg_respawn(scope) rejects an id that is not this member\'s direct child', 
 // seconds ago still has the old last_seen_at. Time cannot tell "not started" from
 // "just started", so the automatic path only reports during the grace period.
 test('automatic respawn does not start a stale child inside the startup grace period', async (t) => {
-  const s = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 5_000 });
+  const s = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 5_000, respawnGraceMs: 5_000 });
   t.after(() => s.close());
 
   const child = await childOf(s, 'grace-child');
@@ -339,6 +339,50 @@ test('automatic respawn does not start a stale child inside the startup grace pe
   await waitFor(() => s.herdr.spawns.length === 1, 'the grace period to expire and the child to start');
   assert.deepEqual(s.herdr.spawns[0]!.args, ['--session', '/tmp/pigroups-child/grace.jsonl', '--model', 'vendor/model']);
   console.warn = originalWarn;
+});
+
+// §12.5 says the grace is for the *automatic* path ("只通报、不起进程"); a person who
+// called `pg_respawn` asked for the repair, so the tool must act even inside the grace.
+test('an explicit respawn starts the child even inside the startup grace period', async (t) => {
+  const s = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 5_000 });
+  t.after(() => s.close());
+
+  const child = await childOf(s, 'manual-child');
+  writeChildRecord(s.adapterDir, recordFor(s, child));
+  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/pigroups-child/manual.jsonl');
+
+  // No clock advance: the loop is still inside its own startup grace.
+  const result = await s.loop.respawn();
+
+  assert.equal(s.herdr.spawns.length, 1, 'the explicit call must start the child immediately');
+  assert.deepEqual(result.restarted, [child.id]);
+  assert.deepEqual(result.skipped, [], 'nothing is skipped for the grace when a person asked');
+});
+
+// §12.5: two different questions. "Is that process running?" is the freshness window
+// (120 s by default); "have herdr's restarts had a moment to authenticate?" is the
+// startup grace (30 s). They must not share one number: a long grace makes the
+// automatic repair look broken, and a short freshness window starts duplicates.
+test('the startup grace and the liveness window are separate numbers', async (t) => {
+  const s = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 1_000, respawnGraceMs: 10_000 });
+  t.after(() => s.close());
+
+  const child = await childOf(s, 'split-child');
+  writeChildRecord(s.adapterDir, recordFor(s, child));
+  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/pigroups-child/split.jsonl');
+
+  await s.loop.pollOnce();
+  await waitFor(() => s.herdr.spawns.length === 0, 'nothing starts while inside the grace');
+
+  // Past the freshness window (the member is stale) but still inside the grace.
+  s.clock.advance(2_000);
+  s.loop.tick();
+  assert.equal(s.herdr.spawns.length, 0, 'the grace still holds even though the member is stale');
+
+  // Past the grace.
+  s.clock.advance(9_000);
+  s.loop.tick();
+  await waitFor(() => s.herdr.spawns.length === 1, 'the automatic path starts it once the grace is over');
 });
 
 // F3: two parent processes can both see a stale last_seen_at. The lock is the only
