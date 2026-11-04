@@ -193,14 +193,15 @@
 
 | # | 变更 | 依据 | 设计说明 | 代码 |
 |---|---|---|---|---|
-| P1 | 子已消失的三条路径（`pg_terminate` 级联 / 退出的 `pg.report` / 30 s `GET /v1/members/{id}`，且复核不依赖 pane 映射） | 三个会话合计 42 次投递、39 次是同一份冻结快照的重播，跨 6.5 h | §3.2 §5.1 | **done**：`reconcileMembers` + `markGone` + `goneReported` 去重；TTL 盖在请求之前 |
+| P1 | 子已消失的三条路径（`pg_terminate` 级联 / 退出的 `pg.attention{state:gone}` / 30 s `GET /v1/members/{id}`，且复核不依赖 pane 映射） | 三个会话合计 42 次投递、39 次是同一份冻结快照的重播，跨 6.5 h | §3.2 §5.1 | **done**：`reconcileMembers` + `markGone` + `goneReported` 去重；TTL 盖在请求之前 |
 | P2 | 遥测提醒**只一次**，删掉 30 分钟超时重提 | 同上：重提假设"状态还在持续"可从子成员印证，子一死即不成立 | §5.2 | **done**：`shouldReport` 只剩边沿 |
 | P3 | 未确认批次：`aborted` 重投、**`error` 丢弃** | 31 个 `(会话,序号)` 重复投递，29 个间隔 ≥2 分钟；31 个全部集中在 5 个会话，每个各收到一次 `pg.abort`。**坑：abort 切断在飞请求时 session 里记 `error` 不是 `aborted`** | §3.4 | **done** |
 | P4 | 欠回复改成**持久化 flag**：投递置、reply/ack 清 | 历史推导的债只能靠说话清；17 次 ack↔ack、14 次 blocked | §4.1 §4.2 | **done**：`src/owed.ts`，`owed/<memberId>.json`；简报不置债只在真 spawn 时 |
 | P5 | 新增 `pg_ack(conv, seq?, all?)`；催办文案改英文 | 旧文案"或说明为什么不需要回"是个没有出口的出口 | §4.3 §5.3 | **done**：上限 = 点名/投递/`pg_read` 读到过的最大 seq |
 | P6 | `idle_owed` 上报但**不触发注入** | 64 条上报里 113 个 owed 引用（15 个不同会话），101 个引用不含父级 | §5.2 | **done** |
 | P7 | 注入给模型的文本全改英文 | 注入的是 prompt，不是给人读的报告 | 全文 | **done** |
-| P8 | nudge 去重：与本会话上一条文本相同则不投 | 62 条逐字重复注入里 61 条是 nudge | §4.3 | **done**，但见 N1：跳过的那次**要计预算**，否则 blocked 信号永远发不出来（已裁决，正在改） |
+| P8 | nudge 去重：与本会话上一条文本相同则不投，**但跳过仍计一次预算** | 62 条逐字重复注入里 61 条是 nudge；不计预算会让冻结的债永不触发 `blocked` | §4.3 | **done** |
+| P9 | **删掉 `pg.report`**：`exiting` → `pg.attention{state:'gone'}`；`blocked` / `silent_acking` 变成 attention 的两个账本态 | 它从来没装过“成员的结论”（成员汇报走 `pg_say`），两个真实生产者都有进入/离开的生命周期 | §5.1 §5.2 §6 §8.6 | **待实现**（文档已改） |
 
 验证口径：`npm test` 163/163、`npm run typecheck` 干净（本轮实现者实际跑出来的数）；"只回退 `src/`"能让 6 条新测试变红。
 
@@ -217,8 +218,8 @@
 | Q12 | 两句自创英文串（`[and N unrelated messages]`、`[skipped N messages…]`）文档里还是中文 | **已解决**：写进 §3.3 |
 | Q11 | `pg_ack` 的上限需要一个新计数器 | **已解决**：`OwedLedger.named`，内存态 |
 | Q1 | `error` 丢表时债已经置上：模型可能被催一条它**从没看过**的消息 | 开放。候选修法：催办文案加一句"若 `#seq` 不在上文，先 `pg_read`" |
-| Q4 | `pg.report{status:'done'}` **不清债**：汇报完仍会被催 3 次并报 blocked | 开放。要决定"报告"与"回复"是否等价 |
-| Q5 | `blocked` 上报之后成员没有终态位（`ChildSnapshot.state` 枚举里没有它） | 开放 |
+| Q4 | ~~`pg.report{done}` 不清债~~ | **关闭**：`done` 从未有生产者，通道已随 P9 删除 |
+| Q5 | ~~`blocked` 没有终态位~~ | **关闭**：P9 之后它是 `pg.attention` 的一个状态，有 `recovered` |
 | Q6 | `slow_turn` / `stalled` 是**单槽**状态，`of:` 未定义嵌套 | 开放 |
 | Q7 | `gone` 被当终态，但进程会重启：重启后一个活着的子会被当成已删 | 开放 |
 | Q8 | 群债（`g:`）没有剪除路径 | 开放 |
