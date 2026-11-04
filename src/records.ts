@@ -32,6 +32,8 @@ export interface SessionRecord {
   token: string;
   parentId: string | null;
   sessionFile: string;
+  /** `<adapterDir>/orgs/<orgKey>/org.json`; absent from records written before organisations named themselves. */
+  orgKey?: string;
 }
 
 /** `sessions/by-member/<memberId>.json`: where the parent can reopen that member. */
@@ -87,6 +89,7 @@ export function writeSessionRecords(adapterDir: string, record: SessionRecord): 
     token: record.token,
     parentId: record.parentId,
     sessionFile: record.sessionFile,
+    ...(record.orgKey === undefined || record.orgKey === '' ? {} : { orgKey: record.orgKey }),
   });
   writeMemberSessionFile(adapterDir, record.memberId, record.sessionFile);
 }
@@ -131,11 +134,13 @@ export function readSessionRecord(adapterDir: string, sessionFile: string): Sess
   const orgUrl = record.orgUrl;
   const token = record.token;
   const storedFile = record.sessionFile;
+  const orgKey = record.orgKey;
   if (
     typeof memberId !== 'string' ||
     typeof orgUrl !== 'string' ||
     typeof token !== 'string' ||
-    typeof storedFile !== 'string'
+    typeof storedFile !== 'string' ||
+    (orgKey !== undefined && orgKey !== null && typeof orgKey !== 'string')
   ) {
     console.warn(`[pigroups] ignoring ${path}: it is not a complete session record`);
     return undefined;
@@ -146,6 +151,7 @@ export function readSessionRecord(adapterDir: string, sessionFile: string): Sess
     token,
     parentId: typeof record.parentId === 'string' ? record.parentId : null,
     sessionFile: storedFile,
+    ...(typeof orgKey === 'string' && orgKey !== '' ? { orgKey } : {}),
   };
 }
 

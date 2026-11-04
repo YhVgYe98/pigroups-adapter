@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -101,16 +101,33 @@ async function fixture(t: { after(fn: () => Promise<void> | void): void }): Prom
 
 async function assertFallsBackToOrgStart(
   f: RecoverFixture,
+  root: MemberRef,
   me: MemberRef,
   sessionFile: string,
   warnings: string[],
 ): Promise<void> {
+  // The member's session record names its organisation; the org record is what
+  // lets the startup path ensure (or reattach to) the platform before the identity
+  // check. Without it a record without orgKey is not allowed to start anything.
+  const orgDir = join(f.adapterDir, 'orgs', 'recover');
+  await mkdir(orgDir, { recursive: true });
+  await writeFile(
+    join(orgDir, 'org.json'),
+    JSON.stringify({
+      url: f.platform.url,
+      token: root.token,
+      admin_token: f.platform.adminToken,
+      pid: 999_999,
+      data_dir: f.platform.dataDir,
+    }),
+  );
   writeSessionRecords(f.adapterDir, {
     memberId: me.id,
     orgUrl: f.platform.url,
     token: me.token,
     parentId: null,
     sessionFile,
+    orgKey: 'recover',
   });
   pigroupsExtension(f.pi);
   await f.fire('session_start', { reason: 'startup' }, ctxFor(sessionFile));
@@ -140,7 +157,7 @@ test('an invalid token in a session record falls back to the no-identity path', 
   });
 
   try {
-    await assertFallsBackToOrgStart(f, bad, '/tmp/pigroups-recover/bad-token.jsonl', warnings);
+    await assertFallsBackToOrgStart(f, root, bad, '/tmp/pigroups-recover/bad-token.jsonl', warnings);
   } finally {
     console.warn = originalWarn;
   }
@@ -161,7 +178,7 @@ test('a session record for a gone member falls back to the no-identity path', as
   });
 
   try {
-    await assertFallsBackToOrgStart(f, gone, '/tmp/pigroups-recover/gone.jsonl', warnings);
+    await assertFallsBackToOrgStart(f, root, gone, '/tmp/pigroups-recover/gone.jsonl', warnings);
   } finally {
     console.warn = originalWarn;
   }

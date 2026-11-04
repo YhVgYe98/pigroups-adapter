@@ -49,6 +49,8 @@ export interface LoopConfig {
   url: string;
   token: string;
   adapterDir: string;
+  /** `<adapterDir>/orgs/<orgKey>/`; inherited by spawned children so their records name it. */
+  orgKey?: string;
   pollLimit: number;
   pollWait: number;
   attentionToolMs: number;
@@ -277,11 +279,9 @@ const SPAWN_READY_MS = 120_000;
 /** §12.4: how recently a member must have authenticated to count as already running. */
 const DEFAULT_RESPAWN_FRESH_MS = 120_000;
 /**
- * §12.5: how long after this adapter started the *automatic* repair waits before it may
- * start processes. herdr restarts every `pi --session` at once, and a member that has
- * been up for three seconds still carries the old `last_seen_at`. Thirty seconds is
- * several times the time such a session needs to authenticate; the freshness window is
- * a separate, much longer question ("is that process still running?").
+ * §12.5: how long the automatic repair waits when herdr cannot list panes. This is
+ * the fallback, not the rule: a pane carrying the child's session file means it is
+ * already running, and a readable pane list without one means start now.
  */
 const DEFAULT_RESPAWN_GRACE_MS = 30_000;
 /** §12.4: a lock younger than this, held by a live pid, still means "another process is starting it". */
@@ -957,6 +957,7 @@ export class AdapterLoop {
       PIGROUPS_TOKEN: token,
       PIGROUPS_ADAPTER_DIR: this.config.adapterDir,
       PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
+      ...(this.config.orgKey === undefined ? {} : { PIGROUPS_ORG_KEY: this.config.orgKey }),
     };
     const { pane } = await this.herdr.spawn({ label: name, env, cwd: opts.cwd, args: opts.args, signal: opts.signal });
     try {
@@ -1207,10 +1208,10 @@ export class AdapterLoop {
    * - `respawnAttempts` answers "did a start fail recently?" so a failure is not
    *   permanently mistaken for a running process.
    *
-   * `allowStart:false` is §12.5's startup grace: herdr restarts every `pi --session`
-   * at once, and a member that has been up for three seconds still carries the old
-   * `last_seen_at`. Time cannot distinguish "not started" from "just started", so the
-   * automatic path may notify but must not start processes until the grace is over.
+   * `allowStart:false` marks the automatic path. It no longer means "wait": the
+   * automatic repair asks herdr's pane list whether the child is already running, and
+   * starts it immediately when no pane carries its session file. The startup grace
+   * applies only when that list cannot be read.
    */
   async respawn(scope?: string, opts: { allowStart?: boolean } = {}): Promise<RespawnResult> {
     const result: RespawnResult = { restarted: [], alreadyRunning: [], skipped: [], failed: [] };
@@ -1282,21 +1283,59 @@ export class AdapterLoop {
         continue;
       }
 
-      if (opts.allowStart === false) {
-        // §12.5 grace: "只通报、不起进程". The control waits in the child's queue and is
-        // acted on after that child has authenticated; it is also what a fresh child gets.
+      const sessionFile = readSessionFileForMember(this.config.adapterDir, id);
+      if (sessionFile === undefined) {
+        result.skipped.push({
+          id,
+          reason: 'no session record for this member; cannot reopen it without a session file (no path is guessed)',
+        });
+        continue;
+      }
+
+      // §12.4/C: `pane list` is the fact that separates "not started" from "just
+      // started". A pane whose agent runs this child's session file is the child;
+      // notify it, never start a second process. When herdr answered and no pane
+      // matches, there is nothing to wait for, so the startup grace does not apply.
+      // Only an unreadable pane list falls back to the time-based grace.
+      let paneRunning = false;
+      let herdrUnavailable = false;
+      try {
+        const panes = await this.herdr.listPanes();
+        paneRunning = panes.some((pane) => pane.agent_session?.value === sessionFile);
+      } catch {
+        herdrUnavailable = true;
+      }
+      if (paneRunning) {
         try {
           await this.sendRespawnControl(id);
-          result.skipped.push({
-            id,
-            reason:
-              `startup grace period (${this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS} ms): ` +
-              'not starting a process yet; pg_respawn starts it now',
-          });
+          result.alreadyRunning.push(id);
         } catch (err) {
           result.failed.push({ id, error: respawnError(err) });
         }
         continue;
+      }
+      if (herdrUnavailable && opts.allowStart === false) {
+        const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
+        const graceEndsAt = this.startedAt + graceMs;
+        if (this.now() < graceEndsAt) {
+          // §12.5 fallback: the control waits in the child's queue and is acted on
+          // after that child has authenticated; it is also what a fresh child gets.
+          try {
+            await this.sendRespawnControl(id);
+            result.skipped.push({
+              id,
+              reason:
+                `startup grace period (${graceMs} ms): herdr could not list panes, ` +
+                'not starting a process yet; pg_respawn starts it now',
+            });
+            // The automatic path retries once the grace is over; tick() drives it.
+            this.autoRespawnDueAt = graceEndsAt;
+            this.autoRespawnDone = false;
+          } catch (err) {
+            result.failed.push({ id, error: respawnError(err) });
+          }
+          continue;
+        }
       }
 
       const failedAt = this.respawnAttempts.get(id);
@@ -1304,15 +1343,6 @@ export class AdapterLoop {
         result.skipped.push({
           id,
           reason: `a previous respawn attempt failed; cooling down for ${freshMs * RESPAWN_FAILURE_COOLDOWN_FACTOR} ms`,
-        });
-        continue;
-      }
-
-      const sessionFile = readSessionFileForMember(this.config.adapterDir, id);
-      if (sessionFile === undefined) {
-        result.skipped.push({
-          id,
-          reason: 'no session record for this member; cannot reopen it without a session file (no path is guessed)',
         });
         continue;
       }
@@ -1336,6 +1366,7 @@ export class AdapterLoop {
             PIGROUPS_TOKEN: record.token,
             PIGROUPS_ADAPTER_DIR: this.config.adapterDir,
             PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
+            ...(this.config.orgKey === undefined ? {} : { PIGROUPS_ORG_KEY: this.config.orgKey }),
           },
           cwd: record.cwd ?? undefined,
           // §12.4/§D-13: `--session` comes first. Caller args may contain `--`, which
@@ -1421,9 +1452,9 @@ export class AdapterLoop {
 
   /**
    * §12.5: startup repairs this layer in the background; it must not block `init()`.
-   * Inside the grace period it only notifies (no process starts). `tick()` runs the real
-   * repair when the grace expires, so herdr's simultaneously restarted sessions have
-   * time to authenticate first.
+   * The automatic run starts immediately: `respawn` asks herdr whether the child's
+   * pane exists, so a stale `last_seen_at` no longer has to be waited out. The
+   * startup grace survives only as the fallback for an unreadable pane list.
    */
   private maybeAutoRespawn(): void {
     if (this.config.autoRespawn !== true || this.autoRespawnDone) return;
@@ -1433,16 +1464,9 @@ export class AdapterLoop {
       this.autoRespawnDone = true;
       return;
     }
-    const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
-    const graceEndsAt = this.startedAt + graceMs;
-    if (this.now() < graceEndsAt) {
-      this.autoRespawnDueAt = graceEndsAt;
-      this.runRespawnInBackground(undefined, { allowStart: false });
-      return;
-    }
     this.autoRespawnDone = true;
     this.autoRespawnDueAt = undefined;
-    this.runRespawnInBackground();
+    this.runRespawnInBackground(undefined, { allowStart: false });
   }
 
   /** The grace has expired: run the automatic repair for real. Called by `tick()`. */
@@ -1664,6 +1688,7 @@ export class AdapterLoop {
         token: this.config.token,
         parentId: who.member.parent_id,
         sessionFile: this.sessionFile,
+        ...(this.config.orgKey === undefined ? {} : { orgKey: this.config.orgKey }),
       });
     } else {
       console.warn(

@@ -45,6 +45,13 @@
   所以父进程重启过、一个成员有多个 pane、herdr 重启换了 pane id，都能关对。
 - 未确认批次：`aborted` 重投、**`error` 丢弃**（31 个重复投递全部追溯到 5 个会话各收到一次 `pg.abort`）。
 - 注入给模型的文本全部改成英文。
+- **成员会话启动时自己把平台拉起来**：`sessions/<hash>` 记录里新增 `orgKey`；打开旧会话时若平台没在跑，
+  用 `startOrg()` 按记录里的端口与数据目录把它拉起来，再注册身份、再修子树。`pi --session <旧会话>`
+  从此不需要任何手动命令。
+- **一份组织只能有一个平台进程**：有记录时端口固定，被占就等 `/v1/health`（`PIGROUPS_START_WAIT_MS`，默认 30 s），
+  等到重接、等不到报错——不再回退到随机端口；等组织锁的循环里也会探 health，并发启动只起一个。
+- **自动 respawn 改用事实判定**：起进程前查 `herdr pane list`，有 pane 在跑这个 session 文件就是"已在跑"，
+  没有就立刻起——不再靠时间窗等待（`PIGROUPS_RESPAWN_GRACE_MS` 只在 herdr 答不上话时兜底）。
 - `PIGROUPS_RESPAWN_GRACE_MS`（默认 30 s）与 `PIGROUPS_RESPAWN_FRESH_MS`（默认 120 s）分开：前者是"herdr 同时拉起会话后给它多久完成第一次鉴权"，后者是"它是否还在跑"。原来共用一个 120 s 的数，会让自动修复看起来像坏了；显式 `pg_respawn` 从来不受宽限期限制。
 
 ## v0.8.0（2026-11-02，与平台 0.2.0 配套）

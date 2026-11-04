@@ -62,6 +62,8 @@ export interface OrgHandle {
   /** The recorded platform process; `0` is never written, so this is always a real pid. */
   pid: number;
   dataDir: string;
+  /** The directory name under `<adapterDir>/orgs/` that holds this organisation. */
+  orgKey: string;
   /** Where this organisation's record lives: `<adapterDir>/orgs/<key>/org.json`. */
   orgFile: string;
   /** The checkout that was started; undefined when we only reattached and did not need one. */
@@ -119,6 +121,9 @@ const START_TIMEOUT_MS = 6000;
 const STOP_TIMEOUT_MS = 2000;
 const LOCK_WAIT_MS = 15_000;
 const LOCK_STALE_MS = 120_000;
+/** §8.2 d/B1: how long a recorded, occupied port may take to answer health before the start fails. */
+const DEFAULT_START_WAIT_MS = 30_000;
+const HEALTH_POLL_MS = 200;
 
 /** The adapter's own directory, independent of cwd: `src/org.ts` → repository root. */
 export function defaultAdapterRoot(): string {
@@ -194,7 +199,18 @@ export async function startOrg(opts: OrgStartOptions = {}): Promise<OrgHandle> {
   const orgDir = join(adapterDir, ORG_DIR, key);
   const orgFile = join(orgDir, ORG_FILE);
 
-  return withOrgLock(orgDir, () => startOrgLocked(opts, adapterDir, orgFile, env));
+  // B2: a caller that cannot take the lock probes health on the same 100 ms cadence. A
+  // platform that is already answering is this organisation, so there is nothing to
+  // start and no reason to wait out the lock (or to report a failure after 18 sessions
+  // start at once). Errors here are only a race with the lock holder's bootstrap; the
+  // locked path below reports the real one.
+  const probe = async (): Promise<OrgHandle | undefined> => {
+    const current = readOrgState(orgFile);
+    if (current === undefined) return undefined;
+    return reattachRecorded(current, adapterDir, orgFile, opts.dataDir);
+  };
+
+  return withOrgLock(orgDir, probe, () => startOrgLocked(opts, adapterDir, orgFile, env));
 }
 
 /** Keys that already hold a record under <adapterDir>/orgs/. */
@@ -204,6 +220,38 @@ function orgKeys(adapterDir: string): string[] {
     return readdirSync(root).filter((key) => existsSync(join(root, key, ORG_FILE)));
   } catch {
     return [];
+  }
+}
+
+/**
+ * The organisation key a session record's URL names. A record written before `orgKey`
+ * existed still has to find its organisation, and the URL is the fact both files share.
+ * This reads only the small `org.json` records under `orgs/` - never a platform database.
+ */
+export function findOrgKeyByUrl(adapterDir: string, url: string): string | undefined {
+  for (const key of orgKeys(adapterDir)) {
+    let state: OrgState | undefined;
+    try {
+      state = readOrgState(join(adapterDir, ORG_DIR, key, ORG_FILE));
+    } catch {
+      continue;
+    }
+    if (state !== undefined && sameOrgUrl(state.url, url)) return key;
+  }
+  return undefined;
+}
+
+/** True when `<adapterDir>/orgs/<key>/org.json` exists; the key is sanitised the same way `orgKey` does. */
+export function isRecordedOrg(adapterDir: string, key: string): boolean {
+  const clean = sanitizeOrgKey(key);
+  return clean !== undefined && existsSync(join(adapterDir, ORG_DIR, clean, ORG_FILE));
+}
+
+function sameOrgUrl(a: string, b: string): boolean {
+  try {
+    return new URL(a).href === new URL(b).href;
+  } catch {
+    return a === b;
   }
 }
 
@@ -219,11 +267,82 @@ function orgKey(name: string | undefined, cwd: string, adapterDir: string): stri
     if (existing.length === 1) return existing[0];
   }
   const base = (name ?? basename(cwd)) || ORG_FILE;
+  return sanitizeOrgKey(base) ?? 'org';
+}
+
+function sanitizeOrgKey(base: string): string | undefined {
   const cleaned = base
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return cleaned === '' ? 'org' : cleaned.slice(0, 64);
+  return cleaned === '' ? undefined : cleaned.slice(0, 64);
+}
+
+/**
+ * The record answered `/v1/health`: prove it is the same platform instance, that its
+ * database is where the record says, and that its token still names a live root. Returns
+ * undefined when nothing answers, which is the caller's signal to restart it.
+ */
+async function reattachRecorded(
+  previous: OrgState,
+  adapterDir: string,
+  orgFile: string,
+  explicitDataDir?: string,
+): Promise<OrgHandle | undefined> {
+  const health = await platformHealth(previous.url);
+  if (health === undefined) return undefined;
+  // One-time follow of a moved data root. It is only a candidate here: a live
+  // platform is reattached first, and an unresponsive one is stopped against the
+  // data dir its process was actually started with before anything is rewritten.
+  const migratedDataDir =
+    explicitDataDir !== undefined && explicitDataDir !== ''
+      ? undefined
+      : migratedRecordDataDir(previous, adapterDir, orgFile);
+  assertPlatformIdentity({
+    requested: undefined,
+    recorded: previous.platform_id,
+    health,
+    url: previous.url,
+    orgFile,
+  });
+  // A healthy URL does not make a wrong record right: if the record names a
+  // platform, its database must be where the record says. A restart would
+  // otherwise create a second instance in the empty dir.
+  assertRecordedPlatformDatabase(previous, migratedDataDir ?? resolve(previous.data_dir), orgFile);
+  let root: { id: string; name: string };
+  try {
+    root = await whoamiRoot(previous.url, previous.token);
+  } catch (err) {
+    throw new OrgStartError(
+      `the platform at ${previous.url} (pid ${previous.pid}) answers /v1/health, but the member ` +
+        `token in ${orgFile} was rejected (${describe(err)}). Refusing to start a second ` +
+        `organisation on top of it: that would leave the old one running with no session able ` +
+        `to reach it.\n` +
+        `Restore that platform's data, or stop pid ${previous.pid} and delete ${orgFile} to ` +
+        `start a new organisation.`,
+    );
+  }
+  // A record written before the platform had ids gets one the first time it is
+  // seen again. Writing it now makes the next restart pin the same instance.
+  const platformId = previous.platform_id ?? platformIdOf(health);
+  if (migratedDataDir !== undefined || (previous.platform_id === undefined && platformId !== undefined)) {
+    writeOrgState(orgFile, {
+      ...previous,
+      data_dir: migratedDataDir ?? previous.data_dir,
+      ...(platformId === undefined ? {} : { platform_id: platformId }),
+    });
+  }
+  return {
+    reattached: true,
+    url: previous.url,
+    token: previous.token,
+    adminToken: previous.admin_token,
+    pid: previous.pid,
+    dataDir: migratedDataDir ?? previous.data_dir,
+    orgKey: basename(dirname(orgFile)),
+    orgFile,
+    root,
+  };
 }
 
 async function startOrgLocked(
@@ -233,68 +352,14 @@ async function startOrgLocked(
   env: NodeJS.ProcessEnv,
 ): Promise<OrgHandle> {
   const previous = readOrgState(orgFile);
-  // One-time follow of a moved data root. It is only a candidate here: a live
-  // platform is reattached first, and an unresponsive one is stopped against the
-  // data dir its process was actually started with before anything is rewritten.
-  const migratedDataDir =
-    previous === undefined || (opts.dataDir !== undefined && opts.dataDir !== '')
-      ? undefined
-      : migratedRecordDataDir(previous, adapterDir, orgFile);
 
   // (b) Reattach when the recorded organisation is still there. This is checked
   // before the platform checkout: a member that already has an identity does not
-  // need the source tree at all.
+  // need the source tree at all, and a caller that lost the lock race adopts the
+  // platform the winner has just brought up.
   if (previous !== undefined) {
-    const health = await platformHealth(previous.url);
-    if (health !== undefined) {
-      assertPlatformIdentity({
-        requested: undefined,
-        recorded: previous.platform_id,
-        health,
-        url: previous.url,
-        orgFile,
-      });
-      // A healthy URL does not make a wrong record right: if the record names a
-      // platform, its database must be where the record says. A restart would
-      // otherwise create a second instance in the empty dir.
-      assertRecordedPlatformDatabase(previous, migratedDataDir ?? resolve(previous.data_dir), orgFile);
-      let root: { id: string; name: string };
-      try {
-        root = await whoamiRoot(previous.url, previous.token);
-      } catch (err) {
-        throw new OrgStartError(
-          `the platform at ${previous.url} (pid ${previous.pid}) answers /v1/health, but the member ` +
-            `token in ${orgFile} was rejected (${describe(err)}). Refusing to start a second ` +
-            `organisation on top of it: that would leave the old one running with no session able ` +
-            `to reach it.\n` +
-            `Restore that platform's data, or stop pid ${previous.pid} and delete ${orgFile} to ` +
-            `start a new organisation.`,
-        );
-      }
-      // A record written before the platform had ids gets one the first time it is
-      // seen again. Writing it now makes the next restart pin the same instance.
-      const platformId = previous.platform_id ?? platformIdOf(health);
-      if (
-        migratedDataDir !== undefined ||
-        (previous.platform_id === undefined && platformId !== undefined)
-      ) {
-        writeOrgState(orgFile, {
-          ...previous,
-          data_dir: migratedDataDir ?? previous.data_dir,
-          ...(platformId === undefined ? {} : { platform_id: platformId }),
-        });
-      }
-      return {
-        reattached: true,
-        url: previous.url,
-        token: previous.token,
-        adminToken: previous.admin_token,
-        pid: previous.pid,
-        dataDir: migratedDataDir ?? previous.data_dir,
-        orgFile,
-        root,
-      };
-    }
+    const reattached = await reattachRecorded(previous, adapterDir, orgFile, opts.dataDir);
+    if (reattached !== undefined) return reattached;
     // The platform process is gone (a reboot, a killed process). Keep its data dir
     // and port so the same organisation comes back with the same URL and tokens.
     await stopRecordedProcess(previous, orgFile);
@@ -309,19 +374,41 @@ async function startOrgLocked(
   // (a) Find the checkout only when a platform actually has to be started.
   const checkout = findPlatformDir({ platformDir: opts.platformDir, env, adapterRoot: opts.adapterRoot });
 
-  // (c) Start it: free port by default, the recorded port when this is a restart;
-  // data under the adapter dir unless told otherwise; a fresh admin token unless
-  // the old organisation had one (creating humans is the only use).
-  let port = opts.port ?? portOf(previous?.url);
-  if (port === undefined || !(await portIsFree(port))) {
+  // (c) Start it: the recorded port for a restart, a free port for a new
+  // organisation; data under the adapter dir unless told otherwise; a fresh admin
+  // token unless the old organisation had one (creating humans is the only use).
+  //
+  // B1: once a record exists its port is part of the organisation's identity. If it
+  // is occupied, another session may have restarted this very platform there; wait
+  // for health and reattach. Choosing a random port would put a second process on
+  // the same SQLite database.
+  const recordedPort = portOf(previous?.url);
+  let port = previous !== undefined ? (recordedPort ?? opts.port) : opts.port;
+  if (port === undefined) {
+    port = await freePort();
+  } else if (!(await portIsFree(port))) {
+    if (previous !== undefined) {
+      const url = `http://127.0.0.1:${port}`;
+      const waitMs = envMs(env, 'PIGROUPS_START_WAIT_MS', DEFAULT_START_WAIT_MS);
+      if ((await waitForHealthAnswer(url, waitMs, opts.signal)) !== undefined) {
+        // The record may have been rewritten by the session that won the start race.
+        const current = readOrgState(orgFile) ?? previous;
+        const adopted = await reattachRecorded(current, adapterDir, orgFile, opts.dataDir);
+        if (adopted !== undefined) return adopted;
+      }
+      throw new OrgStartError(
+        `port ${port} is held by another process, but ${url} did not answer GET /v1/health within ` +
+          `${waitMs} ms (${waitMs / 1000} s); refusing to start a second platform on another port ` +
+          `while ${previous.data_dir} is still in use. Stop that process, or delete ${orgFile} to ` +
+          `start a new organisation.`,
+      );
+    }
     if (opts.port !== undefined) {
       throw new OrgStartError(
         `port ${opts.port} is already in use; the platform was not started. ` +
           `Pass a free port or drop the argument to let the tool choose one.`,
       );
     }
-    // The recorded port may now belong to another service. Moving is safer than
-    // spawning into EADDRINUSE and then reading health from the old process.
     port = await freePort();
   }
   // One data root per adapter directory, not one per organisation: the platform
@@ -396,6 +483,7 @@ async function startOrgLocked(
           url,
           token: state.token,
           adminToken,
+          orgKey: basename(dirname(orgFile)),
           orgFile,
           pid: platform.pid,
           dataDir,
@@ -427,6 +515,7 @@ async function startOrgLocked(
       url,
       token: state.token,
       adminToken,
+      orgKey: basename(dirname(orgFile)),
       orgFile,
       pid: platform.pid,
       dataDir,
@@ -619,10 +708,14 @@ function writeOrgState(file: string, state: OrgState): void {
 /**
  * One organisation per adapter directory, even when two sessions call the tool at
  * the same time. The lock is advisory and short-lived; a dead holder's lock is
- * removed, and one that has waited longer than `LOCK_WAIT_MS` is reported rather
- * than silently starting a second platform.
+ * removed. While waiting, B2 probes health: a platform that already answers makes
+ * the lock pointless, so the caller adopts it instead of waiting out the deadline.
  */
-async function withOrgLock<T>(adapterDir: string, work: () => Promise<T>): Promise<T> {
+async function withOrgLock<T>(
+  adapterDir: string,
+  probe: () => Promise<T | undefined>,
+  work: () => Promise<T>,
+): Promise<T> {
   mkdirSync(adapterDir, { recursive: true, mode: 0o700 });
   const lockFile = join(adapterDir, LOCK_FILE);
   const deadline = Date.now() + LOCK_WAIT_MS;
@@ -640,6 +733,10 @@ async function withOrgLock<T>(adapterDir: string, work: () => Promise<T>): Promi
         rmSync(lockFile, { force: true });
         continue;
       }
+      // A failure here is a race with the holder's bootstrap, not a verdict: the
+      // locked path below reads the record again and reports the real error.
+      const adopted = await probe().catch(() => undefined);
+      if (adopted !== undefined) return adopted;
       if (Date.now() >= deadline) {
         throw new OrgStartError(
           `another pg_org_start is still starting an organisation (lock: ${lockFile}). ` +
@@ -786,6 +883,23 @@ async function platformHealth(url: string): Promise<PlatformHealth | undefined> 
     };
   } catch {
     return undefined;
+  }
+}
+
+/** B1: poll `GET /v1/health` until it answers or the bounded wait expires. */
+async function waitForHealthAnswer(
+  url: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<PlatformHealth | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (signal?.aborted === true) throw new OrgStartError('cancelled while waiting for the platform to answer');
+    const health = await platformHealth(url);
+    if (health !== undefined) return health;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return undefined;
+    await sleep(Math.min(HEALTH_POLL_MS, remaining));
   }
 }
 
@@ -985,6 +1099,13 @@ function portOf(url: string | undefined): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+function envMs(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
 function describe(err: unknown): string {

@@ -49,6 +49,8 @@ export interface LoopConfigOverrides {
   respawnGraceMs?: number;
   /** The pi session file a real extension reads from ctx.sessionManager (§12.3). */
   sessionFile?: string;
+  /** The organisation directory name a child inherits through PIGROUPS_ORG_KEY. */
+  orgKey?: string;
 }
 
 /** A loop plus its fakes, all pointed at one platform and one member identity. */
@@ -94,6 +96,7 @@ export async function createLoop(
     autoRespawn: opts.autoRespawn ?? false,
     respawnFreshMs: opts.respawnFreshMs,
     respawnGraceMs: opts.respawnGraceMs,
+    orgKey: opts.orgKey,
   };
   const pg = new PgClient({ url: config.url, token: config.token });
   const loop = new AdapterLoop({ pg, surface, herdr, config, now: clock.now, sessionFile: opts.sessionFile });

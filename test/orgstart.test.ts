@@ -8,11 +8,14 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import pigroupsExtension from '../src/extension.ts';
 import { platformCandidates, startOrg } from '../src/org.ts';
@@ -81,6 +84,7 @@ function isolateEnv(t: { after(fn: () => void | Promise<void>): void }): void {
     token: process.env.PIGROUPS_TOKEN,
     adapterDir: process.env.PIGROUPS_ADAPTER_DIR,
     pollWait: process.env.PIGROUPS_POLL_WAIT,
+    orgKey: process.env.PIGROUPS_ORG_KEY,
   };
   t.after(() => {
     for (const [name, value] of [
@@ -88,6 +92,7 @@ function isolateEnv(t: { after(fn: () => void | Promise<void>): void }): void {
       ['PIGROUPS_TOKEN', saved.token],
       ['PIGROUPS_ADAPTER_DIR', saved.adapterDir],
       ['PIGROUPS_POLL_WAIT', saved.pollWait],
+      ['PIGROUPS_ORG_KEY', saved.orgKey],
     ] as Array<[string, string | undefined]>) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -95,6 +100,7 @@ function isolateEnv(t: { after(fn: () => void | Promise<void>): void }): void {
   });
   delete process.env.PIGROUPS_URL;
   delete process.env.PIGROUPS_TOKEN;
+  delete process.env.PIGROUPS_ORG_KEY;
   // The loop the tool starts must not block a test on a 25 s long poll.
   process.env.PIGROUPS_POLL_WAIT = '0';
 }
@@ -118,6 +124,99 @@ function freePort(): Promise<number> {
       server.close(() => res(port));
     });
   });
+}
+
+interface OccupiedPlatform {
+  port: number;
+  url: string;
+  close(): Promise<void>;
+}
+
+/**
+ * A process holding the recorded port. It answers /v1/health only after
+ * `answerAfterMs`, so the first health probe misses it and the port wait is the
+ * path under test; `answerAfterMs: undefined` means it never becomes a platform.
+ */
+async function occupiedPlatform(opts: { platformId: string; answerAfterMs?: number }): Promise<OccupiedPlatform> {
+  const port = await freePort();
+  const openedAt = Date.now();
+  const server = createHttpServer((req, res) => {
+    const ready = opts.answerAfterMs !== undefined && Date.now() - openedAt >= opts.answerAfterMs;
+    const json = (status: number, body: unknown): void => {
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    if (ready && req.url === '/v1/health') {
+      json(200, { status: 'ok', version: '0.3.0', uptime_ms: 1, platform_id: opts.platformId });
+      return;
+    }
+    if (ready && req.url === '/v1/whoami') {
+      json(200, {
+        kind: 'member',
+        member: {
+          id: 'm_occupied_root',
+          name: 'root',
+          parent_id: null,
+          status: 'alive',
+          is_root: true,
+          child_count: 0,
+          groups: [],
+          last_seen_at: 1,
+          created_at: 1,
+        },
+        groups: [],
+        dms: [],
+        last_seen_at: 1,
+        server: { version: '0.3.0' },
+      });
+      return;
+    }
+    json(503, { error: { code: 'starting', message: 'not ready' } });
+  });
+  await new Promise<void>((res, rej) => {
+    server.once('error', rej);
+    server.listen(port, '127.0.0.1', () => res());
+  });
+  return {
+    port,
+    url: `http://127.0.0.1:${port}`,
+    close: () =>
+      new Promise<void>((res) => {
+        server.closeAllConnections();
+        server.close(() => res());
+      }),
+  };
+}
+
+async function seedPlatformDatabase(dataDir: string, platformId: string): Promise<void> {
+  await mkdir(join(dataDir, 'platforms', platformId), { recursive: true });
+  await writeFile(join(dataDir, 'platforms', platformId, 'pigroups.db'), 'placeholder');
+}
+
+/** A checkout whose src/main.ts records each start and then runs the real platform. */
+async function instrumentedPlatformCheckout(): Promise<{ dir: string; log: string }> {
+  const dir = await tempDir('pigroups-platform-count-');
+  const log = join(dir, 'starts.log');
+  await mkdir(join(dir, 'src'), { recursive: true });
+  await writeFile(join(dir, 'package.json'), JSON.stringify({ type: 'module' }));
+  const realMain = pathToFileURL(join(PLATFORM_DIR, 'src', 'main.ts')).href;
+  await writeFile(
+    join(dir, 'src', 'main.ts'),
+    [
+      "import { appendFileSync } from 'node:fs';",
+      "appendFileSync(process.env.PIGROUPS_TEST_START_LOG ?? '/dev/null', 'spawn\\n');",
+      `await import(${JSON.stringify(realMain)});`,
+    ].join('\n'),
+  );
+  return { dir, log };
+}
+
+async function startCount(log: string): Promise<number> {
+  try {
+    return (await readFile(log, 'utf8')).split('\n').filter((line) => line.trim() !== '').length;
+  } catch {
+    return 0;
+  }
 }
 
 async function answers(url: string, timeoutMs = 500): Promise<boolean> {
@@ -247,12 +346,25 @@ test('a session with no env identity recovers it from sessions/<sha1(sessionFile
   const me = await createMember(platform, root, 'recovered');
   const sessionFile = join(adapterDir, 'pi-session.jsonl');
   process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+  const orgDir = join(adapterDir, 'orgs', 'recovered');
+  await mkdir(orgDir, { recursive: true });
+  await writeFile(
+    join(orgDir, 'org.json'),
+    JSON.stringify({
+      url: platform.url,
+      token: root.token,
+      admin_token: platform.adminToken,
+      pid: 999_999,
+      data_dir: platform.dataDir,
+    }),
+  );
   writeSessionRecords(adapterDir, {
     memberId: me.id,
     orgUrl: platform.url,
     token: me.token,
     parentId: root.id,
     sessionFile,
+    orgKey: 'recovered',
   });
 
   const fake = fakePi();
@@ -269,6 +381,136 @@ test('a session with no env identity recovers it from sessions/<sha1(sessionFile
   assert.equal(fake.tools.size, 12, 'a recovered identity gets the same twelve member tools as an env-configured one');
   const who = await callTool(fake, 'pg_whoami');
   assert.equal(who.who.member.id, me.id, 'the record supplied the platform and token');
+});
+
+// ---------------------------------------------------------------------------
+// A: a member session heals its own platform
+// ---------------------------------------------------------------------------
+
+// §8.1 A2: a session record is enough to bring the whole organisation back. The
+// record names the adapter directory holding orgs/<key>/org.json, so the platform
+// can be ensured before any identity check talks to it.
+test('a resumed member whose platform is down starts the recorded organisation itself, on the recorded port', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+
+  const before = await startOrg({ adapterDir, name: 'self-heal', platformDir: PLATFORM_DIR });
+  t.after(() => cleanupOrg(adapterDir));
+  const beforeState = JSON.parse(await readFile(before.orgFile, 'utf8')) as { token: string; pid: number };
+  process.kill(before.pid, 'SIGTERM');
+  await waitUntilGone(before.url);
+  await waitUntilProcessGone(before.pid);
+
+  const sessionFile = join(adapterDir, 'pi-session.jsonl');
+  writeSessionRecords(adapterDir, {
+    memberId: before.root.id,
+    orgUrl: before.url,
+    token: beforeState.token,
+    parentId: null,
+    sessionFile,
+    orgKey: 'self-heal',
+  });
+
+  const fake = fakePi();
+  t.after(async () => {
+    await fake.fire('session_shutdown', { reason: 'quit' }).catch(() => undefined);
+  });
+  pigroupsExtension(fake.pi);
+  await fake.fire('session_start', { reason: 'resume' }, ctxWithSession(sessionFile));
+
+  assert.equal(fake.tools.size, 12, 'the resumed member is a full member again, not a zombie behind pg_org_start');
+  const who = await callTool(fake, 'pg_whoami');
+  assert.equal(who.who.member.id, before.root.id, 'the recorded identity is the one that came back');
+  assert.ok(await answers(before.url), 'the platform answers on the URL the record named');
+
+  const afterState = JSON.parse(await readFile(before.orgFile, 'utf8')) as { pid: number; url: string };
+  assert.equal(afterState.url, before.url, 'the organisation did not move to another port');
+  assert.notEqual(afterState.pid, before.pid, 'a new process serves the same organisation');
+  assert.equal(orgRecords(adapterDir).length, 1, 'self-healing reattached the record instead of creating a second organisation');
+
+  const rewritten = JSON.parse(
+    await readFile(join(adapterDir, 'sessions', `${createHash('sha1').update(sessionFile).digest('hex')}.json`), 'utf8'),
+  ) as { orgKey?: string };
+  assert.equal(rewritten.orgKey, 'self-heal', 'the session record now names the organisation it belongs to');
+});
+
+// An old record written before orgKey existed is still usable: the URL is matched
+// against the small org.json files under orgs/, never against a platform database.
+test('a session record without orgKey reattaches by matching its orgUrl under orgs/*/org.json', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+
+  const org = await startOrg({ adapterDir, name: 'by-url', platformDir: PLATFORM_DIR });
+  t.after(() => cleanupOrg(adapterDir));
+  const state = JSON.parse(await readFile(org.orgFile, 'utf8')) as { token: string; pid: number };
+
+  const sessionFile = join(adapterDir, 'pi-session.jsonl');
+  writeSessionRecords(adapterDir, {
+    memberId: org.root.id,
+    orgUrl: org.url,
+    token: state.token,
+    parentId: null,
+    sessionFile,
+  });
+
+  const fake = fakePi();
+  t.after(async () => {
+    await fake.fire('session_shutdown', { reason: 'quit' }).catch(() => undefined);
+  });
+  pigroupsExtension(fake.pi);
+  await fake.fire('session_start', { reason: 'resume' }, ctxWithSession(sessionFile));
+
+  assert.equal(fake.tools.size, 12, 'matching the URL found the organisation');
+  const who = await callTool(fake, 'pg_whoami');
+  assert.equal(who.who.member.id, org.root.id);
+  const afterState = JSON.parse(await readFile(org.orgFile, 'utf8')) as { pid: number };
+  assert.equal(afterState.pid, state.pid, 'a healthy platform was reattached, not restarted');
+});
+
+// §8.1 A2: without a matching organisation record there is nothing to ensure. The
+// session must not invent a platform; it falls back to the one door and says why.
+test('a session record with no orgKey and no matching org record does not start a platform', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+
+  const sessionFile = join(adapterDir, 'pi-session.jsonl');
+  writeSessionRecords(adapterDir, {
+    memberId: 'm_orphan',
+    orgUrl: 'http://127.0.0.1:1',
+    token: 'orphan-token',
+    parentId: null,
+    sessionFile,
+  });
+
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]): void => {
+    warnings.push(args.map(String).join(' '));
+  };
+  t.after(() => {
+    console.warn = originalWarn;
+  });
+
+  const fake = fakePi();
+  t.after(async () => {
+    await fake.fire('session_shutdown', { reason: 'quit' }).catch(() => undefined);
+  });
+  pigroupsExtension(fake.pi);
+  try {
+    await fake.fire('session_start', { reason: 'resume' }, ctxWithSession(sessionFile));
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.deepEqual([...fake.tools.keys()], ['pg_org_start'], 'without an organisation record the session takes the one door');
+  assert.ok(
+    warnings.some((warning) => /orgKey|orgs\/|organisation record/i.test(warning) && /pg_org_start/i.test(warning)),
+    `expected a warning naming the missing organisation record, got ${JSON.stringify(warnings)}`,
+  );
+  assert.equal(orgRecords(adapterDir).length, 0, 'no platform was started and no org.json was written');
 });
 
 // ---------------------------------------------------------------------------
@@ -476,6 +718,147 @@ test('a restart passes the recorded platform id to the platform process', async 
   );
   const restarted = JSON.parse(await readFile(second.orgFile, 'utf8')) as { platform_id?: string };
   assert.equal(restarted.platform_id, state.platform_id, 'the restart kept the same platform id');
+});
+
+// ---------------------------------------------------------------------------
+// B: never start a second platform for the same organisation
+// ---------------------------------------------------------------------------
+
+// B1: a recorded port that is occupied may belong to the very platform another
+// session just brought back. Waiting for health is how a restart becomes a
+// reattach; choosing a free port would be a second platform on one database.
+test('an occupied recorded port is reattached when health answers, never replaced by a new port', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const dataDir = await tempDir('pigroups-orgdata-');
+  const platformId = 'p_0cc00001';
+  const occupied = await occupiedPlatform({ platformId, answerAfterMs: 700 });
+  t.after(async () => {
+    await occupied.close();
+    await rm(adapterDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+  });
+  const orgDir = join(adapterDir, 'orgs', 'occupied');
+  await mkdir(orgDir, { recursive: true });
+  await seedPlatformDatabase(dataDir, platformId);
+  await writeFile(
+    join(orgDir, 'org.json'),
+    JSON.stringify({
+      url: occupied.url,
+      token: 'root-token',
+      admin_token: 'admin-token',
+      pid: 999_999,
+      data_dir: dataDir,
+      platform_id: platformId,
+    }),
+  );
+
+  const started = await startOrg({
+    adapterDir,
+    name: 'occupied',
+    platformDir: PLATFORM_DIR,
+    env: { ...process.env, PIGROUPS_START_WAIT_MS: '5000' },
+  });
+
+  assert.equal(started.reattached, true, 'the service that won the port became the organisation again');
+  assert.equal(started.url, occupied.url, 'the URL stayed the recorded one');
+  assert.equal(existsSync(join(orgDir, 'platform.log')), false, 'no platform process was started');
+});
+
+// B1: if nothing answers health at the recorded port, there is no safe way to
+// start the organisation. A random port would be a second process on the same
+// database, so the start fails and says exactly that.
+test('an occupied recorded port with no health answer fails instead of starting a second platform', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const dataDir = await tempDir('pigroups-orgdata-');
+  const platformId = 'p_0cc00002';
+  const occupied = await occupiedPlatform({ platformId });
+  t.after(async () => {
+    await occupied.close();
+    await rm(adapterDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+  });
+  const orgDir = join(adapterDir, 'orgs', 'occupied-dead');
+  await mkdir(orgDir, { recursive: true });
+  await seedPlatformDatabase(dataDir, platformId);
+  await writeFile(
+    join(orgDir, 'org.json'),
+    JSON.stringify({
+      url: occupied.url,
+      token: 'root-token',
+      admin_token: 'admin-token',
+      pid: 999_999,
+      data_dir: dataDir,
+      platform_id: platformId,
+    }),
+  );
+
+  await assert.rejects(
+    startOrg({
+      adapterDir,
+      name: 'occupied-dead',
+      platformDir: PLATFORM_DIR,
+      env: { ...process.env, PIGROUPS_START_WAIT_MS: '600' },
+    }),
+    (err: Error) => {
+      assert.match(err.message, new RegExp(`port ${occupied.port}`), 'the error names the occupied port');
+      assert.match(err.message, /\/v1\/health/, 'the error names the answer that was missing');
+      assert.match(err.message, /second platform/i, 'the error says a second platform was refused');
+      assert.match(err.message, /600 ms|0\.6 s/, 'the error names the wait it performed');
+      return true;
+    },
+  );
+  assert.equal(existsSync(join(orgDir, 'platform.log')), false, 'nothing was spawned, on this port or another');
+  assert.equal(orgRecords(adapterDir).length, 1, 'the failed start did not write a second record');
+});
+
+// B2: simultaneous starts of one new organisation converge on one process.
+test('two simultaneous starts of the same new organisation spawn one platform and share its URL', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const checkout = await instrumentedPlatformCheckout();
+  const env = { ...process.env, PIGROUPS_TEST_START_LOG: checkout.log };
+  t.after(async () => {
+    await cleanupOrg(adapterDir);
+    await rm(checkout.dir, { recursive: true, force: true });
+  });
+
+  const [first, second] = await Promise.all([
+    startOrg({ adapterDir, name: 'race', platformDir: checkout.dir, env, healthTimeoutMs: 8000 }),
+    startOrg({ adapterDir, name: 'race', platformDir: checkout.dir, env, healthTimeoutMs: 8000 }),
+  ]);
+
+  assert.equal(first.url, second.url, 'both callers got the one organisation URL');
+  assert.equal(first.root.id, second.root.id, 'both callers got the one root identity');
+  assert.equal(await startCount(checkout.log), 1, 'exactly one platform process was spawned');
+
+  const third = await startOrg({ adapterDir, name: 'race', platformDir: checkout.dir, env, healthTimeoutMs: 8000 });
+  assert.equal(third.reattached, true, 'a later start reattaches to the running platform');
+  assert.equal(third.url, first.url, 'the URL did not move');
+  assert.equal(await startCount(checkout.log), 1, 'reattaching never spawns another process');
+});
+
+// B2: the lock is not a reason to wait while the platform is already up. A caller
+// that cannot take the lock probes health and adopts the running organisation.
+test('a start that cannot take the lock adopts the healthy platform instead of waiting it out', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+
+  const org = await startOrg({ adapterDir, name: 'locked-healthy', platformDir: PLATFORM_DIR });
+  t.after(() => cleanupOrg(adapterDir));
+  const lock = join(adapterDir, 'orgs', 'locked-healthy', 'org.lock');
+  await writeFile(lock, JSON.stringify({ pid: process.pid, at: Date.now() }), { mode: 0o600 });
+
+  const startedAt = Date.now();
+  const adopted = await startOrg({ adapterDir, name: 'locked-healthy', platformDir: PLATFORM_DIR });
+  const took = Date.now() - startedAt;
+
+  assert.equal(adopted.reattached, true, 'the healthy platform was adopted');
+  assert.equal(adopted.url, org.url);
+  assert.ok(took < 5000, `adopting must not wait for the 15 s lock deadline, took ${took}ms`);
+  assert.ok(existsSync(lock), 'the live lock belongs to another process; this caller must not remove it');
 });
 
 test('a platform whose id differs from org.json is refused without rewriting the record or bootstrapping', async (t) => {

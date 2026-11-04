@@ -44,6 +44,34 @@ test('an identity start writes both session records, 0600, keyed by sha1(session
   assert.equal(statSync(join(s.adapterDir, 'sessions')).mode & 0o777, 0o700, 'the directory is 0700');
 });
 
+test('a session record carries the organisation key so a later start need not guess it', async (t) => {
+  const sessionFile = '/tmp/pigroups-session-records/keyed.jsonl';
+  const s = await scenario({ sessionFile, orgKey: 'team-a' });
+  t.after(() => s.close());
+
+  await s.loop.pollOnce();
+
+  const sessionPath = join(s.adapterDir, 'sessions', `${hash(sessionFile)}.json`);
+  assert.deepEqual(readJson(sessionPath), {
+    memberId: s.me.id,
+    orgUrl: s.platform.url,
+    token: s.me.token,
+    parentId: s.parent!.id,
+    sessionFile,
+    orgKey: 'team-a',
+  });
+});
+
+test('pg_spawn passes the organisation key to the child so its own record is self-locating', async (t) => {
+  const s = await scenario({ role: 'root', orgKey: 'team-a' });
+  t.after(() => s.close());
+
+  await s.loop.spawnMember({ name: 'keyed-child', brief: 'work' });
+
+  assert.equal(s.herdr.spawns.length, 1);
+  assert.equal(s.herdr.spawns[0]!.env.PIGROUPS_ORG_KEY, 'team-a');
+});
+
 test('without a sessionFile nothing is written and the skip is warned about', async (t) => {
   const s = await scenario({});
   t.after(() => s.close());

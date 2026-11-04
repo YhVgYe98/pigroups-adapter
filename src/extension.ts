@@ -12,7 +12,7 @@ import { shellQuote } from './command.ts';
 import { AdapterLoop } from './loop.ts';
 import type { LoopConfig } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
-import { defaultAdapterDir, startOrg } from './org.ts';
+import { defaultAdapterDir, findOrgKeyByUrl, isRecordedOrg, startOrg } from './org.ts';
 import type { OrgHandle } from './org.ts';
 import { PgClient, PgError } from './pgclient.ts';
 import { readSessionRecord } from './records.ts';
@@ -123,7 +123,7 @@ export default function pigroupsExtension(pi: PiLike): void {
             signal,
           });
           org = started;
-          session = openMemberSession(pi, loopConfig(started.url, started.token));
+          session = openMemberSession(pi, loopConfig(started.url, started.token, process.env, started.orgKey));
           session.start(ctx);
           return text(JSON.stringify({ already_member: false, ...orgAnswer(started, started.reattached) }, null, 2));
         },
@@ -136,16 +136,49 @@ export default function pigroupsExtension(pi: PiLike): void {
       // A record found here is the third startup path, and it is a full member: the
       // same twelve tools, no pg_org_start.
       const sessionFile = sessionFileOf(ctx);
-      const saved = sessionFile === undefined ? undefined : readSessionRecord(defaultAdapterDir(), sessionFile);
+      const adapterDir = defaultAdapterDir();
+      const saved = sessionFile === undefined ? undefined : readSessionRecord(adapterDir, sessionFile);
       if (saved !== undefined) {
+        // §12.3/A: the record names the organisation directory (`orgKey`). A record
+        // written before that field existed is matched by URL against the small
+        // orgs/*/org.json files - never against a platform database. Without a
+        // record there is nothing to ensure, so do not invent a platform.
+        const orgKey = saved.orgKey ?? findOrgKeyByUrl(adapterDir, saved.orgUrl);
+        if (orgKey === undefined || !isRecordedOrg(adapterDir, orgKey)) {
+          console.warn(
+            `[pigroups] session record for ${saved.memberId} cannot name its organisation ` +
+              (saved.orgKey === undefined
+                ? `(no orgKey, and no orgs/*/org.json matches ${saved.orgUrl}); `
+                : `(orgKey '${saved.orgKey}', but its org.json is missing); `) +
+              'not starting a platform from this record. Falling back to pg_org_start: ' +
+              'start an organisation, or ask the parent to reissue the token.',
+          );
+          registerOrgStart();
+          return;
+        }
+        // A: ensure the platform before asking whether this identity still works. A
+        // dead platform is no longer mistaken for a healthy identity: a session that
+        // resumed after a reboot brings its own organisation back on the recorded port.
+        let started: OrgHandle;
+        try {
+          started = await startOrg({ adapterDir, name: orgKey });
+        } catch (err) {
+          console.warn(
+            `[pigroups] could not ensure the platform for session record ${saved.memberId} ` +
+              `(orgs/${orgKey}): ${err instanceof Error ? err.message : String(err)}. ` +
+              'Falling back to pg_org_start: start an organisation, or ask the parent to reissue the token.',
+          );
+          registerOrgStart();
+          return;
+        }
         // §12.3: a record is a claim, not proof. A token that the platform no longer
         // accepts (or a member whose status is gone) must not trap this session behind
         // twelve tools that cannot talk to anything. Fall back to the no-identity path
         // and say exactly what happened, so a person can start over or a parent can
         // reissue the token.
-        const verdict = await recoveryVerdict(saved.orgUrl, saved.token, saved.memberId);
+        const verdict = await recoveryVerdict(started.url, saved.token, saved.memberId);
         if (verdict.ok) {
-          session = openMemberSession(pi, loopConfig(saved.orgUrl, saved.token));
+          session = openMemberSession(pi, loopConfig(started.url, saved.token, process.env, started.orgKey));
           session.start(ctx);
           return;
         }
@@ -242,11 +275,13 @@ function readConfig(): LoopConfig | null {
 }
 
 /** The same wiring for both paths: a configured member and one that just started an org. */
-export function loopConfig(url: string, token: string, env: NodeJS.ProcessEnv = process.env): LoopConfig {
+export function loopConfig(url: string, token: string, env: NodeJS.ProcessEnv = process.env, orgKey?: string): LoopConfig {
+  const key = orgKey ?? env.PIGROUPS_ORG_KEY;
   return {
     url,
     token,
     adapterDir: defaultAdapterDir(env),
+    ...(key === undefined || key === '' ? {} : { orgKey: key }),
     pollLimit: envInt(env, 'PIGROUPS_POLL_LIMIT', 20),
     pollWait: envInt(env, 'PIGROUPS_POLL_WAIT', 25),
     attentionToolMs: envInt(env, 'PIGROUPS_ATTENTION_TOOL_MS', 300_000),
