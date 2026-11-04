@@ -312,6 +312,95 @@ test('the parent sees a child’s last round in its snapshot and in the consolid
   );
 });
 
+// §5.1: only a direct child may change what its parent believes about it. A parent is
+// higher up, not a direct child: its `pg.attention` must be injected as an ordinary
+// control line (nothing may be dropped) but must not touch the telemetry table.
+test('pg.attention from a non-child is injected but cannot change a child state', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'watched');
+  await s.cycle(); // startup roster read: the direct child is known
+
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]): void => {
+    warnings.push(args.map(String).join(' '));
+  };
+  try {
+    await command(s.platform, s.parent!.token, s.me.id, 'pg.attention', {
+      v: 1,
+      child: child.id,
+      name: child.name,
+      state: 'error',
+      since: s.clock.now(),
+      note: 'forged by the parent',
+    });
+    await s.cycle();
+  } finally {
+    console.warn = original;
+  }
+
+  await s.timer(); // past the reminder window: an applied error would produce a nudge
+  await s.timer(WINDOW);
+
+  const rows = await s.loop.children();
+  assert.equal(
+    rows.find((row) => row.id === child.id)?.state,
+    'ok',
+    `a non-child must not change the child's state: ${JSON.stringify(rows)}`,
+  );
+  const control = s.surface.textsOfKind('control').join('\n');
+  assert.match(
+    control,
+    new RegExp(`^\\[control ${s.parent!.id}\\] pg.attention `, 'm'),
+    `the ignored control must still reach the model as a line: ${control}`,
+  );
+  assert.ok(control.includes('forged by the parent'), `the payload must not be dropped: ${control}`);
+  assert.equal(
+    s.surface.textsOfKind('nudge').length,
+    0,
+    `an ignored attention must not open a reminder: ${JSON.stringify(s.surface.texts())}`,
+  );
+  assert.ok(
+    warnings.some((line) => line.includes('not a direct child')),
+    `the ignore must be explained in a warning, got ${JSON.stringify(warnings)}`,
+  );
+});
+
+// A child spawned after the startup snapshot is still a child. The first report cannot
+// hit the pane map (another process spawned it) or telemetry (it has never reported), so
+// it must refresh the stale roster once instead of staying blind until the next settle.
+test('a child missing from the startup roster is accepted after one report refreshes it', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  await s.cycle(); // startup roster snapshot: the child does not exist yet
+
+  const late = await createMember(s.platform, s.me, 'late-child');
+  s.clock.advance(31_000); // the snapshot is now older than ROSTER_TTL_MS
+
+  await command(s.platform, late.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: late.id,
+    name: late.name,
+    state: 'error',
+    since: s.clock.now(),
+    note: 'provider 429',
+  });
+  await s.cycle();
+
+  const rows = await s.loop.children();
+  assert.equal(
+    rows.find((row) => row.id === late.id)?.state,
+    'error',
+    `a child after the startup snapshot must be accepted after the roster refresh: ${JSON.stringify(rows)}`,
+  );
+  assert.equal(
+    s.surface.textsOfKind('control').length,
+    0,
+    `an accepted attention is not injected as a control: ${JSON.stringify(s.surface.texts())}`,
+  );
+});
+
 // §5.1 path 2: a child that says it is exiting is a state change, not a line of text.
 // The control reaches the parent as `pg.report{status:'blocked', text:'exiting'}`; leaving it
 // in the default branch would inject the payload and leave the child in its last state forever.

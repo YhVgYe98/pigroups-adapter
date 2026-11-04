@@ -205,6 +205,8 @@ interface ScheduledWake {
 interface RosterSnapshot {
   at: number;
   ids: Set<string>;
+  /** The ids whose `parent_id` was this member in that same read (§5.1). */
+  directChildren: Set<string>;
 }
 
 /** What `terminate()` did: the delete, and what happened to the panes it took with it (§5.3). */
@@ -355,6 +357,11 @@ export class AdapterLoop {
   private roster: RosterSnapshot | undefined;
   /** After a failed roster read, the next attempt waits until this instant. */
   private rosterRetryAt = 0;
+  /**
+   * When `isDirectChild()` last tried to refresh a stale roster. A miss costs at most one
+   * request per `ROSTER_TTL_MS`, and a failed refresh does not retry inside that TTL either.
+   */
+  private childRosterCheckedAt = Number.NEGATIVE_INFINITY;
   /** When each mapped child's status was last confirmed with `GET /v1/members/{id}` (§5.3). */
   private readonly paneCheckedAt = new Map<string, number>();
   /**
@@ -817,6 +824,7 @@ export class AdapterLoop {
    */
   private async forgetDm(member: string): Promise<void> {
     this.roster?.ids.delete(member);
+    this.roster?.directChildren.delete(member);
     if (this.selfId === undefined) return;
     const conv = dmConv(this.selfId, member);
     await this.owed.clear(conv);
@@ -1374,7 +1382,14 @@ export class AdapterLoop {
         this.settleInspect(payload);
         return;
 
+      // §5.1: only a direct child may change what its parent believes about it. A
+      // control from anyone else is still injected — nothing is dropped — but it does
+      // not touch the telemetry table.
       case 'pg.attention':
+        if (!(await this.isDirectChild(item.from_id))) {
+          await this.injectIgnoredNonChild(item, payload, journalId);
+          return;
+        }
         this.applyAttention(payload);
         return;
 
@@ -1520,6 +1535,49 @@ export class AdapterLoop {
     if (this.parentId !== null && item.from_id === this.parentId) return true;
     // Humans are the only other authority (§5.3); their ids are `h_…` (platform §3.1).
     return item.from_id.startsWith('h_');
+  }
+
+  /**
+   * §5.1: only a direct child may change this member's view of it. Three local facts can
+   * prove that relation without a request: this process spawned it (panes), it has
+   * reported before (telemetry), or the last roster read named its parent (roster).
+   *
+   * A miss refreshes the roster at most once per TTL. That covers a child spawned after
+   * the snapshot was taken, or one this process did not spawn (a parent that restarted,
+   * or a child created by an ancestor). A failed refresh is a closed door, not an open
+   * one: the control is still injected as a line, but no state changes until a later read
+   * succeeds. There is no "no roster means accept everyone" fallback.
+   */
+  private async isDirectChild(member: string): Promise<boolean> {
+    if (this.isKnownDirectChild(member)) return true;
+    const now = this.now();
+    const stale = this.roster === undefined || now < this.roster.at || now - this.roster.at >= ROSTER_TTL_MS;
+    if (stale && now >= this.childRosterCheckedAt + ROSTER_TTL_MS) {
+      // Stamp the attempt before the request: a failed refresh is a closed door for one
+      // TTL, not a reason for every following control to ask again.
+      this.childRosterCheckedAt = now;
+      await this.aliveIds();
+    }
+    return this.isKnownDirectChild(member);
+  }
+
+  private isKnownDirectChild(member: string): boolean {
+    if (this.panes.has(member)) return true;
+    if (this.telemetry.snapshot().some((entry) => entry.child === member)) return true;
+    return this.roster?.directChildren.has(member) ?? false;
+  }
+
+  /** §3.2: an ignored state change is still information, so it leaves as a control line. */
+  private async injectIgnoredNonChild(
+    item: PollControlItem,
+    payload: Record<string, unknown>,
+    journalId?: string,
+  ): Promise<void> {
+    console.warn(
+      `[pigroups] ignored ${item.cmd} from ${item.from_id}: the sender is not a direct child, ` +
+        `so it cannot change this member's state; the control line is injected instead`,
+    );
+    await this.injectUnknownControl(item, payload, journalId);
   }
 
   private logIgnored(item: PollControlItem): void {
@@ -1735,9 +1793,12 @@ export class AdapterLoop {
    */
   private async pruneUnanswerableDms(startup = false): Promise<void> {
     const dms = this.owed.entries().filter((entry) => isDmConv(entry.conv));
-    if (dms.length === 0) return;
+    // Startup always reads the roster once: it is also the first evidence of who this
+    // member's direct children are (§5.1), and a root has no DM debt to trigger the read.
+    // A settle with no DM debt still returns without a request.
+    if (dms.length === 0 && !startup) return;
     const roster = await this.aliveIds(startup);
-    if (!roster) return;
+    if (!roster || dms.length === 0) return;
 
     let changed = false;
     for (const entry of dms) {
@@ -1778,13 +1839,16 @@ export class AdapterLoop {
       const nodes = (tree as { nodes?: unknown } | null | undefined)?.nodes;
       if (!Array.isArray(nodes)) return this.rejectRoster();
       const ids = new Set<string>();
+      const directChildren = new Set<string>();
       for (const node of nodes) {
         const id = (node as { id?: unknown } | null | undefined)?.id;
         if (typeof id !== 'string' || id === '') return this.rejectRoster();
         ids.add(id);
+        const parentId = (node as { parent_id?: unknown } | null | undefined)?.parent_id;
+        if (this.selfId !== undefined && parentId === this.selfId) directChildren.add(id);
       }
       if (this.selfId === undefined || !ids.has(this.selfId)) return this.rejectRoster();
-      this.roster = { at: now, ids };
+      this.roster = { at: now, ids, directChildren };
       this.rosterRetryAt = 0;
       return this.roster;
     } catch {
