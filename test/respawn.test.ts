@@ -12,7 +12,7 @@ import { writeChildRecord, writeMemberSessionFile } from '../src/records.ts';
 import type { ChildRecord } from '../src/records.ts';
 import { scenario, pollUntil } from './scenario.ts';
 import type { Scenario } from './scenario.ts';
-import { command, createMember, member, poll, quiet, removeMember, waitFor, whoami, within } from './support.ts';
+import { command, createMember, delay, member, poll, quiet, removeMember, waitFor, whoami, within } from './support.ts';
 import type { MemberRef, Platform } from './support.ts';
 
 async function childOf(s: Scenario, name: string): Promise<MemberRef> {
@@ -344,8 +344,9 @@ test('automatic respawn treats a pane already running that session as already ru
   assert.equal(s.herdr.spawns.length, 0, 'a pane running that session is never given a second process');
 });
 
-// C: the time-based grace is now only the fallback for a herdr that cannot answer.
-test('automatic respawn falls back to the startup grace only when herdr cannot list panes', async (t) => {
+// C: an unreadable pane list is not evidence of absence. The automatic path may send
+// the control, but it must never start a process while herdr cannot answer.
+test('automatic respawn never starts a child while herdr cannot list panes', async (t) => {
   const s = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 5_000, respawnGraceMs: 5_000 });
   t.after(() => s.close());
 
@@ -372,8 +373,12 @@ test('automatic respawn falls back to the startup grace only when herdr cannot l
 
   s.clock.advance(5_001);
   s.loop.tick();
-  await waitFor(() => s.herdr.spawns.length === 1, 'the fallback grace to expire and the child to start');
-  assert.deepEqual(s.herdr.spawns[0]!.args, ['--session', '/tmp/pigroups-child/herdr-down.jsonl', '--model', 'vendor/model']);
+  await waitFor(
+    () => warnings.some((warning) => /could not list panes|answer is unknown/i.test(warning)),
+    'the unreadable pane list to be reported by the repair path',
+  );
+  await delay(200);
+  assert.equal(s.herdr.spawns.length, 0, 'an unreadable pane list never starts a process, even after the grace');
 });
 
 // §12.5 says the grace is for the *automatic* path ("只通报、不起进程"); a person who

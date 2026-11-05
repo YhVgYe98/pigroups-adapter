@@ -9,10 +9,9 @@ import { command, createMember, delay, member, removeMember, send, waitFor } fro
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, payloads, scenario, type Scenario } from './scenario.ts';
 
 /**
- * The loop's clock is fake (2024) while the platform stamps `last_seen_at` from wall
- * time, so a claim timestamped from the fake clock is a year older than any sighting —
- * far past the staleness grace (§5.1). Ordering claims use this helper to stay live;
- * the carrier-refresh tests below build their `since` from wall time on purpose.
+ * The loop's clock is fake (2024) while the platform stamps times from wall time.
+ * Claims are ordered only by `since` (§5.1), so helper timestamps are kept close to
+ * wall time; the carrier-refresh test below builds its `since` from wall time on purpose.
  */
 function attentionSince(s: Scenario, offsetMs = 0): number {
   return Math.max(s.clock.now(), Date.now()) + 1_000 + offsetMs;
@@ -166,33 +165,10 @@ test('two attentions from one child build a real table entry: state, since, coun
   assert.ok(String(row.tool?.preview).includes('loop.ts'), `the row keeps the preview: ${JSON.stringify(row.tool)}`);
 });
 
-test('state gone skips the reminder merge window, but still waits for the delivery window', async (t) => {
-  const s = await scenario({ role: 'root', remindWindowMs: 3_600_000 });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'vanished');
 
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'gone',
-    since: attentionSince(s),
-  });
-  await s.cycle();
-  await s.timer(0); // the 1h reminder window cannot have expired
-  assert.equal(s.surface.textsOfKind('nudge').length, 0, 'the delivery window still applies to a reminder');
-
-  await s.timer(WINDOW);
-  const nudges = s.surface.textsOfKind('nudge');
-  assert.equal(nudges.length, 1, 'gone must not wait for the reminder merge window');
-  assert.ok(nudges[0].includes(child.id), `the report must name the child that went away: ${nudges[0]}`);
-});
-
-// §5.1: every `pg.attention` is POSTed through the carrier, and the platform refreshes
-// `last_seen_at` on *every* authenticated request. The child computes `since` shortly
-// before that POST, so `last_seen_at` is always a little newer than the claim it carries.
-// A sighting two seconds later is this claim's own carrier, not evidence that the claim
-// is obsolete; dropping it loses every real event.
+// §5.1: attention is ordered by `since`, not by `last_seen_at`. The carrier of every
+// claim is an authenticated POST, so its own sighting is always a little newer; that
+// must not make the claim disappear.
 test('a claim whose own carrier refreshed last_seen_at two seconds later is applied', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
@@ -220,140 +196,10 @@ test('a claim whose own carrier refreshed last_seen_at two seconds later is appl
   assert.equal(row?.since, since, 'the claim keeps its own moment, not the carrier time');
 });
 
-// §5.1: a claim is dropped only when the child has been seen substantially after it — a
-// whole reminder window of life since the claim describes a world that is over. The
-// lookup failure path (apply anyway) is tested below with a stub.
-test('a gone three hours older than last_seen_at is dropped with one warning and never summarised', async (t) => {
-  const s = await scenario({ role: 'root' });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'revived');
-  const since = Date.now() - 3 * 3_600_000;
 
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'gone',
-    since,
-    note: 'exiting',
-  });
-  const seen = (await member(s.platform, s.me.token, child.id)).last_seen_at;
-  assert.ok(seen !== null && seen > since, 'precondition: the child authenticated after the claim');
-
-  const warnings: string[] = [];
-  const originalWarn = console.warn;
-  console.warn = (...args: unknown[]): void => {
-    warnings.push(args.map(String).join(' '));
-  };
-  t.after(() => {
-    console.warn = originalWarn;
-  });
-
-  await s.cycle();
-  const row = (await s.loop.children()).find((entry) => entry.id === child.id);
-  assert.equal(row?.states.length, 0, `a stale claim must not enter the table: ${JSON.stringify(row)}`);
-
-  const stale = warnings.filter(
-    (line) => line.includes(child.id) && line.includes('gone') && line.includes(formatLocalMinute(since)),
-  );
-  assert.equal(stale.length, 1, `one warning, naming the child, state and times: ${JSON.stringify(warnings)}`);
-  assert.ok(stale[0]!.includes(formatLocalMinute(seen!)), `the warning names last_seen_at too: ${stale[0]}`);
-
-  await s.timer(0);
-  await s.timer(WINDOW);
-  assert.equal(s.surface.textsOfKind('nudge').length, 0, 'a dropped claim must not produce a summary');
-  assert.ok(!s.surface.texts().join('\n').includes(child.id), 'the child is never mentioned');
-});
-
-// §5.1: the freshness check fails open. A platform that cannot answer must not make the
-// parent throw away a real "it died"; it applies the claim and says why in one warning.
-test('when last_seen_at cannot be read, the claim is applied and a warning names the failure', async (t) => {
-  const s = await scenario({ role: 'root' });
-  t.after(() => s.close());
-  await s.cycle(); // the startup roster does not contain a child created after it
-  const child = await createMember(s.platform, s.me, 'unreachable-check');
-  writeChildRecord(s.adapterDir, {
-    parentId: s.me.id,
-    childId: child.id,
-    name: child.name,
-    cwd: null,
-    args: [],
-    token: child.token,
-    intent: 'spawned',
-  });
-  const since = Date.now() + 60_000;
-
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'gone',
-    since,
-    note: 'exiting',
-  });
-
-  const warnings: string[] = [];
-  const originalWarn = console.warn;
-  console.warn = (...args: unknown[]): void => {
-    warnings.push(args.map(String).join(' '));
-  };
-  t.after(() => {
-    console.warn = originalWarn;
-  });
-  s.pg.getMember = async () => {
-    throw new Error('platform unreachable');
-  };
-
-  await s.cycle();
-  assert.equal(
-    (await s.loop.children()).find((entry) => entry.id === child.id)?.state,
-    'gone',
-    'a failed freshness lookup must not drop the claim',
-  );
-  const failed = warnings.filter((line) => line.includes(child.id) && /fresh|last_seen|unreachable/i.test(line));
-  assert.equal(failed.length, 1, `one warning names the failed check: ${JSON.stringify(warnings)}`);
-});
-
-// §5.1: a failed lookup is an answer too. Without caching it, a platform outage makes
-// every queued claim pay the request bound again on the serial control path. The TTL is
-// the one the successful lookup uses, and fail-open stays: the claims are applied.
-test('a failed freshness lookup is cached for the TTL instead of being paid by every claim', async (t) => {
-  const s = await scenario({ role: 'root' });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'outage');
-  let calls = 0;
-  const stub = s.pg as unknown as { getMember: (id: string) => Promise<unknown> };
-  stub.getMember = async () => {
-    calls += 1;
-    throw new Error('platform unreachable');
-  };
-  const since = attentionSince(s);
-
-  for (const state of ['error', 'slow_turn'] as const) {
-    await command(s.platform, child.token, s.me.id, 'pg.attention', {
-      v: 1,
-      child: child.id,
-      name: child.name,
-      state,
-      since,
-      ...(state === 'error' ? { note: 'provider 429' } : {}),
-    });
-  }
-  await s.cycle();
-
-  assert.equal(calls, 1, `one failed lookup must answer every claim inside the TTL, saw ${calls} requests`);
-  const row = (await s.loop.children()).find((entry) => entry.id === child.id);
-  assert.deepEqual(
-    row?.states.map((state) => state.state).sort(),
-    ['error', 'slow_turn'],
-    `a cached failure still fails open: ${JSON.stringify(row)}`,
-  );
-});
-
-// §5.1: attention is edge-triggered, so a dropped `recovered` is never re-sent and the
-// state it names stays in the table forever. The table orders by `since`, which already
-// stops a stale recovery from clearing a newer state; the freshness check must not apply.
-test('a recovered older than last_seen_at still clears the state it names', async (t) => {
+// §5.1: attention is edge-triggered, so a `recovered` is never re-sent. The table
+// orders by `since`; a recovery newer than the state it names clears it.
+test('a recovered clears the state it names even when a later sighting exists', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
   const sender = await createMember(s.platform, s.me, 'sender');
@@ -386,7 +232,7 @@ test('a recovered older than last_seen_at still clears the state it names', asyn
     'precondition: the state to recover is in the table',
   );
 
-  // A sighting an hour after the recovery: the freshness check would call it stale.
+  // A sighting an hour after the recovery is irrelevant: only `since` orders claims.
   seenAt = recoveredSince + 3_600_000;
   await command(s.platform, sender.token, s.me.id, 'pg.attention', {
     v: 1,
@@ -403,9 +249,55 @@ test('a recovered older than last_seen_at still clears the state it names', asyn
   assert.equal(row?.states.length, 0, 'the recovered state is gone from the table');
 });
 
-// §5.1: `since: 0` means "now", not 1970. It is normalized once on the way in, and both
-// the table and the freshness check must see that same moment; a 0 only the table
-// understands is dropped as decades-stale before it ever gets there.
+// §5.1: the snapshot names the latest applied state. When a recovery removes that state,
+// `lastState` must re-point at the newest state that remains, not keep naming a row that
+// no longer exists.
+test('a recovery re-points lastState at the newest remaining state', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await createMember(s.platform, s.me, 'multi-state');
+  const errorSince = attentionSince(s);
+  const blockedSince = attentionSince(s, 1_000);
+  const recoveredSince = attentionSince(s, 2_000);
+
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'error',
+    since: errorSince,
+    note: 'provider 429',
+  });
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'blocked',
+    since: blockedSince,
+    owed: ['dm:m_a_m_d'],
+  });
+  await command(s.platform, child.token, s.me.id, 'pg.attention', {
+    v: 1,
+    child: child.id,
+    name: child.name,
+    state: 'recovered',
+    since: recoveredSince,
+    of: 'blocked',
+  });
+  await s.cycle();
+
+  const row = (await s.loop.children()).find((entry) => entry.id === child.id);
+  assert.equal(row?.state, 'error', `lastState points at the state that still exists: ${JSON.stringify(row)}`);
+  assert.equal(row?.since, errorSince, 'the snapshot carries the remaining state\'s own since, not 0');
+  assert.deepEqual(
+    row?.states.map((state) => state.state),
+    ['error'],
+    'only the error state remains after the blocked recovery',
+  );
+});
+
+// §5.1: `since: 0` means "now", not 1970. It is normalized once on the way in, so the
+// stored claim and the arrival moment agree.
 test('an attention with since 0 is treated as now, not as 1970', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
@@ -427,124 +319,6 @@ test('an attention with since 0 is treated as now, not as 1970', async (t) => {
   assert.equal(row?.since, s.clock.now(), 'the stored since is the arrival moment, not the epoch');
 });
 
-// §5.1: `gone` is a claim, not a tombstone. A claim newer than `last_seen_at` is applied
-// and reported once; the child's later events can replace it.
-test('a gone newer than last_seen_at is applied and reported once', async (t) => {
-  const s = await scenario({ role: 'root' });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'departed');
-  const since = Date.now() + 60_000;
-
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'gone',
-    since,
-    note: 'exiting',
-  });
-  await s.cycle();
-  assert.equal(
-    (await s.loop.children()).find((entry) => entry.id === child.id)?.state,
-    'gone',
-    'a fresh claim enters the table',
-  );
-
-  await s.timer(0);
-  await s.timer(WINDOW);
-  const nudges = s.surface.textsOfKind('nudge');
-  assert.equal(nudges.length, 1, `exactly one report, got ${JSON.stringify(s.surface.texts())}`);
-  assert.ok(nudges[0]!.includes(formatLocalMinute(since)), `the line carries its since: ${nudges[0]}`);
-
-  await s.timer(WINDOW);
-  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'the same claim is never reported twice');
-});
-
-// §5.1 "两种消失": the attention `gone` is a process exit, not a deletion. A later state
-// from the same child (a respawn) replaces it, and the child shows up again.
-test('a later state with a newer since replaces gone and the child shows up again', async (t) => {
-  const s = await scenario({ role: 'root', remindWindowMs: 60_000 });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'respawned');
-  const goneSince = Date.now() + 60_000;
-  const errorSince = goneSince + 1_000;
-
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'gone',
-    since: goneSince,
-    note: 'exiting',
-  });
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'error',
-    since: errorSince,
-    note: 'provider 429 after respawn',
-  });
-  await s.cycle();
-
-  const row = (await s.loop.children()).find((entry) => entry.id === child.id);
-  assert.equal(row?.state, 'error', `the newer claim wins: ${JSON.stringify(row)}`);
-  assert.equal(row?.states.some((state) => state.state === 'gone'), false, 'gone is not terminal');
-  assert.equal(row?.since, errorSince);
-
-  await s.timer(60_000); // the normal reminder window for the error
-  await s.timer(WINDOW); // then the delivery window closes
-  const nudges = s.surface.textsOfKind('nudge');
-  assert.equal(nudges.length, 1, JSON.stringify(s.surface.texts()));
-  assert.match(nudges[0]!, /error: provider 429 after respawn/);
-  assert.ok(!nudges[0]!.includes('gone: exiting'), `the old disappearance is gone: ${nudges[0]}`);
-});
-
-// §5.1/§5.2: a recovery deletes the state it names and the `gone` row it supersedes. The
-// child's `lastState` must move with it, or `pg_children()` keeps answering `gone` for a
-// live member whose exit claim was just withdrawn.
-test('a recovery that deletes gone re-points the child at the state that remains', async (t) => {
-  const s = await scenario({ role: 'root' });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'revived-live');
-  const base = attentionSince(s);
-
-  for (const [state, since] of [
-    ['error', base],
-    ['blocked', base + 1_000],
-    ['gone', base + 2_000],
-  ] as const) {
-    await command(s.platform, child.token, s.me.id, 'pg.attention', {
-      v: 1,
-      child: child.id,
-      name: child.name,
-      state,
-      since,
-      ...(state === 'blocked' ? { owed: [`dm:${child.id}_${s.me.id}`] } : {}),
-    });
-  }
-  await s.cycle();
-  assert.equal(
-    (await s.loop.children()).find((entry) => entry.id === child.id)?.state,
-    'gone',
-    'precondition: gone is the last state the table remembers',
-  );
-
-  // A recovery newer than the gone row withdraws it; `error` is what is left.
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'recovered',
-    since: base + 3_000,
-    of: 'blocked',
-  });
-  await s.cycle();
-
-  const row = (await s.loop.children()).find((entry) => entry.id === child.id);
-  assert.equal(row?.state, 'error', `a live child is not reported gone: ${JSON.stringify(row)}`);
-  assert.equal(row?.since, base, 'the remaining state keeps its own since');
-});
 
 // §5.1: the ordering guard is per state name. A delayed event that describes an older
 // moment is not allowed to overwrite the newer facts already in the row.
@@ -917,8 +691,8 @@ test('a repeated blocked set is not re-reported, while a larger or smaller set i
   );
 });
 
-// §5.1: `gone` is terminal and is not an `of:` value. A bogus `recovered{of:'gone'}`
-// must not remove anything from the table.
+// §5.1/§6: `gone` is not an attention state and cannot be an `of:` value. A bogus
+// `recovered{of:'gone'}` must not remove anything from the table.
 test('recovered never accepts gone as the state it left', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
@@ -1038,10 +812,7 @@ test('a child missing from the startup roster is accepted after one report refre
   );
 });
 
-// §5.1 path 3 after a restart: telemetry is empty and no pane is cached, but `children/`
-// is on disk. That record alone must keep the liveness recheck asking about the child —
-// and an explicit `gone` must make it close the pane `pane list` names.
-test('a child known only from its children record is rechecked and its pane closed when gone', async (t) => {
+test('a child known only from its children record is rechecked and its pane closed when the platform says gone', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
   const child = await createMember(s.platform, s.me, 'from-record');
@@ -1073,12 +844,13 @@ test('a child known only from its children record is rechecked and its pane clos
   await s.cycle();
 
   assert.deepEqual(s.herdr.closed, ['pane-from-record'], 'the children record kept the member in the recheck');
-  await s.timer(0); // gone skips the reminder merge window
+  await s.timer(0);
   await s.timer(WINDOW);
-  const nudges = s.surface.textsOfKind('nudge');
-  assert.equal(nudges.length, 1, `a dead child must be reported gone, got ${JSON.stringify(s.surface.texts())}`);
-  assert.ok(nudges[0].includes(child.id), `the reminder names the child: ${nudges[0]}`);
-  assert.match(nudges[0], /gone/, `the reminder says the child is gone: ${nudges[0]}`);
+  assert.equal(
+    s.surface.textsOfKind('nudge').some((text) => text.includes(child.id) && /gone/.test(text)),
+    false,
+    `a deletion is not an attention state: ${JSON.stringify(s.surface.texts())}`,
+  );
 });
 
 // §5.1: only a direct child may change this member's state. A child created after the
@@ -1123,91 +895,17 @@ test('a child known only from its children record may report attention', async (
   );
 });
 
-// §5.1 path 2: a child that is exiting sends `pg.attention{state:'gone'}`, not a report.
-// The exit path is the same channel as every other state: it puts the sender in the table
-// as gone and is never injected as a control line.
-test('an exiting child arrives as attention gone and is reported without a control line', async (t) => {
-  const s = await scenario({ role: 'root' });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'leaver');
 
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'gone',
-    since: attentionSince(s),
-    note: 'exiting',
-  });
-  await s.cycle();
-
-  assert.equal(s.surface.deliveries.length, 0, 'an exit is not a line of text for the parent');
-  const rows = await s.loop.children();
-  assert.equal(
-    rows.find((row) => row.id === child.id)?.state,
-    'gone',
-    `the sender must be gone in the table, got ${JSON.stringify(rows)}`,
-  );
-
-  await s.timer(0); // gone skips the reminder merge window
-  await s.timer(WINDOW); // but it still waits for the delivery window
-  const nudges = s.surface.textsOfKind('nudge');
-  assert.equal(nudges.length, 1, `gone must be reported once, got ${JSON.stringify(s.surface.texts())}`);
-  assert.ok(nudges[0].includes(child.id), `the report must name the child that left: ${nudges[0]}`);
-  assert.match(nudges[0], /gone: exiting/, `the exit note is the one fact the parent gets: ${nudges[0]}`);
-});
-
-// §5.2: gone is urgent (it skips the reminder merge window) but it is still delivered once.
-// A crash cascade removes many children at the same instant; fifteen injections here is the
-// 6.5 hour replay in miniature.
-test('two children gone in one window produce one reminder with one line each', async (t) => {
-  const s = await scenario({ role: 'root', remindWindowMs: 3_600_000 });
-  t.after(() => s.close());
-  const a = await createMember(s.platform, s.me, 'first');
-  const b = await createMember(s.platform, s.me, 'second');
-
-  for (const child of [a, b]) {
-    await command(s.platform, child.token, s.me.id, 'pg.attention', {
-      v: 1,
-      child: child.id,
-      name: child.name,
-      state: 'gone',
-      since: attentionSince(s),
-      note: 'exiting',
-    });
-  }
-  await s.cycle();
-  assert.deepEqual(
-    (await s.loop.children()).map((row) => [row.id, row.state]).sort(),
-    [
-      [a.id, 'gone'],
-      [b.id, 'gone'],
-    ].sort(),
-    'both children are gone in the table before the reminder is queued',
-  );
-
-  await s.timer(0); // the merge window is bypassed, but the delivery window is not
-  assert.equal(s.surface.textsOfKind('nudge').length, 0, 'one delivery, not one per gone child');
-
-  await s.timer(WINDOW);
-  const nudges = s.surface.textsOfKind('nudge');
-  assert.equal(nudges.length, 1, `two gone children are one delivery, got ${JSON.stringify(s.surface.texts())}`);
-  const lines = nudges[0].split('\n').filter((line) => line.startsWith('- '));
-  assert.equal(lines.length, 2, `one line per gone child: ${nudges[0]}`);
-  assert.ok(lines.some((line) => line.includes(a.id)), `the first child is named: ${nudges[0]}`);
-  assert.ok(lines.some((line) => line.includes(b.id)), `the second child is named: ${nudges[0]}`);
-
-  await s.timer(WINDOW);
-  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'a gone state is reported once, never again');
-});
-
-// §5.1 path 3: the liveness recheck must cover the telemetry table too. A child created
-// by an ancestor has no `children/` record here, so without telemetry its `error` entry
-// would stay forever.
-test('a child that dies is rechecked from the telemetry table without a children record', async (t) => {
+test('a gone child is forgotten by the telemetry table instead of being re-fetched forever', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
   const child = await createMember(s.platform, s.me, 'ghost');
+  const realGetMember = s.pg.getMember.bind(s.pg);
+  let reads = 0;
+  s.pg.getMember = async (id) => {
+    if (id === child.id) reads += 1;
+    return realGetMember(id);
+  };
 
   await command(s.platform, child.token, s.me.id, 'pg.attention', {
     v: 1,
@@ -1225,16 +923,28 @@ test('a child that dies is rechecked from the telemetry table without a children
     'precondition: the child is in the telemetry table',
   );
 
-  await removeMember(s.platform, s.me.token, child.id); // a delete this process never issued
-  s.clock.advance(30_000); // the recheck TTL
+  // A delete this process never issued: the direct GET is what notices it. The table
+  // is consulted only to keep the member in the 30 s recheck; deletion is not a state.
+  await removeMember(s.platform, s.me.token, child.id);
+  const beforeRecheck = reads;
+  s.clock.advance(30_000);
   await s.cycle();
+  assert.equal(reads, beforeRecheck + 1, 'the deleted child is read once for its gone answer');
 
-  await s.timer(0); // gone skips the reminder merge window
+  // Once the platform says gone, the telemetry row is dropped: a long-lived parent does
+  // not ask about a dead child every 30 s for the rest of its life.
+  const afterGone = reads;
+  s.clock.advance(30_000);
+  await s.cycle();
+  assert.equal(reads, afterGone, 'the forgotten child is no longer a candidate on the next pass');
+
+  await s.timer(0);
   await s.timer(WINDOW);
-  const nudges = s.surface.textsOfKind('nudge');
-  assert.equal(nudges.length, 1, `a dead child must be reported gone, got ${JSON.stringify(s.surface.texts())}`);
-  assert.match(nudges[0], /gone/, `the reminder must say the child is gone: ${nudges[0]}`);
-  assert.ok(nudges[0].includes(child.id), `the reminder must name the child: ${nudges[0]}`);
+  assert.equal(
+    s.surface.textsOfKind('nudge').some((text) => text.includes(child.id) && /gone/.test(text)),
+    false,
+    `a deletion is not an attention state: ${JSON.stringify(s.surface.texts())}`,
+  );
 });
 
 // §5.2: one reminder per state entry, with no timeout repeat. The old rule ("still going
@@ -1347,174 +1057,4 @@ test('idle_owed stays in the table but opens no window and joins no summary', as
   assert.equal(nudges.length, 1, `one reminder for the actionable child, got ${JSON.stringify(s.surface.texts())}`);
   assert.ok(nudges[0].includes(broken.id), `the summary names the failing child: ${nudges[0]}`);
   assert.ok(!nudges[0].includes(indebted.id), `idle_owed must never join a summary: ${nudges[0]}`);
-});
-
-// §5.2: "报一次就从表里删掉". A `gone` row that stays would make `pg_children()` list a dead
-// child as gone forever, long after the parent was told once.
-test('a gone child is dropped from the table once the reminder is delivered', async (t) => {
-  const s = await scenario({ role: 'root' });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'departed');
-
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'gone',
-    since: attentionSince(s),
-    note: 'exiting',
-  });
-  await s.cycle();
-  await s.timer(0);
-  await s.timer(WINDOW);
-  assert.equal(s.surface.textsOfKind('nudge').length, 1, 'precondition: the disappearance was reported');
-
-  const rows = await s.loop.children();
-  assert.notEqual(
-    rows.find((row) => row.id === child.id)?.state,
-    'gone',
-    `a reported disappearance is no longer a state in the table: ${JSON.stringify(rows)}`,
-  );
-});
-
-// §5.1 path 2 + path 3 are two ways to learn the same fact. A child that reported `exiting`
-// and then disappeared from the platform must not be reported gone a second time — and the
-// children record keeps the recheck alive, so a failed close can be retried. Left alone, that
-// retry rebuilt the row every poll cycle and injected a fresh "1 child needs attention … gone"
-// each time: the 6.5 hour replay with a new trigger.
-test('one disappearance is reported once, even when the pane close fails and the check is retried', async (t) => {
-  // A short delivery window: the 30 s liveness bound has to still be running when the next
-  // poll happens, so the test cannot spend a whole 60 s window to get the reminder out.
-  const s = await scenario({ role: 'root', deliveryWindowMs: 1_000 });
-  t.after(() => s.close());
-  const child = await s.loop.spawnMember({ brief: 'watch the build' });
-  const goneLines = (): string[] =>
-    s.surface.textsOfKind('nudge').filter((text) => new RegExp(`${child.id}.*gone`).test(text));
-  // Count the liveness questions themselves: delivery text cannot show whether the 30 s
-  // bound was honoured, and a platform that is asked once per poll is what this guards.
-  let checks = 0;
-  const realGetMember = s.pg.getMember.bind(s.pg);
-  (s.pg as unknown as { getMember: (id: string) => Promise<unknown> }).getMember = async (id: string) => {
-    checks += 1;
-    return realGetMember(id);
-  };
-
-  // herdr is down: the child record keeps the recheck alive, which is exactly the retry case (§5.3).
-  s.herdr.failClose = new Error('herdr daemon is not running');
-  await removeMember(s.platform, s.me.token, child.id);
-
-  s.clock.advance(30_000);
-  await s.cycle(); // getMember → gone, the pane close fails
-  await s.timer(0); // gone skips the merge window
-  await s.timer(2_000); // and only the 1 s delivery window has to close
-  assert.equal(goneLines().length, 1, `the disappearance is reported once: ${JSON.stringify(s.surface.texts())}`);
-
-  // The background spawn watchdog notices the same 30 s and gives up; it asks `getMember`
-  // too, so let it finish before counting.
-  await delay(400);
-  checks = 0;
-
-  // A second look inside the 30 s bound is not a question worth asking the platform.
-  await s.cycle();
-  await s.timer(0);
-  await s.timer(2_000);
-  assert.equal(checks, 0, 'a poll inside the 30 s bound must not re-ask about a member it just checked');
-  assert.equal(
-    goneLines().length,
-    1,
-    `a retried recheck inside the TTL must not re-report: ${JSON.stringify(s.surface.texts())}`,
-  );
-
-  // And a recheck after the bound still describes the same disappearance, not a new one.
-  s.clock.advance(30_001);
-  await s.cycle();
-  await s.timer(0);
-  await s.timer(2_000);
-  assert.equal(checks, 1, 'after the bound the member is checked again — the retry the failed close needs');
-  assert.equal(
-    goneLines().length,
-    1,
-    `a recheck after the TTL must not re-report either: ${JSON.stringify(s.surface.texts())}`,
-  );
-});
-
-// §5.1/§5.3: the gone check runs before the freshness read, which awaits the platform.
-// A `pg_terminate` landing inside that await applies the deletion's own `gone` row; the
-// queued claim that resumes afterwards must not undo it. Without the second check the
-// claim's newer `since` deletes the row and the parent is never told the child is gone.
-test('a terminate that lands during the freshness read still leaves the child reported gone', async (t) => {
-  const s = await scenario({ role: 'root', remindWindowMs: 1_000, deliveryWindowMs: 1_000 });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'racing');
-
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let asked = false;
-  const stub = s.pg as unknown as { getMember: (id: string) => Promise<unknown> };
-  stub.getMember = async () => {
-    asked = true;
-    await gate;
-    return { id: child.id, name: child.name, status: 'alive', last_seen_at: null };
-  };
-
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'error',
-    // Newer than every sighting, so the roster cannot answer and the read is the stub.
-    since: attentionSince(s),
-    note: 'provider 429',
-  });
-  const polling = s.loop.pollOnce();
-  await waitFor(() => asked, 'the freshness read to start');
-  await s.loop.terminate(child.id); // the exit lands while the read is in flight
-  release();
-  await polling;
-
-  await s.timer(0); // gone skips the reminder merge window
-  await s.timer(2_000);
-  await s.timer(2_000);
-  const lines = s.surface
-    .textsOfKind('nudge')
-    .filter((text) => new RegExp(`- ${child.id} .*gone`).test(text));
-  assert.equal(lines.length, 1, `the termination is reported once: ${JSON.stringify(s.surface.texts())}`);
-  assert.ok(!s.surface.texts().join('\n').includes('provider 429'), 'the queued claim must not replace the exit');
-});
-
-// §5.1 path 2 + §5.3: the attention `gone` and a later `pg_terminate` describe the same
-// exit. Once the exit has been reported through the attention channel, `markGone` must
-// not open a fresh row for the same child — `due()` would report the disappearance again.
-test('a terminate after the attention gone does not report the same exit twice', async (t) => {
-  const s = await scenario({ role: 'root', remindWindowMs: 1_000, deliveryWindowMs: 1_000 });
-  t.after(() => s.close());
-  const child = await createMember(s.platform, s.me, 'twice');
-  const goneLines = (): string[] =>
-    s.surface.textsOfKind('nudge').filter((text) => new RegExp(`- ${child.id} .*gone`).test(text));
-
-  await command(s.platform, child.token, s.me.id, 'pg.attention', {
-    v: 1,
-    child: child.id,
-    name: child.name,
-    state: 'gone',
-    since: attentionSince(s),
-    note: 'exiting',
-  });
-  await s.cycle();
-  await s.timer(0);
-  await s.timer(2_000);
-  assert.equal(goneLines().length, 1, `precondition: the exit was reported: ${JSON.stringify(s.surface.texts())}`);
-
-  await s.loop.terminate(child.id); // the delete path learns the same exit
-  await s.timer(0);
-  await s.timer(2_000);
-  await s.timer(2_000);
-
-  assert.equal(
-    goneLines().length,
-    1,
-    `one exit is one report, not one per path: ${JSON.stringify(s.surface.texts())}`,
-  );
 });

@@ -769,7 +769,8 @@ async function makeLoop(tree: (signal?: AbortSignal) => Promise<unknown>): Promi
     }),
     tree,
     poll: async () => ({ items: [], control_pending: 0 }),
-    getMember: async () => ({ status: 'alive' }),
+    getMember: async () => ({ status: 'alive', heartbeat_at: null }),
+    heartbeat: async () => ({ heartbeat_at: Date.now() }),
     sendMessage: async () => ({ to: '', seq: 0, recipients: [], created_at: 0 }),
     sendControl: async () => ({ control_seq: 0, receipts: [] }),
   };

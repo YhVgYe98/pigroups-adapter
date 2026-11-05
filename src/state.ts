@@ -42,11 +42,10 @@ export type AttentionState =
   | 'idle_owed'
   | 'blocked'
   | 'silent_acking'
-  | 'recovered'
-  | 'gone';
+  | 'recovered';
 
-/** The six states a `recovered{of}` may name. `gone` is never in `of` (it is a claim, not a state to recover from). */
-export type RecoverableAttentionState = Exclude<AttentionState, 'recovered' | 'gone'>;
+/** The five states a `recovered{of}` may name (§5.1). */
+export type RecoverableAttentionState = Exclude<AttentionState, 'recovered'>;
 
 export interface AttentionTool {
   name: string;
@@ -172,7 +171,7 @@ export class TelemetryTable {
    * Fold one `pg.attention` event into the table. Never injects.
    *
    * `since` arrives normalized: the loop turns `0` into the arrival moment before it
-   * checks freshness and folds the claim, so the ordering here and that check agree.
+   * folds the claim, so the table and the event agree on when it happened.
    */
   apply(event: AttentionEvent, now: number): void {
     const since = event.since;
@@ -180,27 +179,21 @@ export class TelemetryTable {
     if (event.state === 'recovered') {
       const child = this.entries.get(event.child);
       const of = event.of;
-      // §5.1: `gone` is not an `of:` value; the parser has already rejected it, so an
-      // absent `of` is the only shape left to refuse.
+      // §5.1: an absent `of` names nothing; the parser has already rejected unknown names.
       if (child === undefined || of === undefined) return;
 
       // A recovery is also a claim about a moment. A recovery older than the state it
-      // names, or older than a later `gone`, is stale and changes nothing.
+      // names is stale and changes nothing.
       const previous = child.states.get(of);
       if (previous !== undefined && since < previous.since) return;
-      const gone = child.states.get('gone');
-      if (gone !== undefined) {
-        if (since <= gone.since) return;
-        child.states.delete('gone');
-      }
       child.states.delete(of);
       if (child.states.size === 0) {
         this.entries.delete(event.child);
         return;
       }
-      // §5.1: `lastState` is what `pg_children()` names. It must point at a row that still
-      // exists: a recovery that just deleted `gone` cannot leave a live child reported gone
-      // with no `since` at all.
+      // §5.1: `lastState` is what `snapshot()` names. It must point at a row that still
+      // exists: a recovery that deletes the latest state cannot leave the child reported
+      // as that state with no `since` at all. Re-point at the newest remaining state.
       if (!child.states.has(child.lastState)) child.lastState = latestState(child.states) ?? child.lastState;
       return;
     }
@@ -222,16 +215,6 @@ export class TelemetryTable {
     // §5.1: the same state name, from the same child, is ordered by `since`. A delayed
     // event describes a world that is already over; it must not overwrite or count.
     if (prev !== undefined && since < prev.since) return;
-
-    // §5.1 "两种消失": the attention `gone` is a process exit, not a deletion. A later
-    // claim from the same child (it was respawned) replaces it; an older one is stale.
-    // Deletion still never reaches this path twice: the loop's `markGone` path keeps
-    // its own terminal set, not this table.
-    const gone = child.states.get('gone');
-    if (gone !== undefined) {
-      if (since <= gone.since) return;
-      child.states.delete('gone');
-    }
 
     // §5.1: `stalled` is a special case of `slow_turn` (one tool eating the turn). While a
     // tool is stalled the turn is slow by definition, so the second line adds nothing to
@@ -277,6 +260,15 @@ export class TelemetryTable {
     return this.entries.get(child)?.states.has(state) ?? false;
   }
 
+  /**
+   * §5.3: a child the platform reports gone is not a candidate for the 30 s recheck.
+   * Dropping the row is what stops a long-lived parent from re-fetching a dead child
+   * forever; deletion itself never becomes a state.
+   */
+  forget(child: string): void {
+    this.entries.delete(child);
+  }
+
   snapshot(): TelemetryEntry[] {
     return [...this.entries.values()].map((child) => {
       const row = child.states.get(child.lastState);
@@ -314,11 +306,8 @@ export class TelemetryTable {
       return { kind: 'silent' };
     }
 
-    const urgent = [...this.entries.values()].some(
-      (child) => child.states.get('gone')?.remindedAt === null,
-    );
     const expired = this.windowStart !== null && now - this.windowStart >= this.windowMs;
-    if (!urgent && !expired) return { kind: 'idle' };
+    if (!expired) return { kind: 'idle' };
 
     // §5.2: a summary never contains `idle_owed`, either alone or beside something the
     // parent can act on. `blocked` and `silent_acking` do belong here.
@@ -337,11 +326,6 @@ export class TelemetryTable {
     for (const line of reportable) {
       for (const state of line.states) state.remindedAt = now;
     }
-    for (const line of reportable) {
-      // §5.2: a disappearance is reported once; the whole child row goes with it. The
-      // claim is not terminal, though: a later event from the same child opens a new row.
-      if (line.states.some((state) => state.state === 'gone')) this.entries.delete(line.child.child);
-    }
     this.windowStart = this.entries.size > 0 ? now : null;
 
     return {
@@ -356,17 +340,17 @@ export class TelemetryTable {
   }
 }
 
-function normalizeOwed(owed: string[] | undefined): string[] {
-  return [...new Set(owed ?? [])].sort();
-}
-
-/** The row entered most recently: the greatest `since` among the states that remain. */
+/** The row with the greatest `since` among the states that remain. */
 function latestState(states: Map<AttentionState, StateRow>): AttentionState | undefined {
   let latest: StateRow | undefined;
   for (const row of states.values()) {
     if (latest === undefined || row.since > latest.since) latest = row;
   }
   return latest?.state;
+}
+
+function normalizeOwed(owed: string[] | undefined): string[] {
+  return [...new Set(owed ?? [])].sort();
 }
 
 function sameOwed(left: string[] | undefined, right: string[] | undefined): boolean {
@@ -429,8 +413,6 @@ function renderState(entry: StateRow, now: number): string {
       return `silent_acking${renderConvSet(entry.owed)}${since}`;
     case 'recovered':
       return `recovered${since}`;
-    case 'gone':
-      return `gone${entry.note ? `: ${entry.note}` : ''}${since}`;
   }
 }
 

@@ -43,7 +43,7 @@ import type {
 } from './pgclient.ts';
 import type { Herdr, HerdrPane } from './herdr.ts';
 import { ABORT_IDLE_TIMEOUT_MS } from './surface.ts';
-import { platformCompatibilityWarning } from './version.ts';
+import { platformCompatibilityWarning, platformSupportsHeartbeat } from './version.ts';
 import type { DeliverKind, PiEvent, PiSurface } from './surface.ts';
 
 export interface LoopConfig {
@@ -57,8 +57,10 @@ export interface LoopConfig {
   /** PIGROUPS_DELIVERY_MAX_CHARS: code points of one message body allowed into the context. */
   deliveryMaxChars: number;
   attentionToolMs: number;
-  /** §5.1: how much newer than a claim `last_seen_at` must be before the claim is dropped. */
-  attentionStaleGraceMs?: number;
+  /** §5.4: how often this member writes its heartbeat. */
+  heartbeatMs?: number;
+  /** §5.4: how many heartbeat intervals may pass before the parent judges a child not running. */
+  heartbeatMiss?: number;
   remindWindowMs: number;
   nudgeMax: number;
   spawnCmd: string;
@@ -239,14 +241,9 @@ const ROSTER_RETRY_BACKOFF_MS = 5000;
  * `GET /v1/members/{id}` per TTL, and a dead one is closed within that TTL.
  */
 const PANE_CHECK_TTL_MS = 30_000;
-/**
- * §5.1: how much newer than a claim `last_seen_at` must be before the claim counts as
- * obsolete. Deliberately the reminder window: a claim whose child has since completed a
- * whole reminder window of life describes a world that is over. Below it, the carrier's
- * own authenticated POST is the sighting — every `pg.attention` arrives through one — and
- * dropping on that would lose every real event.
- */
-const ATTENTION_STALE_GRACE_MS = 300_000;
+/** §5.4: the member-side heartbeat cadence and the parent-side absence threshold. */
+const DEFAULT_HEARTBEAT_MS = 15_000;
+const DEFAULT_HEARTBEAT_MISS = 3;
 
 /** The state of one `pg_schedule` wake: one shot, in memory only (§7.5). */
 interface ScheduledWake {
@@ -260,8 +257,6 @@ interface RosterSnapshot {
   ids: Set<string>;
   /** The ids whose `parent_id` was this member in that same read (§5.1). */
   directChildren: Set<string>;
-  /** `last_seen_at` as of that read, for the attention freshness check (§5.1). */
-  lastSeen: Map<string, number | null>;
 }
 
 /** `pg_respawn`'s answer (§12.4): readable even when the repair was partial. */
@@ -270,6 +265,23 @@ export interface RespawnResult {
   alreadyRunning: string[];
   skipped: Array<{ id: string; reason: string }>;
   failed: Array<{ id: string; error: string }>;
+}
+
+/** One child whose repair has something to tell the parent (§12.5). */
+interface RepairFact {
+  id: string;
+  name: string;
+  heartbeatAt: number | null;
+  lastSeenAt: number | null;
+  createdAt: number | null;
+  outcome: 'restarted' | 'failed';
+  error?: string;
+  at: number;
+}
+
+interface RespawnRun {
+  result: RespawnResult;
+  repairs: RepairFact[];
 }
 
 /** What `terminate()` did: the delete, and what happened to the panes it took with it (§5.3). */
@@ -444,24 +456,29 @@ export class AdapterLoop {
   private childRosterCheckedAt = Number.NEGATIVE_INFINITY;
   /** When each child's status was last confirmed with `GET /v1/members/{id}` (§5.3). */
   private readonly paneCheckedAt = new Map<string, number>();
-  /** The `last_seen_at` returned by those pane checks, reusable by the attention freshness check. */
-  private readonly memberLastSeen = new Map<string, { at: number; value: number | null; failed?: boolean }>();
   /**
-   * Members this process already reported `gone` (§5.1). The telemetry row is deleted as soon
-   * as the reminder is delivered (§5.2), so the row cannot be the dedup key: three paths can
-   * learn the same disappearance (this adapter's delete, the member's own `exiting`, the 30 s
-   * recheck), and a failed pane close keeps the recheck alive. Without this set each path
-   * rebuilt the row and the parent got one urgent injection per path — the 6.5 hour replay
-   * with a new trigger. Memory only: what survives a restart is Q7's problem, not this one.
+   * Members this process already learned were deleted (`status:'gone'`). A queued claim
+   * from one of them describes a world that no longer exists, so it is not folded in.
+   * Deletion itself is not an attention state (§5.1): this set only suppresses late news.
    */
   private readonly goneReported = new Set<string>();
+  /** When the last heartbeat was started; a failed attempt waits a full interval too. */
+  private heartbeatAt = Number.NEGATIVE_INFINITY;
+  /** Single-flight: at most one heartbeat request is in the air at a time. */
+  private heartbeatInFlight = false;
+  /** §5.4: the heartbeat route exists from platform 0.5; `init()` reads the version. */
+  private heartbeatSupported = true;
+  private heartbeatSupportWarned = false;
+  /** Distinct heartbeat failures already warned about, so one outage is one line. */
+  private readonly heartbeatWarned = new Set<string>();
+  /** A `pg.attention{state:'gone'}` claim from this child was already reported. */
+  private readonly goneAttentionWarned = new Set<string>();
   /**
-   * Children whose exit already reached the parent through the attention `gone` channel
-   * (§5.1 path 2). `due()` deletes that row when it is delivered, so the row cannot stop a
-   * later `pg_terminate` from opening a fresh one and reporting the same exit again (§5.3).
-   * A newer state from the same child is a respawn, and removes it again.
+   * The last `[repair]` line emitted per child. The key carries both the outcome and the
+   * observation that caused it: a retry of the same observation is silent, while a child
+   * that dies again later has a new heartbeat and deserves a new line.
    */
-  private readonly attentionGoneReported = new Set<string>();
+  private readonly repairReported = new Map<string, string>();
   /**
    * Failed respawn attempts, keyed by child id (§12.4). A failed start is not "already
    * running": after `2 × freshMs` the same process may try again. The timestamp is on the
@@ -816,6 +833,9 @@ export class AdapterLoop {
     if (this.stopped) return;
     const now = this.now();
     this.fireDueSchedules(now);
+    // §5.4: the heartbeat rides the timer, not a turn. A member stuck in a long tool
+    // still tells the parent its loop is alive; a killed process stops without a word.
+    this.feedHeartbeat(now);
     this.fireDueAutoRespawn(now);
     this.evaluateAttention(now);
     this.queueReminder(now);
@@ -823,6 +843,37 @@ export class AdapterLoop {
     void this.flush().catch((err: unknown) => {
       console.warn(`[pigroups] delivery failed: ${(err as Error)?.message ?? String(err)}`);
     });
+  }
+
+  /**
+   * §5.4: at most one heartbeat per interval, and never two in flight. The request is
+   * fire-and-forget: `tick()` must keep the loop moving even while the platform is
+   * slow. A failure is warned once per distinct error, not once per attempt.
+   */
+  private feedHeartbeat(now: number): void {
+    // §5.4: the route only exists from platform 0.5; `init()` warned once already. On an
+    // older platform liveness falls back to `last_seen_at` plus the pane list.
+    if (!this.heartbeatSupported) return;
+    const selfId = this.selfId;
+    if (selfId === undefined || this.heartbeatInFlight) return;
+    const interval = this.config.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+    if (now - this.heartbeatAt < interval) return;
+    // Stamp the attempt, not the success: a failing platform must not turn every 5 s
+    // tick into another request.
+    this.heartbeatAt = now;
+    this.heartbeatInFlight = true;
+    // A platform that accepts the socket and never answers must not hold the in-flight
+    // flag forever: the bound releases it, and the next interval tries again.
+    void withTimeout(this.pg.heartbeat(selfId), ROSTER_TIMEOUT_MS)
+      .catch((err: unknown) => {
+        const reason = errorText(err);
+        if (this.heartbeatWarned.has(reason)) return;
+        this.heartbeatWarned.add(reason);
+        console.warn(`[pigroups] heartbeat failed: ${reason}; the loop keeps running`);
+      })
+      .finally(() => {
+        this.heartbeatInFlight = false;
+      });
   }
 
   /** The only send path: keeps the owed ledger honest (§2.3, §4.2). */
@@ -1201,15 +1252,14 @@ export class AdapterLoop {
   }
 
   /**
-   * `pg_terminate`: delete the subtree, close the panes it had spawned, and surface it
-   * in telemetry (§5.2).
+   * `pg_terminate`: delete the subtree and close the panes it had spawned. The
+   * platform's answer is the report; a deletion is not an attention state (§5.1).
    *
    * The platform answers with the whole cascade, not just `member`, so the debts and
    * panes of every node it deleted are handled here too: a grandchild this adapter
    * spawned (through the child) would otherwise keep its debt and its pane forever.
    */
   async terminate(member: string): Promise<TerminateResult> {
-    const known = this.telemetry.snapshot().find((entry) => entry.child === member);
     const { terminated } = await this.pg.deleteMember(member);
     // The delete has committed as of this line. Everything below is cleanup of a fact:
     try {
@@ -1225,7 +1275,7 @@ export class AdapterLoop {
     // than at the next roster read: nobody should be nudged once more for a member this
     // call just deleted. `member` is included even if the platform's answer is odd.
     for (const id of new Set([member, ...terminated])) await this.forgetDm(id);
-    for (const id of terminated) this.markGone(id, id === member ? known?.name : undefined);
+    for (const id of terminated) this.markGone(id);
     const pane_close_failed: TerminateResult['pane_close_failed'] = [];
     const pane_close_forced: TerminateResult['pane_close_forced'] = [];
     for (const id of new Set([member, ...terminated])) {
@@ -1242,27 +1292,33 @@ export class AdapterLoop {
    * `token_hash`, which logs a living child out. The recorded token is used as-is.
    *
    * Idempotence has independent guards, because neither is enough alone:
-   * - `last_seen_at` answers "is it already running?" across processes and restarts;
+   * - the heartbeat answers "is it already running?" across processes and restarts;
    * - `respawnStarting` answers "did this process already start it?" inside the window
-   *   before the child's first authenticated request updates `last_seen_at`;
+   *   before the child's first heartbeat or authenticated request;
    * - the on-disk lock answers the same question across processes;
    * - `respawnAttempts` answers "did a start fail recently?" so a failure is not
    *   permanently mistaken for a running process.
    *
    * `allowStart:false` marks the automatic path. It no longer means "wait": the
    * automatic repair asks herdr's pane list whether the child is already running, and
-   * starts it immediately when no pane carries its session file. The startup grace
-   * applies only when that list cannot be read.
+   * starts it immediately when no pane carries its session file. When that list cannot
+   * be read, no process is started at all; during the startup grace the child only gets
+   * the control.
    */
   async respawn(scope?: string, opts: { allowStart?: boolean } = {}): Promise<RespawnResult> {
+    return (await this.performRespawn(scope, opts)).result;
+  }
+
+  private async performRespawn(scope?: string, opts: { allowStart?: boolean } = {}): Promise<RespawnRun> {
     const result: RespawnResult = { restarted: [], alreadyRunning: [], skipped: [], failed: [] };
+    const repairs: RepairFact[] = [];
     // The filter needs this member's id; a direct call (a test, or a control that won
     // the race with the first poll) may arrive before `init()` has run.
     await this.ensureReady();
     const selfId = this.selfId;
     if (selfId === undefined) {
       result.skipped.push({ id: scope ?? 'self', reason: 'this adapter has no identity yet; nothing to respawn' });
-      return result;
+      return { result, repairs };
     }
     const freshMs = this.config.respawnFreshMs ?? DEFAULT_RESPAWN_FRESH_MS;
     let records = readChildRecords(this.config.adapterDir, selfId);
@@ -1273,7 +1329,7 @@ export class AdapterLoop {
           id: scope,
           reason: 'not a direct child of this member; respawn only handles children recorded by pg_spawn',
         });
-        return result;
+        return { result, repairs };
       }
       records = selected;
     }
@@ -1312,8 +1368,14 @@ export class AdapterLoop {
         continue;
       }
 
+      // §5.4: every authenticated request refreshes `last_seen_at`, so it is a superset
+      // of the heartbeat. Taking the fresher of the two matters where being wrong starts
+      // a second process on one identity: an old heartbeat must not override a newer
+      // sighting, and on a pre-0.5 platform the heartbeat is absent altogether.
+      const heartbeatAt = typeof detail.heartbeat_at === 'number' ? detail.heartbeat_at : null;
       const lastSeen = typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null;
-      const fresh = lastSeen !== null && this.now() - lastSeen < freshMs;
+      const livenessAt = Math.max(heartbeatAt ?? 0, lastSeen ?? 0) || null;
+      const fresh = livenessAt !== null && this.now() - livenessAt < freshMs;
       if (fresh) {
         try {
           await this.sendRespawnControl(id);
@@ -1335,18 +1397,15 @@ export class AdapterLoop {
 
       // §12.4/C: `pane list` is the fact that separates "not started" from "just
       // started". A pane whose agent runs this child's session file is the child;
-      // notify it, never start a second process. When herdr answered and no pane
-      // matches, there is nothing to wait for, so the startup grace does not apply.
-      // Only an unreadable pane list falls back to the time-based grace.
-      let paneRunning = false;
-      let herdrUnavailable = false;
+      // notify it, never start a second process. `null` means herdr could not ask, and
+      // an unknown answer is never evidence that the child is absent.
+      let panes: HerdrPane[] | null;
       try {
-        const panes = await this.herdr.listPanes();
-        paneRunning = panes.some((pane) => pane.agent_session?.value === sessionFile);
+        panes = await this.herdr.listPanes();
       } catch {
-        herdrUnavailable = true;
+        panes = null;
       }
-      if (paneRunning) {
+      if (panes !== null && panes.some((pane) => pane.agent_session?.value === sessionFile)) {
         try {
           await this.sendRespawnControl(id);
           result.alreadyRunning.push(id);
@@ -1355,28 +1414,38 @@ export class AdapterLoop {
         }
         continue;
       }
-      if (herdrUnavailable && opts.allowStart === false) {
-        const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
-        const graceEndsAt = this.startedAt + graceMs;
-        if (this.now() < graceEndsAt) {
-          // §12.5 fallback: the control waits in the child's queue and is acted on
-          // after that child has authenticated; it is also what a fresh child gets.
-          try {
-            await this.sendRespawnControl(id);
-            result.skipped.push({
-              id,
-              reason:
-                `startup grace period (${graceMs} ms): herdr could not list panes, ` +
-                'not starting a process yet; pg_respawn starts it now',
-            });
-            // The automatic path retries once the grace is over; tick() drives it.
-            this.autoRespawnDueAt = graceEndsAt;
-            this.autoRespawnDone = false;
-          } catch (err) {
-            result.failed.push({ id, error: respawnError(err) });
+      if (panes === null) {
+        if (opts.allowStart === false) {
+          const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
+          const graceEndsAt = this.startedAt + graceMs;
+          if (this.now() < graceEndsAt) {
+            // §12.5 fallback: the control waits in the child's queue and is acted on
+            // after that child has authenticated; it is also what a fresh child gets.
+            try {
+              await this.sendRespawnControl(id);
+              result.skipped.push({
+                id,
+                reason:
+                  `startup grace period (${graceMs} ms): herdr could not list panes, ` +
+                  'not starting a process yet; pg_respawn starts it now',
+              });
+              // The automatic path retries once the grace is over; tick() drives it.
+              this.autoRespawnDueAt = graceEndsAt;
+              this.autoRespawnDone = false;
+            } catch (err) {
+              result.failed.push({ id, error: respawnError(err) });
+            }
+            continue;
           }
-          continue;
         }
+        // Never start a process on an unknown answer, not even for an explicit
+        // `pg_respawn` or after the startup grace: a second process on one identity is
+        // the exact mistake this check exists to prevent.
+        result.skipped.push({
+          id,
+          reason: 'herdr could not list panes; not starting a process while the answer is unknown',
+        });
+        continue;
       }
 
       const failedAt = this.respawnAttempts.get(id);
@@ -1424,13 +1493,33 @@ export class AdapterLoop {
         await this.sendRespawnControl(id);
         this.respawnAttempts.delete(id);
         result.restarted.push(id);
+        repairs.push({
+          id,
+          name: record.name,
+          heartbeatAt,
+          lastSeenAt: lastSeen,
+          createdAt: typeof detail.created_at === 'number' ? detail.created_at : null,
+          outcome: 'restarted',
+          at: this.now(),
+        });
       } catch (err) {
         // A spawn can fail after the pane exists (the session never authenticates, or
         // the recursive control cannot be sent). Close it before reporting the failed
         // attempt: leaving it behind is the shell a dead child's parent must not keep.
+        const error = respawnError(err);
         if (pane !== undefined) await this.closePane(id);
         this.respawnAttempts.set(id, this.now());
-        result.failed.push({ id, error: respawnError(err) });
+        result.failed.push({ id, error });
+        repairs.push({
+          id,
+          name: record.name,
+          heartbeatAt,
+          lastSeenAt: lastSeen,
+          createdAt: typeof detail.created_at === 'number' ? detail.created_at : null,
+          outcome: 'failed',
+          error,
+          at: this.now(),
+        });
       } finally {
         this.respawnStarting.delete(id);
         // Always remove our own lock: success, failure and a thrown close all end the
@@ -1439,7 +1528,7 @@ export class AdapterLoop {
         removeRespawnLock(this.config.adapterDir, id);
       }
     }
-    return result;
+    return { result, repairs };
   }
 
   /**
@@ -1520,8 +1609,33 @@ export class AdapterLoop {
 
   /** A control or startup repair is a background job: the loop must keep handling abort/terminate. */
   private runRespawnInBackground(scope?: string, opts: { allowStart?: boolean } = {}): void {
-    void this.respawn(scope, opts)
-      .then((result) => {
+    this.runRespawnJobs([() => this.performRespawn(scope, opts)]);
+  }
+
+  /**
+   * One cascade is one repair pass. The children are repaired in the order the pass
+   * found them, one `performRespawn` after another - the same ordering guarantee the
+   * startup path gives by looping over the records instead of starting them at once.
+   */
+  private runRepairPassInBackground(ids: string[]): void {
+    this.runRespawnJobs(ids.map((id) => () => this.performRespawn(id)));
+  }
+
+  private runRespawnJobs(jobs: Array<() => Promise<RespawnRun>>): void {
+    void (async () => {
+      const result: RespawnResult = { restarted: [], alreadyRunning: [], skipped: [], failed: [] };
+      const repairs: RepairFact[] = [];
+      for (const job of jobs) {
+        const run = await job();
+        result.restarted.push(...run.result.restarted);
+        result.alreadyRunning.push(...run.result.alreadyRunning);
+        result.skipped.push(...run.result.skipped);
+        result.failed.push(...run.result.failed);
+        repairs.push(...run.repairs);
+      }
+      return { result, repairs };
+    })()
+      .then(({ result, repairs }) => {
         // §12.5/F8: a skip in the background is invisible unless it is logged. Dedup per
         // process: startup runs on every session start, and a tombstone must not fill the log.
         for (const skipped of result.skipped) {
@@ -1533,10 +1647,41 @@ export class AdapterLoop {
         for (const failed of result.failed) {
           console.warn(`[pigroups] respawn of ${failed.id} failed: ${failed.error}`);
         }
+        this.reportRepairs(repairs);
       })
       .catch((err: unknown) => {
         console.warn(`[pigroups] respawn failed: ${respawnError(err)}`);
       });
+  }
+
+  /**
+   * §12.5: a repair the model cannot see is a repair that did not communicate. One
+   * line per child per death; a retry of the same observation is already in the
+   * conversation, so it does not repeat, but a child that dies again later has a new
+   * heartbeat and is news. The line carries both halves the parent needs: the observed
+   * fact and what this process did about it.
+   */
+  private reportRepairs(repairs: RepairFact[]): void {
+    if (this.stopped) return;
+    for (const repair of repairs) {
+      const outcome = repair.outcome === 'restarted' ? 'restarted' : `failed:${repair.error ?? 'unknown error'}`;
+      // The observation is part of the key: `heartbeat_at`/`last_seen_at` move when the
+      // child really dies again, while a retry sees exactly the same values.
+      const observation = `${repair.heartbeatAt ?? 'null'}\u0000${repair.lastSeenAt ?? 'null'}`;
+      const key = `${outcome}\u0000${observation}`;
+      if (this.repairReported.get(repair.id) === key) continue;
+      this.repairReported.set(repair.id, key);
+      const since = repair.heartbeatAt ?? repair.lastSeenAt ?? repair.createdAt;
+      const sinceText = since === null ? 'unknown' : formatLocalMinute(since);
+      const end =
+        repair.outcome === 'restarted'
+          ? `restarted ${formatLocalMinute(repair.at).slice(11)}`
+          : `restart failed: ${repair.error ?? 'unknown error'}`;
+      this.enqueue({
+        text: `[repair] ${repair.id} (${repair.name}) was not running (no heartbeat since ${sinceText}); ${end}`,
+        kind: 'nudge',
+      });
+    }
   }
 
   /**
@@ -1563,13 +1708,15 @@ export class AdapterLoop {
     const sessionFile = readSessionFileForMember(this.config.adapterDir, member);
 
     // `listPanes()` is promised not to throw, but a fake or an older implementation may;
-    // a committed delete must not fail here.
-    let listed: HerdrPane[] = [];
+    // a committed delete must not fail here. `null` means "could not ask": there is
+    // nothing to close and that is not a close failure.
+    let listed: HerdrPane[] | null = null;
     try {
       listed = await this.herdr.listPanes();
     } catch (err) {
       console.warn(`[pigroups] could not list herdr panes for ${member}: ${(err as Error)?.message ?? String(err)}`);
     }
+    if (listed === null) return { failures: [], forced: [] };
 
     const targets = new Set<string>();
     if (sessionFile !== undefined) {
@@ -1606,8 +1753,8 @@ export class AdapterLoop {
 
   /** The name this adapter knows for a member, for the session-file-less fallback. */
   private memberName(member: string): string | undefined {
-    // The child record is the label `spawnMember` actually passed to herdr. Prefer it:
-    // `markGone()` may already have put an entry in telemetry whose name is the id.
+    // The child record is the label `spawnMember` actually passed to herdr. Prefer it;
+    // telemetry may only know the id.
     if (this.selfId !== undefined) {
       const record = readChildRecords(this.config.adapterDir, this.selfId).find((entry) => entry.childId === member);
       if (record !== undefined) return record.name;
@@ -1639,8 +1786,9 @@ export class AdapterLoop {
   }
 
   /**
-   * Confirm every child the adapter knows from disk or telemetry is still alive, and close
-   * the panes of the ones that are not (§5.3, §5.1 path 3).
+   * Confirm every child the adapter knows from disk or telemetry is still alive, close
+   * the panes of the ones the platform says are deleted (§5.3), and judge a recorded
+   * child's liveness by heartbeat plus panes (§5.4).
    *
    * `terminate()` only sees deletes this adapter issued. A grandparent deleting this
    * adapter's direct child is a legal `DELETE` that never reaches this process; the
@@ -1650,20 +1798,31 @@ export class AdapterLoop {
    * against. Ask about each member directly; only an explicit `status:'gone'` closes a
    * pane, so a failed read keeps everything.
    *
+   * Death is two observations, never a message (§5.1/§5.4): the child's freshest
+   * liveness timestamp (heartbeat on 0.5, `last_seen_at` on older platforms) is absent
+   * past `PIGROUPS_HEARTBEAT_MISS` intervals, and `pane list` has no pane running its
+   * session file. An unreadable pane list is not the second observation. The judgement
+   * itself never deletes a member, reissues a token or closes a pane; it only lets the
+   * repair path start the process.
+   *
    * Telemetry contributes the children this member did not spawn or record (a child
-   * created by an ancestor), whose `error` state has no other way of leaving the table
-   * (§5.1: `error` cannot self-clear).
+   * created by an ancestor), whose `error` state has no other way of leaving the table.
    */
   private async reconcileMembers(): Promise<void> {
-    const candidates = new Set<string>();
-    if (this.selfId !== undefined) {
-      for (const record of readChildRecords(this.config.adapterDir, this.selfId)) candidates.add(record.childId);
-    }
-    for (const entry of this.telemetry.snapshot()) {
-      if (!entry.states.some((state) => state.state === 'gone')) candidates.add(entry.child);
-    }
+    const records =
+      this.selfId === undefined ? [] : readChildRecords(this.config.adapterDir, this.selfId);
+    const recorded = new Map(records.map((record) => [record.childId, record]));
+    const candidates = new Set<string>(recorded.keys());
+    for (const entry of this.telemetry.snapshot()) candidates.add(entry.child);
     if (candidates.size === 0) return;
     const now = this.now();
+    const heartbeatMs = this.config.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+    const heartbeatMiss = this.config.heartbeatMiss ?? DEFAULT_HEARTBEAT_MISS;
+    const missingAfterMs = heartbeatMs * heartbeatMiss;
+    // One pane list answers the whole pass. `undefined` means "not asked yet", `null`
+    // means "herdr could not answer"; the second is not evidence of absence.
+    let panes: HerdrPane[] | null | undefined;
+    const dead: string[] = [];
     for (const member of candidates) {
       const checkedAt = this.paneCheckedAt.get(member);
       if (checkedAt !== undefined && now >= checkedAt && now - checkedAt < PANE_CHECK_TTL_MS) continue;
@@ -1676,12 +1835,8 @@ export class AdapterLoop {
         // Bounded like the roster read: a platform that does not answer must not turn
         // the poll/settle path into an unbounded wait.
         const detail = await withTimeout(this.pg.getMember(member), ROSTER_TIMEOUT_MS);
-        this.memberLastSeen.set(member, {
-          at: this.now(),
-          value: typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null,
-        });
         if (detail.status === 'gone') {
-          this.markGone(member, detail.name);
+          this.markGone(member);
           const outcome = await this.closePane(member);
           for (const failure of outcome.failures) {
             console.warn(`[pigroups] could not close pane ${failure.pane} of gone member ${member}: ${failure.error}`);
@@ -1689,14 +1844,53 @@ export class AdapterLoop {
           for (const forced of outcome.forced) {
             console.warn(`[pigroups] closed pane ${forced.pane} of gone member ${member} while its agent was still running`);
           }
+          // The row only existed to keep a telemetry-only child in this recheck. Forget
+          // it after closePane: the name fallback still needs it to find the last pane
+          // when the child has no session record. Once the platform says gone, keeping
+          // it would ask about a dead child forever.
+          this.telemetry.forget(member);
           continue;
         }
-      } catch {
-        // Unreachable platform, 404, our own 410: keep the pane and ask again later —
-        // one bounded recheck per TTL, not one per poll.
-        // A wrong close removes the shell of a living child; a late close loses nothing.
+
+        const record = recorded.get(member);
+        if (record === undefined || record.intent === 'terminated' || this.config.autoRespawn !== true) continue;
+        // The fresher of the two: `last_seen_at` is refreshed by every authenticated
+        // request, so on a pre-0.5 platform with no heartbeat it is the fallback. An old
+        // heartbeat must not overrule a newer sighting.
+        const heartbeatAt = typeof detail.heartbeat_at === 'number' ? detail.heartbeat_at : null;
+        const lastSeen = typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null;
+        const livenessAt = Math.max(heartbeatAt ?? 0, lastSeen ?? 0) || null;
+        if (livenessAt !== null && now - livenessAt <= missingAfterMs) continue;
+        // No session file means no pane can be matched to it; that is not confirmation
+        // of absence, and the repair could not reopen it without guessing a path.
+        const sessionFile = readSessionFileForMember(this.config.adapterDir, member);
+        if (sessionFile === undefined) continue;
+        if (panes === undefined) {
+          try {
+            panes = await this.herdr.listPanes();
+          } catch {
+            panes = null;
+          }
+        }
+        // A question herdr could not answer is not evidence of death: never start a
+        // process when the answer is unknown.
+        if (panes === null) continue;
+        // A live pane means the process is there and merely quiet; starting another
+        // would split its cursor. Only both observations together are a death sentence.
+        if (panes.some((pane) => pane.agent_session?.value === sessionFile)) continue;
+        dead.push(member);
+      } catch (err) {
+        // A 404 is the platform's other way of saying the member is gone; drop the
+        // telemetry row like the explicit `status:'gone'` branch above.
+        if (err instanceof PgError && err.status === 404) this.telemetry.forget(member);
+        // Unreachable platform, our own 410: keep the pane and ask again later — one
+        // bounded recheck per TTL, not one per poll. A wrong close removes the shell of
+        // a living child; a late close loses nothing.
       }
     }
+    // One cascade is one repair pass. Starting every dead child at once would open a
+    // pane and a pi process per child in the same instant.
+    if (dead.length > 0) this.runRepairPassInBackground(dead);
   }
 
   // ---- startup -----------------------------------------------------------
@@ -1716,10 +1910,22 @@ export class AdapterLoop {
     // §8: after the platform answers, a major.minor outside the supported list is
     // one warning, not a refusal. A platform that cannot be reached never gets here;
     // the loop's unreachability reporting owns that case.
-    if (!this.compatibilityChecked && typeof who.server?.version === 'string') {
-      this.compatibilityChecked = true;
-      const warning = platformCompatibilityWarning(who.server.version);
-      if (warning !== undefined) console.warn(warning);
+    if (typeof who.server?.version === 'string') {
+      if (!this.compatibilityChecked) {
+        this.compatibilityChecked = true;
+        const warning = platformCompatibilityWarning(who.server.version);
+        if (warning !== undefined) console.warn(warning);
+      }
+      // §5.4: heartbeat is a platform 0.5 feature. On 0.4 the death judgement falls
+      // back to `last_seen_at` plus the pane list, exactly as it did before.
+      this.heartbeatSupported = platformSupportsHeartbeat(who.server.version);
+      if (!this.heartbeatSupported && !this.heartbeatSupportWarned) {
+        this.heartbeatSupportWarned = true;
+        console.warn(
+          `[pigroups] platform ${who.server.version} does not support heartbeats ` +
+            '(the heartbeat route needs platform 0.5); liveness falls back to last_seen_at and the pane list',
+        );
+      }
     }
     this.selfId = who.member.id;
     this.selfName = who.member.name;
@@ -2234,98 +2440,39 @@ export class AdapterLoop {
   }
 
   /**
-   * §5.1: every path to "this child is gone" writes the same row, so the parent cannot
-   * tell them apart and none of them can leave a stale state behind. A member this process
-   * already reported gone is left alone: the row is deleted once the reminder is delivered,
-   * so re-applying would count a second event for the same disappearance (and, with a pane
-   * that could not be closed, once per recheck interval for as long as the process lives).
+   * §5.1: a deletion is an identity fact, not an attention state. Nothing is written to
+   * the telemetry table here; the set only stops a queued claim from a member this
+   * process already knows is deleted from describing a world that no longer exists.
    */
-  private markGone(member: string, name?: string): void {
-    if (this.goneReported.has(member)) return;
-    // §5.1/§5.3: the same exit already reached the parent through the child's own `gone`
-    // claim. `due()` deleted that row when it was delivered, so opening a fresh one here
-    // would report one disappearance twice; the deletion is still marked as reported.
-    if (this.attentionGoneReported.has(member)) {
-      this.goneReported.add(member);
-      return;
-    }
-    const known = this.telemetry.snapshot().find((entry) => entry.child === member);
+  private markGone(member: string): void {
     this.goneReported.add(member);
-    const now = this.now();
-    this.telemetry.apply(
-      { child: member, name: name ?? known?.name ?? member, state: 'gone', since: now },
-      now,
-    );
-  }
-
-  /**
-   * §5.1: is this claim already obsolete? The child has to have been seen *substantially*
-   * after the claim — `last_seen_at - since > grace` — for it to describe a world that is
-   * over. A sighting a little newer proves nothing: the platform refreshes
-   * `last_seen_at` on every authenticated request, and every `pg.attention` is one, so the
-   * claim's own carrier is always a little newer than the `since` it computed before it.
-   *
-   * A cached value is reused only when it is itself newer than the claim (and inside its
-   * TTL); an older cached value cannot rule out a newer login. A cached *failure* is an
-   * answer too: a platform outage must not charge every queued claim the request bound
-   * again on the serial control path.
-   *
-   * A failed lookup applies the claim anyway: losing a real "it died" because the
-   * platform blinked is worse than keeping a stale one.
-   */
-  private async attentionIsStale(child: string, state: AttentionState, since: number): Promise<boolean> {
-    const now = this.now();
-    const grace = this.config.attentionStaleGraceMs ?? ATTENTION_STALE_GRACE_MS;
-    let lastSeen: number | null | undefined;
-
-    const checked = this.memberLastSeen.get(child);
-    if (checked !== undefined && now >= checked.at && now - checked.at < PANE_CHECK_TTL_MS) {
-      if (checked.failed === true) return false;
-      if (checked.value !== null && checked.value > since) lastSeen = checked.value;
-    }
-    if (lastSeen === undefined && this.roster !== undefined && now >= this.roster.at && now - this.roster.at < ROSTER_TTL_MS) {
-      const seen = this.roster.lastSeen.get(child);
-      if (seen !== undefined && seen !== null && seen > since) lastSeen = seen;
-    }
-    if (lastSeen === undefined) {
-      try {
-        const detail = await withTimeout(this.pg.getMember(child), ROSTER_TIMEOUT_MS);
-        lastSeen = typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null;
-        this.memberLastSeen.set(child, { at: this.now(), value: lastSeen });
-      } catch (err) {
-        const reason = (err as Error)?.message ?? String(err);
-        // §5.1: cache the failure for the TTL an answer gets. The claim is applied either
-        // way (fail-open); asking again for the next queued claim would only pay the
-        // request bound again on the serial control path while the platform is down.
-        this.memberLastSeen.set(child, { at: this.now(), value: null, failed: true });
-        console.warn(
-          `[pigroups] could not check last_seen_at before applying ${state} from ${child}: ${reason}; applying it anyway`,
-        );
-        return false;
-      }
-    }
-
-    if (lastSeen !== null && lastSeen - since > grace) {
-      console.warn(
-        `[pigroups] dropped stale pg.attention from ${child}: ${state} since ${formatLocalMinute(since)} ` +
-          `is more than ${grace} ms older than last_seen_at ${formatLocalMinute(lastSeen)}`,
-      );
-      return true;
-    }
-    return false;
   }
 
   private async applyAttention(payload: Record<string, unknown>): Promise<void> {
     const child = typeof payload.child === 'string' ? payload.child : '';
+    if (!child) return;
+    // §5.1 (0.13.0): an older child still announces its exit as `gone`. It is no longer
+    // a state; the observation that replaces it is the heartbeat (§5.4). Drop the claim
+    // with one warning so the sender's version is visible, never fold it into the table.
+    if (payload.state === 'gone') {
+      // One line per child, like the heartbeat warnings: a child that keeps re-sending
+      // the old claim must not fill the log.
+      if (!this.goneAttentionWarned.has(child)) {
+        this.goneAttentionWarned.add(child);
+        console.warn(
+          `[pigroups] dropped pg.attention state 'gone' from ${child}: gone is no longer an attention state ` +
+            '(0.13.0); liveness is observed from the heartbeat, not from a message',
+        );
+      }
+      return;
+    }
     const state = attentionStateOf(payload.state);
-    if (!child || !state) return;
-    // A member this process has already reported deleted cannot report anything new. Its
-    // remaining events were queued before it died; folding one in would replace the `gone`
-    // row with `error` and make the parent wait a whole recheck before learning it is dead.
-    // Attention `gone` is not added here: a process exit is not a deletion (§5.1).
+    if (!state) return;
+    // A member this process already knows is deleted cannot report anything new. Its
+    // remaining events were queued before it died; folding one in would describe a world
+    // that is already over.
     if (this.goneReported.has(child)) return;
-    // §5.1: `since <= 0` means "now". Normalized here, once: the table does the same, but
-    // the freshness check runs first and a 0 would read as 1970 and drop the claim.
+    // §5.1: `since <= 0` means "now".
     const since = typeof payload.since === 'number' && payload.since > 0 ? payload.since : this.now();
     const event: AttentionEvent = {
       child,
@@ -2339,23 +2486,7 @@ export class AdapterLoop {
       busy_ms: typeof payload.busy_ms === 'number' ? payload.busy_ms : undefined,
       last: isLastRound(payload.last) ? payload.last : undefined,
     };
-    // §5.1: a `recovered` is edge-triggered — nothing resends it — so dropping one would
-    // pin the state it clears forever. The table already orders by `since`, which keeps a
-    // stale recovery from cutting a state that is newer than its claim.
-    if (state !== 'recovered' && (await this.attentionIsStale(child, state, since))) return;
-    // §5.1/§5.3: the freshness read awaits the platform, and a `pg_terminate` can land in
-    // that window. The deletion's own `gone` row is newer evidence than this queued claim;
-    // applying it now would replace the exit with a state that is already over.
-    if (this.goneReported.has(child)) return;
     this.telemetry.apply(event, this.now());
-    // §5.1 path 2 + §5.3: remember that this exit already reached the parent, so the same
-    // disappearance through the deletion path is not reported a second time. Any other
-    // state from the same child is a respawn and withdraws that claim.
-    if (state === 'gone') {
-      if (this.telemetry.has(child, 'gone')) this.attentionGoneReported.add(child);
-    } else {
-      this.attentionGoneReported.delete(child);
-    }
   }
 
   // ---- delivery bookkeeping ---------------------------------------------
@@ -2537,18 +2668,15 @@ export class AdapterLoop {
       if (!Array.isArray(nodes)) return this.rejectRoster();
       const ids = new Set<string>();
       const directChildren = new Set<string>();
-      const lastSeen = new Map<string, number | null>();
       for (const node of nodes) {
         const id = (node as { id?: unknown } | null | undefined)?.id;
         if (typeof id !== 'string' || id === '') return this.rejectRoster();
         ids.add(id);
         const parentId = (node as { parent_id?: unknown } | null | undefined)?.parent_id;
         if (this.selfId !== undefined && parentId === this.selfId) directChildren.add(id);
-        const seen = (node as { last_seen_at?: unknown } | null | undefined)?.last_seen_at;
-        lastSeen.set(id, typeof seen === 'number' ? seen : null);
       }
       if (this.selfId === undefined || !ids.has(this.selfId)) return this.rejectRoster();
-      this.roster = { at: now, ids, directChildren, lastSeen };
+      this.roster = { at: now, ids, directChildren };
       this.rosterRetryAt = 0;
       return this.roster;
     } catch {
@@ -2988,16 +3116,15 @@ function attentionStateOf(value: unknown): AttentionState | undefined {
     value === 'idle_owed' ||
     value === 'blocked' ||
     value === 'silent_acking' ||
-    value === 'recovered' ||
-    value === 'gone'
+    value === 'recovered'
     ? value
     : undefined;
 }
 
-/** `of:` names one of the six states; `gone` is terminal and never appears there (§6). */
+/** `of:` names one of the five recoverable states; `recovered` and old `gone` do not (§6). */
 function recoverableAttentionStateOf(value: unknown): RecoverableAttentionState | undefined {
   const state = attentionStateOf(value);
-  return state === undefined || state === 'recovered' || state === 'gone' ? undefined : state;
+  return state === undefined || state === 'recovered' ? undefined : state;
 }
 
 function isAttentionTool(value: unknown): value is AttentionTool {

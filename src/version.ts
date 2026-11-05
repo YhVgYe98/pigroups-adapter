@@ -11,7 +11,7 @@
  * change that needs no adapter change is answered by republishing the same numeric
  * version with new metadata, not by moving the number.
  */
-export const ADAPTER_VERSION = '0.12.0+platform.0.4.0';
+export const ADAPTER_VERSION = '0.13.0+platform.0.5.0';
 
 /**
  * Platform major.minor versions this adapter is built for. The list itself is a
@@ -23,7 +23,20 @@ export const ADAPTER_VERSION = '0.12.0+platform.0.4.0';
  * older than 0.3.0 reports no id and ignores `PIGROUPS_PLATFORM_ID`, so `startOrg`
  * refuses it. Extend this list when a new platform minor has been exercised.
  */
-export const SUPPORTED_PLATFORM_MINORS = ['0.3', '0.4'];
+export const SUPPORTED_PLATFORM_MINORS = ['0.3', '0.4', '0.5'];
+
+/**
+ * §5.4: `PUT /v1/members/{id}/heartbeat` exists from platform 0.5. This is a gate,
+ * not a warning: asking a 0.4 platform for the route would only produce a failure.
+ * An unreadable version cannot prove 0.5, so it is treated as unsupported; the
+ * parent's death judgement falls back to `last_seen_at` plus the pane list.
+ */
+export function platformSupportsHeartbeat(version: string): boolean {
+  const minor = platformMajorMinor(version);
+  if (minor === undefined) return false;
+  const [major, rest] = minor.split('.').map(Number);
+  return major > 0 || rest >= 5;
+}
 
 /** The major.minor part of a platform version, or `undefined` when it cannot be read. */
 export function platformMajorMinor(version: string): string | undefined {

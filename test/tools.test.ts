@@ -370,9 +370,10 @@ test("pg_terminate falls back to the member's name when no session file exists, 
   assert.ok(!s.herdr.closed.includes('pane-other'), `the live other member keeps its pane (${other.id})`);
 });
 
-// §5.3: `pane list` is how a pane is found, not a fact the delete depends on. If it fails,
-// nothing can be identified; the committed delete still succeeds and reports no close.
-test('a failed pane list does not fail the committed delete', async (t) => {
+// §5.3: `pane list` is how a pane is found, not a fact the delete depends on. If herdr
+// cannot answer (null), nothing can be identified; the committed delete still succeeds
+// and reports no close failure.
+test('an unreadable pane list does not fail the committed delete', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
 

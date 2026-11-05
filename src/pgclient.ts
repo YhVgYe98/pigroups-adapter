@@ -15,6 +15,8 @@ export interface MemberRecord {
   child_count: number;
   groups: { to: string; owner: string }[];
   last_seen_at: number | null;
+  /** The last time this member fed its heartbeat (§9.1); `null` means it never did. */
+  heartbeat_at: number | null;
   created_at: number;
 }
 
@@ -65,6 +67,7 @@ export interface TreeMember {
   parent_id: string | null;
   child_count: number;
   last_seen_at: number | null;
+  heartbeat_at: number | null;
 }
 
 export interface MessageRecord {
@@ -232,6 +235,13 @@ export class PgClient {
 
   async getMember(id: string): Promise<MemberRecord> {
     return this.request<MemberRecord>('GET', `/v1/members/${encodeURIComponent(id)}`);
+  }
+
+  /** §5.4/平台 §9.1: only the member itself may write its heartbeat. */
+  async heartbeat(id: string): Promise<{ heartbeat_at: number }> {
+    return this.request<{ heartbeat_at: number }>('PUT', `/v1/members/${encodeURIComponent(id)}/heartbeat`, {
+      body: {},
+    });
   }
 
   async deleteMember(id: string): Promise<{ terminated: string[] }> {

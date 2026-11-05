@@ -55,10 +55,10 @@ export interface Herdr {
   read(pane: string, lines: number): Promise<string>;
   /**
    * Every pane in the workspace, with the session file herdr attributes to its agent.
-   * A list that cannot be read is an empty list plus a warning, never a throw: it is
-   * cleanup for a delete that has already committed.
+   * A list that cannot be read is `null` plus a warning, never a throw: `null` means
+   * "could not ask", which is not the same fact as "no pane".
    */
-  listPanes(): Promise<HerdrPane[]>;
+  listPanes(): Promise<HerdrPane[] | null>;
   /**
    * Close the pane. A pane that is already gone is a success, not an error. The result
    * says whether the close was forced past a still-working agent.
@@ -179,20 +179,21 @@ export class HerdrCli implements Herdr {
     return typeof read?.text === 'string' ? read.text : '';
   }
 
-  async listPanes(): Promise<HerdrPane[]> {
+  async listPanes(): Promise<HerdrPane[] | null> {
     let envelope: Record<string, unknown> | null;
     try {
       envelope = await this.run(['pane', 'list']);
     } catch (err) {
-      // `pg_terminate` has already committed the delete by the time this runs. A herdr
-      // that cannot answer must leave the caller its mapped pane, not an exception.
+      // `null` keeps the call non-throwing (cleanup for a committed delete relies on
+      // that) while still telling a caller that herdr could not answer. A caller that
+      // treats this as "no pane" would start a second process on a living identity.
       console.warn(`[pigroups] could not read herdr pane list: ${(err as Error)?.message ?? String(err)}`);
-      return [];
+      return null;
     }
     const panes = envelope?.panes;
     if (!Array.isArray(panes)) {
       console.warn('[pigroups] herdr pane list returned no pane array');
-      return [];
+      return null;
     }
     const result: HerdrPane[] = [];
     for (const item of panes) {

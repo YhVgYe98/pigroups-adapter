@@ -130,20 +130,20 @@ esac
   }
 });
 
-test('listPanes() returns no panes instead of throwing when herdr cannot answer', async () => {
+test('listPanes() answers null instead of throwing when herdr cannot answer', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pigroups-herdr-'));
   const originalWarn = console.warn;
   const warnings: string[] = [];
   try {
-    // Reading the list is how a committed delete finds its panes. A broken answer must
-    // leave the caller with an empty list, not an exception that turns a successful
-    // DELETE into a tool error.
+    // Reading the list is how a committed delete finds its panes, and how a parent tells
+    // "no pane" from "could not ask". A broken answer is null, not an empty list and not
+    // an exception that turns a successful DELETE into a tool error.
     const command = await fakeHerdr(dir, 'not json at all', 0);
     console.warn = (...args: unknown[]): void => {
       warnings.push(args.map(String).join(' '));
     };
     const herdr = new HerdrCli({ spawnCmd: 'pi', command });
-    assert.deepEqual(await herdr.listPanes(), []);
+    assert.equal(await herdr.listPanes(), null);
     assert.ok(
       warnings.some((warning) => /pane list/i.test(warning)),
       `a failed read must be visible in the log, got ${JSON.stringify(warnings)}`,

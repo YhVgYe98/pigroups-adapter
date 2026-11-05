@@ -20,7 +20,6 @@ import { PiSurfaceAdapter } from './surface.ts';
 import type { PiContext, PiLike, PiToolDefinition } from './surface.ts';
 import { ADAPTER_VERSION } from './version.ts';
 
-const EXIT_REPORT_TIMEOUT_MS = 2000;
 const INSPECT_TIMEOUT_MS = 10_000;
 
 /** The file pi loaded, not a path guessed from cwd or an install location. */
@@ -242,7 +241,8 @@ function openMemberSession(pi: PiLike, config: LoopConfig): MemberSession {
       const active = loop;
       if (!active) return;
       loop = undefined;
-      await reportExiting(pg);
+      // §8.6: nothing is sent. The heartbeat stops with the loop, and the parent's
+      // liveness check observes the absence (§5.4).
       await active.stop();
     },
   };
@@ -296,9 +296,11 @@ export function loopConfig(url: string, token: string, env: NodeJS.ProcessEnv = 
     pollWait: envInt(env, 'PIGROUPS_POLL_WAIT', 25),
     deliveryMaxChars: envInt(env, 'PIGROUPS_DELIVERY_MAX_CHARS', DEFAULT_DELIVERY_MAX_CHARS),
     attentionToolMs: envInt(env, 'PIGROUPS_ATTENTION_TOOL_MS', 300_000),
-    // §5.1: a claim has to be this much older than the child's last authenticated
-    // request before the parent treats it as obsolete. The reminder window by default.
-    attentionStaleGraceMs: envInt(env, 'PIGROUPS_ATTENTION_STALE_GRACE_MS', 300_000),
+    // §5.4: the member feeds its heartbeat on the timer; the parent judges absence by
+    // how many of those intervals may pass. The floor keeps a mistyped knob from either
+    // beating on every tick or treating the first interval as already missed.
+    heartbeatMs: Math.max(1_000, envInt(env, 'PIGROUPS_HEARTBEAT_MS', 15_000)),
+    heartbeatMiss: Math.max(1, envInt(env, 'PIGROUPS_HEARTBEAT_MISS', 3)),
     remindWindowMs: envInt(env, 'PIGROUPS_REMIND_WINDOW_MS', 300_000),
     nudgeMax: envInt(env, 'PIGROUPS_NUDGE_MAX', 3),
     // 概念稿 §8.1 / §13.3: the tumbling delivery window. 60 s covers two 25 s polls, so
@@ -350,38 +352,6 @@ async function recoveryVerdict(orgUrl: string, token: string, memberId: string):
       return { ok: false, reason: `${err.status} ${err.code}` };
     }
     return { ok: true };
-  }
-}
-
-/**
- * §8.6: best effort, two seconds, then give up. The exit is a `gone` telemetry state on
- * the same channel as every other child-to-parent state — there is no `pg.report` any
- * more. It goes directly through PgClient because the loop is stopping and must not be
- * involved in this last send.
- */
-async function reportExiting(pg: PgClient): Promise<void> {
-  try {
-    const who = await withTimeout(pg.whoami(), EXIT_REPORT_TIMEOUT_MS);
-    const parent = who.member.parent_id;
-    if (!parent) return;
-    await withTimeout(
-      pg.sendControl({
-        to: parent,
-        id: randomUUID(),
-        cmd: 'pg.attention',
-        payload: {
-          v: 1,
-          child: who.member.id,
-          name: who.member.name,
-          state: 'gone',
-          since: Date.now(),
-          note: 'exiting',
-        },
-      }),
-      EXIT_REPORT_TIMEOUT_MS,
-    );
-  } catch {
-    // Nothing to do: the process is going away either way.
   }
 }
 
@@ -669,20 +639,4 @@ function buildTools(
 
 function text(value: string): { content: { type: 'text'; text: string }[]; details?: unknown } {
   return { content: [{ type: 'text', text: value }] };
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('timeout')), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
 }

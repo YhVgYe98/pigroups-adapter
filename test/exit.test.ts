@@ -1,6 +1,6 @@
-// §8.6: the exit path sends `pg.attention{state:'gone', note:'exiting'}` directly through
-// PgClient, with a two-second bound. It is the same channel every other state uses; the
-// old `pg.report` command no longer exists.
+// §8.6 (0.13.0): a graceful exit sends nothing. The heartbeat stops, and the parent
+// observes the absence on its next liveness check. There is no `gone` attention and no
+// `pg.report`.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import pigroupsExtension from '../src/extension.ts';
 import type { PiLike, PiToolDefinition } from '../src/surface.ts';
 
-import { bootPlatform, bootstrapRoot, createMember, poll } from './support.ts';
+import { bootPlatform, bootstrapRoot, createMember, delay, poll } from './support.ts';
 
 type Handler = (event: unknown, ctx?: unknown) => unknown;
 
@@ -47,7 +47,7 @@ function fakePi(): FakePi {
 
 const CTX = { isIdle: () => true, abort: () => undefined, shutdown: () => undefined };
 
-test('session_shutdown reports gone through pg.attention, not pg.report', async () => {
+test('session_shutdown sends no exit message: the heartbeat stopping is the signal', async () => {
   const platform = await bootPlatform();
   const adapterDir = await mkdtemp(join(tmpdir(), 'pigroups-exit-'));
   const saved = {
@@ -73,26 +73,14 @@ test('session_shutdown reports gone through pg.attention, not pg.report', async 
     await children.execute('call-1', {}, undefined, undefined, CTX);
 
     await fake.fire('session_shutdown', { reason: 'quit' }, CTX);
+    await delay(100);
 
-    let gone: Record<string, any> | undefined;
-    let reports = 0;
-    for (let i = 0; i < 50 && gone === undefined; i += 1) {
-      const polled = await poll(platform, parent.token, { wait: 1, types: 'control' });
-      for (const item of polled.items) {
-        if (item.kind !== 'control') continue;
-        if (item.cmd === 'pg.report') reports += 1;
-        if (item.cmd === 'pg.attention' && (item.payload as Record<string, unknown>)?.state === 'gone') {
-          gone = item.payload as Record<string, any>;
-        }
-      }
-    }
-
-    assert.ok(gone, 'the parent must receive the exit as pg.attention gone');
-    assert.equal(reports, 0, 'the old pg.report exit command must be gone');
-    assert.equal(gone.child, me.id, 'the exit names the member that is leaving');
-    assert.equal(gone.name, me.name, 'and its name');
-    assert.equal(gone.note, 'exiting', 'the note says why the state was entered');
-    assert.equal(typeof gone.since, 'number', 'and when');
+    const polled = await poll(platform, parent.token, { wait: 0, types: 'control' });
+    assert.equal(
+      polled.items.filter((item) => item.kind === 'control').length,
+      0,
+      `a graceful exit sends no control at all: ${JSON.stringify(polled.items)}`,
+    );
   } finally {
     await fake.fire('session_shutdown', { reason: 'quit' }).catch(() => undefined);
     await platform.stop();

@@ -105,7 +105,7 @@ export interface Res<T = any> {
 export async function call<T = any>(
   platform: Platform,
   token: string | null,
-  method: 'GET' | 'POST' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<Res<T>> {
@@ -124,7 +124,7 @@ export async function call<T = any>(
 export async function ok<T = any>(
   platform: Platform,
   token: string | null,
-  method: 'GET' | 'POST' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -273,12 +273,21 @@ export interface MemberDetail {
   child_count: number;
   groups: Array<{ to: string; owner: string }>;
   last_seen_at: number | null;
+  heartbeat_at: number | null;
   created_at: number;
 }
 
 /** `GET /v1/members/{id}`. */
 export function member(platform: Platform, token: string, id: string): Promise<MemberDetail> {
   return ok(platform, token, 'GET', `/v1/members/${id}`);
+}
+
+export function heartbeat(
+  platform: Platform,
+  token: string,
+  id: string,
+): Promise<{ heartbeat_at: number }> {
+  return ok(platform, token, 'PUT', `/v1/members/${id}/heartbeat`, {});
 }
 
 /** `GET /v1/whoami`. */
@@ -529,11 +538,13 @@ export class FakeHerdr implements Herdr {
   readonly reads: Array<{ pane: string; lines: number }> = [];
   /** What `pane list` reports. A test fills this to describe panes it did not spawn. */
   readonly paneList: HerdrPane[] = [];
+  /** How many times `listPanes` was asked, so a test can assert one pass reads it once. */
+  listPanesCalls = 0;
   /** The same list under its earlier name; it is pane output, never an adapter cache. */
   get panes(): HerdrPane[] {
     return this.paneList;
   }
-  /** When set, `listPanes` rejects: the `pane list` command itself failed. */
+  /** When set, `listPanes` answers null: the `pane list` command itself failed. */
   failListPanes: Error | undefined;
   paneText = '';
   /** When set, `waitReady` rejects after recording the call (the timeout path). */
@@ -591,8 +602,9 @@ export class FakeHerdr implements Herdr {
     return this.paneText;
   }
 
-  async listPanes(): Promise<HerdrPane[]> {
-    if (this.failListPanes !== undefined) throw this.failListPanes;
+  async listPanes(): Promise<HerdrPane[] | null> {
+    this.listPanesCalls += 1;
+    if (this.failListPanes !== undefined) return null;
     return [...this.paneList];
   }
 
