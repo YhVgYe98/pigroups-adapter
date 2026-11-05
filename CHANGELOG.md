@@ -1,3 +1,37 @@
+## v0.13.0（2026-11-05，与平台 0.5.0 配套）
+
+次版本：**删掉一个状态，改用观测判死。** 与平台 0.5.0 的心跳配套。
+
+### `gone` 不再是注意力状态
+
+`pg.attention{state:'gone'}` 是一条"**这个进程退出了**"的**消息**，而"它还在不在"是一个**能直接观测的事实**
+（平台 `heartbeat_at`，0.5.0）。用消息传事实的代价我们已经付过：晚到 7 小时 50 分、被自己的 respawn 推翻
+（3 秒后）、重复上报、丢了不重发。删掉它之后，`state.ts` 里为它写的那些补偿（终态守卫、可覆盖规则、
+报一次就删行、`attentionGoneReported`）一起退场。
+
+### 判死改用观测：心跳缺席 + pane 确认
+
+- 子成员每 `PIGROUPS_HEARTBEAT_MS`（默认 **15 s**）喂一次心跳，由 `tick()` 发，**与 turn 无关**（卡在
+  40 分钟的工具调用里照样喂）。
+- 父级在 30 秒一次的复核里读 `heartbeat_at`：缺席超过 `PIGROUPS_HEARTBEAT_MISS`（默认 **3**）个周期，
+  **再**用 `herdr pane list` 确认没有进程在跑它的 session 文件，才判定"它不在了"。
+- 优雅退出**不再发任何消息**：心跳一停，父级自然观测到。`kill -9` / OOM / 宿主重启同样有效——这正是退出
+  报告做不到的那一类。
+
+### 修复必须自报结果
+
+后台 respawn 的结果原来只进 `console.warn`，模型看不见。现在自动修复结束时会投一行：
+
+```
+[repair] m_ca707c (fw-dev) was not running (no heartbeat since 2026-11-05 01:49); restarted 09:39
+[repair] m_883dd0 (t1-lead) was not running (no heartbeat since 01:49); restart failed: <why>
+```
+
+### 删除 0.12.0 的时效宽限
+
+`PIGROUPS_ATTENTION_STALE_GRACE_MS` 及其校验逻辑删除。它挡的是"晚到的退出断言"，而那个问题随 `gone` 一起
+消失了；剩下五个状态是"它现在处于什么状态"，`since` 排序已经够用。
+
 ## v0.12.0（2026-11-05，与平台 0.4.0 配套）
 
 次版本：改的是**语义**，不是补丁——`gone` 的含义、注入文本的形状都变了。
