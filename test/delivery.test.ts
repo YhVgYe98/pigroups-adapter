@@ -6,7 +6,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { send } from './support.ts';
+import { formatLocalMinute } from '../src/format.ts';
+import { history, send } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, scenario } from './scenario.ts';
 
 test('a DM from the parent waits for its window, then arrives with the conversation id and the message seq', async (t) => {
@@ -29,6 +30,47 @@ test('a DM from the parent waits for its window, then arrives with the conversat
   assert.ok(delivery.text.includes(s.dm), `injected text must carry the conversation id, got: ${delivery.text}`);
   assert.ok(delivery.text.includes('#1'), `injected text must carry the message seq, got: ${delivery.text}`);
   assert.ok(delivery.text.includes('implement X'), 'injected text must carry the body');
+});
+
+// §3.3: a backlog delivered after a failure used to look exactly like a live message.
+// The message's own `at` travels with it, in local time and minute precision.
+test('a delivered message starts with its conversation, seq and the message local timestamp', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle(); // drain startup: no DM yet, so no windowless brief
+
+  const sent = await send(s.platform, s.parent!.token, s.me.id, 'implement X, accept Y');
+  const [record] = (await history(s.platform, s.me.token, s.dm, { limit: 1 })).items;
+  assert.ok(record, 'the platform records the message it accepted');
+
+  await s.cycle();
+  await s.timer(WINDOW);
+
+  const [delivery] = s.surface.deliveries;
+  assert.ok(delivery, 'the message is delivered');
+  assert.ok(
+    delivery.text.startsWith(
+      `[${s.dm}#${sent.seq} ${formatLocalMinute(record.created_at)}] ${s.parent!.name}: implement X, accept Y`,
+    ),
+    `the injected prefix carries the message time: ${delivery.text}`,
+  );
+});
+
+// §3.3/§5.2: the shape and the timezone of every injected stamp are pinned here, not just
+// computed with the same formatter the adapter uses. An assertion that compares against
+// `formatLocalMinute` moves with the implementation; this one names the literal shape.
+test('the injected header carries a YYYY-MM-DD HH:MM local stamp', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  await s.cycle(); // drain startup
+
+  await send(s.platform, s.parent!.token, s.me.id, 'what is the date?');
+  await s.cycle();
+  await s.timer(WINDOW);
+
+  const [delivery] = s.surface.deliveries;
+  assert.ok(delivery, 'the message is delivered');
+  assert.match(delivery.text, /^\[\S+#\d+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}\] /, `the header shape is pinned: ${delivery.text}`);
 });
 
 test('items that arrive inside one window share a single delivery, in arrival order', async (t) => {
@@ -244,7 +286,7 @@ test('a batch delivered into an aborted turn is put back and delivered again; a 
   assert.equal(s.surface.deliveries.length, 2, 'the aborted turn must hand the batch back');
   const replay = s.surface.deliveries[1].text;
   assert.ok(replay.includes('the message the abort could swallow'), replay);
-  assert.ok(replay.includes(`[${s.dm}#${sent.seq}]`), `the duplicate still carries its marker: ${replay}`);
+  assert.ok(replay.includes(`[${s.dm}#${sent.seq} `), `the duplicate still carries its marker: ${replay}`);
 
   // A clean turn end means pi kept it: nothing is re-sent.
   s.surface.settle();

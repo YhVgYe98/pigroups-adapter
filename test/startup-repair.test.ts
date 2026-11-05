@@ -191,11 +191,11 @@ test('a second session_tree does not inject the startup brief twice', async (t) 
 
   await h.fake.fire('session_start', { reason: 'startup' }, first);
   await waitFor(
-    () => h.fake.sent.some((message) => message.content.includes(`[${h.dm}#${queued.seq}]`)),
+    () => h.fake.sent.some((message) => message.content.includes(`[${h.dm}#${queued.seq} `)),
     'the startup brief to be injected',
   );
   const briefs = (): number =>
-    h.fake.sent.filter((message) => message.content.includes(`[${h.dm}#${queued.seq}]`)).length;
+    h.fake.sent.filter((message) => message.content.includes(`[${h.dm}#${queued.seq} `)).length;
   assert.equal(briefs(), 1, 'precondition: the brief reached the context once');
 
   await h.fake.fire('session_tree', { newLeafId: 'leaf-2', oldLeafId: 'leaf-1' }, second);

@@ -73,7 +73,7 @@ test('the startup brief does not create a debt of its own', async (t) => {
   await quiet(300);
 
   assert.ok(
-    s.surface.deliveries[0].text.includes(`[${s.dm}#${brief.seq}]`),
+    s.surface.deliveries[0].text.includes(`[${s.dm}#${brief.seq} `),
     `precondition: the first injection is the brief, got ${s.surface.deliveries[0].text}`,
   );
   assert.deepEqual(

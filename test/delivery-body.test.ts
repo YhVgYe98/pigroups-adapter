@@ -6,7 +6,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { send, waitFor } from './support.ts';
+import { formatLocalMinute } from '../src/format.ts';
+import { history, send, waitFor } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, scenario, type Scenario } from './scenario.ts';
 
 const MARKER = /\[truncated: first (\d+) of (\d+) chars; pg_read (\S+) before=(\d+) limit=(\d+)\]/;
@@ -104,6 +105,26 @@ test('the startup brief is capped by the same rule and names its pg_read call', 
   assert.equal(Number(marker[5]), 1);
 });
 
+// §3.3/§8.4: the startup brief is a message too. It carries its own creation time,
+// not the time the member happened to start.
+test('the startup brief carries its own local timestamp', async (t) => {
+  const s = await scenario();
+  t.after(() => s.close());
+  const sent = await send(s.platform, s.parent!.token, s.me.id, 'the task book');
+  const [record] = (await history(s.platform, s.me.token, s.dm, { limit: 1 })).items;
+  assert.ok(record, 'the platform records the brief it accepted');
+  assert.equal(record.seq, sent.seq);
+
+  s.loop.start();
+  await waitFor(() => s.surface.deliveries.length > 0, 'the startup brief to be injected');
+
+  const text = s.surface.texts()[0];
+  assert.ok(
+    text.startsWith(`[${s.dm}#${record.seq} ${formatLocalMinute(record.created_at)}] ${s.parent!.name}: the task book`),
+    `the brief carries the message time: ${text}`,
+  );
+});
+
 test('199- and 200-character messages are delivered with no marker', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
@@ -117,7 +138,7 @@ test('199- and 200-character messages are delivered with no marker', async (t) =
   await s.timer(WINDOW);
   const firstText = s.surface.texts()[0];
   assert.ok(firstText.includes(justUnder), `the 199-character body must arrive whole: ${firstText}`);
-  assert.ok(firstText.includes(`#${first.seq}]`), 'the first delivery is the 199-character message');
+  assert.ok(firstText.includes(`#${first.seq} `), 'the first delivery is the 199-character message');
   assert.doesNotMatch(firstText, MARKER, '199 characters is under the cap and must not be marked');
 
   const second = await send(s.platform, s.parent!.token, s.me.id, exactly);
@@ -125,7 +146,7 @@ test('199- and 200-character messages are delivered with no marker', async (t) =
   await s.timer(WINDOW);
   const secondText = s.surface.texts()[1];
   assert.ok(secondText.includes(exactly), `the 200-character body must arrive whole: ${secondText}`);
-  assert.ok(secondText.includes(`#${second.seq}]`), 'the second delivery is the 200-character message');
+  assert.ok(secondText.includes(`#${second.seq} `), 'the second delivery is the 200-character message');
   assert.doesNotMatch(secondText, MARKER, '200 characters is exactly at the old boundary but under the new cap');
 });
 

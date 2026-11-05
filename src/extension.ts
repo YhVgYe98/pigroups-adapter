@@ -296,6 +296,9 @@ export function loopConfig(url: string, token: string, env: NodeJS.ProcessEnv = 
     pollWait: envInt(env, 'PIGROUPS_POLL_WAIT', 25),
     deliveryMaxChars: envInt(env, 'PIGROUPS_DELIVERY_MAX_CHARS', DEFAULT_DELIVERY_MAX_CHARS),
     attentionToolMs: envInt(env, 'PIGROUPS_ATTENTION_TOOL_MS', 300_000),
+    // §5.1: a claim has to be this much older than the child's last authenticated
+    // request before the parent treats it as obsolete. The reminder window by default.
+    attentionStaleGraceMs: envInt(env, 'PIGROUPS_ATTENTION_STALE_GRACE_MS', 300_000),
     remindWindowMs: envInt(env, 'PIGROUPS_REMIND_WINDOW_MS', 300_000),
     nudgeMax: envInt(env, 'PIGROUPS_NUDGE_MAX', 3),
     // 概念稿 §8.1 / §13.3: the tumbling delivery window. 60 s covers two 25 s polls, so

@@ -12,7 +12,7 @@ import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, scenario } from './sc
 
 /** The injected text carries `[<to>#<seq>]`; count how often one message id appears. */
 function injections(text: string, dm: string, seq: number): number {
-  return text.split(`[${dm}#${seq}]`).length - 1;
+  return text.split(`[${dm}#${seq} `).length - 1;
 }
 
 test('the startup brief and the polled copy of the same message are injected once', async (t) => {

@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { formatLocalMinute } from './format.ts';
 import { Journal } from './journal.ts';
 import { OwedLedger } from './owed.ts';
 import {
@@ -56,6 +57,8 @@ export interface LoopConfig {
   /** PIGROUPS_DELIVERY_MAX_CHARS: code points of one message body allowed into the context. */
   deliveryMaxChars: number;
   attentionToolMs: number;
+  /** §5.1: how much newer than a claim `last_seen_at` must be before the claim is dropped. */
+  attentionStaleGraceMs?: number;
   remindWindowMs: number;
   nudgeMax: number;
   spawnCmd: string;
@@ -236,6 +239,14 @@ const ROSTER_RETRY_BACKOFF_MS = 5000;
  * `GET /v1/members/{id}` per TTL, and a dead one is closed within that TTL.
  */
 const PANE_CHECK_TTL_MS = 30_000;
+/**
+ * §5.1: how much newer than a claim `last_seen_at` must be before the claim counts as
+ * obsolete. Deliberately the reminder window: a claim whose child has since completed a
+ * whole reminder window of life describes a world that is over. Below it, the carrier's
+ * own authenticated POST is the sighting — every `pg.attention` arrives through one — and
+ * dropping on that would lose every real event.
+ */
+const ATTENTION_STALE_GRACE_MS = 300_000;
 
 /** The state of one `pg_schedule` wake: one shot, in memory only (§7.5). */
 interface ScheduledWake {
@@ -249,6 +260,8 @@ interface RosterSnapshot {
   ids: Set<string>;
   /** The ids whose `parent_id` was this member in that same read (§5.1). */
   directChildren: Set<string>;
+  /** `last_seen_at` as of that read, for the attention freshness check (§5.1). */
+  lastSeen: Map<string, number | null>;
 }
 
 /** `pg_respawn`'s answer (§12.4): readable even when the repair was partial. */
@@ -431,6 +444,8 @@ export class AdapterLoop {
   private childRosterCheckedAt = Number.NEGATIVE_INFINITY;
   /** When each child's status was last confirmed with `GET /v1/members/{id}` (§5.3). */
   private readonly paneCheckedAt = new Map<string, number>();
+  /** The `last_seen_at` returned by those pane checks, reusable by the attention freshness check. */
+  private readonly memberLastSeen = new Map<string, { at: number; value: number | null; failed?: boolean }>();
   /**
    * Members this process already reported `gone` (§5.1). The telemetry row is deleted as soon
    * as the reminder is delivered (§5.2), so the row cannot be the dedup key: three paths can
@@ -440,6 +455,13 @@ export class AdapterLoop {
    * with a new trigger. Memory only: what survives a restart is Q7's problem, not this one.
    */
   private readonly goneReported = new Set<string>();
+  /**
+   * Children whose exit already reached the parent through the attention `gone` channel
+   * (§5.1 path 2). `due()` deletes that row when it is delivered, so the row cannot stop a
+   * later `pg_terminate` from opening a fresh one and reporting the same exit again (§5.3).
+   * A newer state from the same child is a respawn, and removes it again.
+   */
+  private readonly attentionGoneReported = new Set<string>();
   /**
    * Failed respawn attempts, keyed by child id (§12.4). A failed start is not "already
    * running": after `2 × freshMs` the same process may try again. The timestamp is on the
@@ -1654,6 +1676,10 @@ export class AdapterLoop {
         // Bounded like the roster read: a platform that does not answer must not turn
         // the poll/settle path into an unbounded wait.
         const detail = await withTimeout(this.pg.getMember(member), ROSTER_TIMEOUT_MS);
+        this.memberLastSeen.set(member, {
+          at: this.now(),
+          value: typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null,
+        });
         if (detail.status === 'gone') {
           this.markGone(member, detail.name);
           const outcome = await this.closePane(member);
@@ -1778,7 +1804,7 @@ export class AdapterLoop {
     if (!brief || brief.sender_id !== parent) return;
     this.brief = { conv, seq: brief.seq };
     this.enqueue({
-      text: this.messageText(conv, brief.seq, brief.sender_name, brief.body),
+      text: this.messageText(conv, brief.seq, brief.created_at, brief.sender_name, brief.body),
       kind: 'message',
       // 概念稿 §8.4: the brief is the one source that does not wait for a window.
       windowless: true,
@@ -1883,7 +1909,7 @@ export class AdapterLoop {
       return;
     }
     this.enqueue({
-      text: this.messageText(item.to, item.seq, item.from_name, item.body),
+      text: this.messageText(item.to, item.seq, item.at, item.from_name, item.body),
       kind: 'message',
       journalId,
       conv: item.to,
@@ -1896,12 +1922,13 @@ export class AdapterLoop {
    * code points, and a cut body names the exact `pg_read` call that returns the rest.
    * `before=seq+1` because `/v1/messages` selects `seq < before`.
    */
-  private messageText(conv: string, seq: number, fromName: string, body: string): string {
+  private messageText(conv: string, seq: number, at: number, fromName: string, body: string): string {
     const max = Math.max(1, Math.floor(this.config.deliveryMaxChars));
     const chars = Array.from(body);
-    if (chars.length <= max) return `[${conv}#${seq}] ${fromName}: ${body}`;
+    const stamp = formatLocalMinute(at);
+    if (chars.length <= max) return `[${conv}#${seq} ${stamp}] ${fromName}: ${body}`;
     return (
-      `[${conv}#${seq}] ${fromName}: ${chars.slice(0, max).join('')}` +
+      `[${conv}#${seq} ${stamp}] ${fromName}: ${chars.slice(0, max).join('')}` +
       `…[truncated: first ${max} of ${chars.length} chars; pg_read ${conv} before=${seq + 1} limit=1]`
     );
   }
@@ -1990,7 +2017,7 @@ export class AdapterLoop {
           await this.injectIgnoredNonChild(item, payload, journalId);
           return;
         }
-        this.applyAttention(payload);
+        await this.applyAttention(payload);
         return;
 
       default:
@@ -2215,6 +2242,13 @@ export class AdapterLoop {
    */
   private markGone(member: string, name?: string): void {
     if (this.goneReported.has(member)) return;
+    // §5.1/§5.3: the same exit already reached the parent through the child's own `gone`
+    // claim. `due()` deleted that row when it was delivered, so opening a fresh one here
+    // would report one disappearance twice; the deletion is still marked as reported.
+    if (this.attentionGoneReported.has(member)) {
+      this.goneReported.add(member);
+      return;
+    }
     const known = this.telemetry.snapshot().find((entry) => entry.child === member);
     this.goneReported.add(member);
     const now = this.now();
@@ -2224,19 +2258,80 @@ export class AdapterLoop {
     );
   }
 
-  private applyAttention(payload: Record<string, unknown>): void {
+  /**
+   * §5.1: is this claim already obsolete? The child has to have been seen *substantially*
+   * after the claim — `last_seen_at - since > grace` — for it to describe a world that is
+   * over. A sighting a little newer proves nothing: the platform refreshes
+   * `last_seen_at` on every authenticated request, and every `pg.attention` is one, so the
+   * claim's own carrier is always a little newer than the `since` it computed before it.
+   *
+   * A cached value is reused only when it is itself newer than the claim (and inside its
+   * TTL); an older cached value cannot rule out a newer login. A cached *failure* is an
+   * answer too: a platform outage must not charge every queued claim the request bound
+   * again on the serial control path.
+   *
+   * A failed lookup applies the claim anyway: losing a real "it died" because the
+   * platform blinked is worse than keeping a stale one.
+   */
+  private async attentionIsStale(child: string, state: AttentionState, since: number): Promise<boolean> {
+    const now = this.now();
+    const grace = this.config.attentionStaleGraceMs ?? ATTENTION_STALE_GRACE_MS;
+    let lastSeen: number | null | undefined;
+
+    const checked = this.memberLastSeen.get(child);
+    if (checked !== undefined && now >= checked.at && now - checked.at < PANE_CHECK_TTL_MS) {
+      if (checked.failed === true) return false;
+      if (checked.value !== null && checked.value > since) lastSeen = checked.value;
+    }
+    if (lastSeen === undefined && this.roster !== undefined && now >= this.roster.at && now - this.roster.at < ROSTER_TTL_MS) {
+      const seen = this.roster.lastSeen.get(child);
+      if (seen !== undefined && seen !== null && seen > since) lastSeen = seen;
+    }
+    if (lastSeen === undefined) {
+      try {
+        const detail = await withTimeout(this.pg.getMember(child), ROSTER_TIMEOUT_MS);
+        lastSeen = typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null;
+        this.memberLastSeen.set(child, { at: this.now(), value: lastSeen });
+      } catch (err) {
+        const reason = (err as Error)?.message ?? String(err);
+        // §5.1: cache the failure for the TTL an answer gets. The claim is applied either
+        // way (fail-open); asking again for the next queued claim would only pay the
+        // request bound again on the serial control path while the platform is down.
+        this.memberLastSeen.set(child, { at: this.now(), value: null, failed: true });
+        console.warn(
+          `[pigroups] could not check last_seen_at before applying ${state} from ${child}: ${reason}; applying it anyway`,
+        );
+        return false;
+      }
+    }
+
+    if (lastSeen !== null && lastSeen - since > grace) {
+      console.warn(
+        `[pigroups] dropped stale pg.attention from ${child}: ${state} since ${formatLocalMinute(since)} ` +
+          `is more than ${grace} ms older than last_seen_at ${formatLocalMinute(lastSeen)}`,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  private async applyAttention(payload: Record<string, unknown>): Promise<void> {
     const child = typeof payload.child === 'string' ? payload.child : '';
     const state = attentionStateOf(payload.state);
     if (!child || !state) return;
-    // A member this process has already reported gone cannot report anything new. Its
+    // A member this process has already reported deleted cannot report anything new. Its
     // remaining events were queued before it died; folding one in would replace the `gone`
     // row with `error` and make the parent wait a whole recheck before learning it is dead.
+    // Attention `gone` is not added here: a process exit is not a deletion (§5.1).
     if (this.goneReported.has(child)) return;
+    // §5.1: `since <= 0` means "now". Normalized here, once: the table does the same, but
+    // the freshness check runs first and a 0 would read as 1970 and drop the claim.
+    const since = typeof payload.since === 'number' && payload.since > 0 ? payload.since : this.now();
     const event: AttentionEvent = {
       child,
       name: typeof payload.name === 'string' ? payload.name : child,
       state,
-      since: typeof payload.since === 'number' ? payload.since : this.now(),
+      since,
       of: recoverableAttentionStateOf(payload.of),
       tool: isAttentionTool(payload.tool) ? payload.tool : undefined,
       owed: Array.isArray(payload.owed) ? payload.owed.filter((c): c is string => typeof c === 'string') : undefined,
@@ -2244,10 +2339,23 @@ export class AdapterLoop {
       busy_ms: typeof payload.busy_ms === 'number' ? payload.busy_ms : undefined,
       last: isLastRound(payload.last) ? payload.last : undefined,
     };
-    // §5.1 path 2: the child said it is exiting. That is the same terminal fact as the
-    // adapter's own delete, so no later queued event may replace it.
-    if (state === 'gone') this.goneReported.add(child);
+    // §5.1: a `recovered` is edge-triggered — nothing resends it — so dropping one would
+    // pin the state it clears forever. The table already orders by `since`, which keeps a
+    // stale recovery from cutting a state that is newer than its claim.
+    if (state !== 'recovered' && (await this.attentionIsStale(child, state, since))) return;
+    // §5.1/§5.3: the freshness read awaits the platform, and a `pg_terminate` can land in
+    // that window. The deletion's own `gone` row is newer evidence than this queued claim;
+    // applying it now would replace the exit with a state that is already over.
+    if (this.goneReported.has(child)) return;
     this.telemetry.apply(event, this.now());
+    // §5.1 path 2 + §5.3: remember that this exit already reached the parent, so the same
+    // disappearance through the deletion path is not reported a second time. Any other
+    // state from the same child is a respawn and withdraws that claim.
+    if (state === 'gone') {
+      if (this.telemetry.has(child, 'gone')) this.attentionGoneReported.add(child);
+    } else {
+      this.attentionGoneReported.delete(child);
+    }
   }
 
   // ---- delivery bookkeeping ---------------------------------------------
@@ -2429,15 +2537,18 @@ export class AdapterLoop {
       if (!Array.isArray(nodes)) return this.rejectRoster();
       const ids = new Set<string>();
       const directChildren = new Set<string>();
+      const lastSeen = new Map<string, number | null>();
       for (const node of nodes) {
         const id = (node as { id?: unknown } | null | undefined)?.id;
         if (typeof id !== 'string' || id === '') return this.rejectRoster();
         ids.add(id);
         const parentId = (node as { parent_id?: unknown } | null | undefined)?.parent_id;
         if (this.selfId !== undefined && parentId === this.selfId) directChildren.add(id);
+        const seen = (node as { last_seen_at?: unknown } | null | undefined)?.last_seen_at;
+        lastSeen.set(id, typeof seen === 'number' ? seen : null);
       }
       if (this.selfId === undefined || !ids.has(this.selfId)) return this.rejectRoster();
-      this.roster = { at: now, ids, directChildren };
+      this.roster = { at: now, ids, directChildren, lastSeen };
       this.rosterRetryAt = 0;
       return this.roster;
     } catch {

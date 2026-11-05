@@ -66,3 +66,16 @@ test('PIGROUPS_RESPAWN_FRESH_MS is read from the environment', () => {
     'the freshness window and the startup grace are configurable together',
   );
 });
+
+test('PIGROUPS_ATTENTION_STALE_GRACE_MS defaults to one reminder window', () => {
+  assert.equal(
+    loopConfig('http://127.0.0.1:1', 'token', {}).attentionStaleGraceMs,
+    300_000,
+    'a claim older than a whole reminder window describes a world that is over',
+  );
+  assert.equal(
+    loopConfig('http://127.0.0.1:1', 'token', { PIGROUPS_ATTENTION_STALE_GRACE_MS: '1000' }).attentionStaleGraceMs,
+    1_000,
+    'an operator can move the grace',
+  );
+});
