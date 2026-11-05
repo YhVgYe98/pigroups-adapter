@@ -36,18 +36,28 @@ Then start `pi` and ask for an organisation:
 A session with no identity gets exactly one tool, `pg_org_start`. It finds the platform
 checkout (`platform_dir` argument, else `PIGROUPS_PLATFORM_DIR`, else `../PiGroups` next to
 this repository), starts the platform detached, bootstraps a root, writes
-`<adapter dir>/org.json`, and only then registers the ten member tools (`pg_say`, `pg_spawn`,
+`<adapter dir>/orgs/<name>/org.json`, and only then registers the ten member tools (`pg_say`, `pg_spawn`,
 `pg_members`, ...). The platform is started **by the agent**, not by hand, and it outlives the
 session: a later session with the same adapter directory reattaches through the same tool
 instead of starting a second platform.
+
+**The platform owns its port.** `pg_org_start` passes `port` as a first candidate; the platform
+binds a socket, keeps it for its lifetime, and records the port it got in
+`platforms/<platform_id>/endpoint.json` before it opens the database. An existing organisation
+starts from that recorded port, so two sessions cannot end up serving one platform on two ports.
+A candidate held by the same platform makes the new process exit `2`, and the adapter reattaches
+instead of treating it as a failure. A temporary health failure does not establish member death,
+and nothing signals a recorded pid any more; agent liveness and respawn remain adapter
+responsibilities. See §8.2 of [the adapter design](docs/设计说明.md).
 
 A member that was **handed an identity** is the other path: start pi with `PIGROUPS_URL` and
 `PIGROUPS_TOKEN` in its environment. It registers the ten member tools at startup and does not
 get `pg_org_start` at all. A child spawned by `pg_spawn` inherits both variables, so nothing
 else needs configuring for the tree below the root.
 
-`PIGROUPS_ADAPTER_DIR` (default `~/.pigroups-adapter`) holds the journal, the per-member
-state, `org.json`, and by default the platform's data directory.
+`PIGROUPS_ADAPTER_DIR` (default `~/.pi/pigroups`, or `<PI_CODING_AGENT_DIR>/pigroups`
+for a custom profile) holds the journal, per-member state, per-organisation `org.json`,
+and by default the shared platform data root.
 
 ## Clone for development
 

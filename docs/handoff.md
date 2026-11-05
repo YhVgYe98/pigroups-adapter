@@ -1,5 +1,22 @@
 # 交接文档
 
+
+> **启动协议交接补充（适配器 0.14.0 / 平台 0.6.0，已实现）**：下文是历史记录，其中"单个
+> `<adapterDir>/org.json`"、"固定端口重启"、"随机选空闲端口"、"health 不答即杀进程"等描述属于当时的行为。
+> 现在的契约见《概念稿》§7.4 与《设计说明》§8.2–8.5：
+>
+> - 平台自己 `listen` 并一直持有，端口就是单实例锁；绑定成功后、打开数据库之前写
+>   `platforms/<platform_id>/endpoint.json`（`{platform_id, port, version, pid, updated_at}`）。
+> - 适配器只给**起始候选**（`port` 参数；已有组织用 `org.json.url` 或 endpoint 的端口），
+>   每轮读 endpoint 发现实际地址，验证 `platform_id` 与正常 health 后才 bootstrap / 重接，
+>   并在端口变化后更新 `org.json.url`。
+> - 同一平台已经在服务时，新拉起的进程以退出码 `2` 退出；适配器把它当作重接信号。
+> - 适配器不再对记录的 pid 发信号；瞬时 health 失败不判成员死亡、不杀平台、不重发 token。
+>   没有 `platform_id` 的旧记录只能重接，不能重启。
+> - 端口冲突由平台判定：同平台 → 退出 2；确定是别的服务 → 前进一个端口；两次都问不到 → 拒绝启动。
+>
+> 本轮两仓都有实现与黑盒测试；没有在 live quant 组织上做真机升级验证。
+
 > 写于 2026-10-31，更新于 2026-11-01（补 §3.5 真机探针结果、§3.6 第 4 级端到端，改写 §2 / §4 / §7 / §10，补 §8 的版本与发版；同日第二轮探针把第 2 级降为部分通过，并证明第 3 级的 await；第 4 级主链路已在真机上跑通，整级仍是**部分通过**：只跑了 1 个子成员，且判据事后改过两次——两处都在 `de48904` 里，**不在**记录那次 run 的 `3919467` 里，§3.6 原先记错了，本版改正。第四、五轮留痕见 §11，第五轮审阅后的修复见 §12。**第六轮同日：修 A–D（§13），并把 A 放到真机上复跑四轮——子成员能在 5 s 内退出时成立，卡在长工具里时 `pane close` 仍会切掉活着的 agent（§3.7）。适配器单独发 `v0.2.1`，平台仍是 `0.2.0`（§8）。**第七轮同日：修 E–F（§14），把“先切断正在跑的那一轮，再收尾”写进 `sys.terminated`，并让强制关 pane 不再伪装成干净关闭；上一轮唯一失败的 `bash sleep 40` 真机复跑现在 3/3 PASS，5 s 硬上限不再是常态路径，但仍是兜底（§3.8）。适配器单独发 `v0.3.0`，平台仍是 `0.2.0`（§8）。**第八轮同日：spawn 默认改成自加载本扩展（`pi -ne -e <自身绝对路径>`），启动时对平台 major.minor 只 warn 不拒绝，适配器成为带 `pi` manifest 的包；版本 `0.4.0+platform.0.2.0`（metadata 只记录测试对象，不参与判定）。适配器单独发 `v0.4.0`，平台仍是 `0.2.0`（§8）。**第九轮同日：把 spawn 默认纠回正常 pi（`pi -e <自身绝对路径>`，去掉 `-ne`）。`pg_spawn` 先试过镜像 model/thinking/tools/exclude_tools/extensions/skills/prompt_templates，随后按老板的意见整组删掉，只留原始 `args` 透穿——不知道旗标就读 `pi --help`；适配器 103/103，版本仍是 `0.4.0+platform.0.2.0`。**第十轮同日：`args` 透传在真机上验过——只给 name+brief 的子成员是正常 pi（`pi -e <本扩展>`，无 `-ne`），`args:["--tools","read"]` 真的到 pi（内置工具只剩 `read`，它自己说跑不了 bash），两个 case 都 PASS；附带复现了 `waitReady()` 只等 `idle`、对 `done` 永远超时的既有 bug（§15）。**第十一轮同日：发版。** 版本仍是 `0.4.0+platform.0.2.0`（三处一致），`npm pack` 出 16 个文件，解包副本的 20 条相对 import 全部解析、入口能 import、pi 的 verbose banner 列出解包路径、`--mode json` 的 stderr 打出启动行（退出 0）；标签 `v0.4.0+platform.0.2.0` 打在携带证据的提交上（§8）。**第十二轮（2026-11-02）：按概念稿 v3 换掉投递核心（§16）——一条队列 + 翻滚窗口 + `deliverAs:'steer'`，`isBusy()` 闸门与“一次 settle 只投一次”整条删掉；工具面删 `pg_steer`、加 `pg_members`/`pg_schedule`；遥测与 inspect 带 last 块；两个 skill 进包。真机 A–D 全 PASS（长工具中投递、abort 后重投、名册/预约、skill 被发现），证据 `probe/logs/v3-20261101T173805Z/`；发版证据 `probe/logs/release-0.5.0-20261101T175209Z/`。适配器 `0.5.0+platform.0.2.0`，平台仍是 `0.2.0`（§8）。**第十三轮（2026-11-02）：0.6.0——根自己开组织（§2.4、§3.9）。** 无身份会话只注册 `pg_org_start`：它找平台代码、必要时 detached 起平台、bootstrap 出根、写 `<adapterDir>/org.json`，成功后补注册十个成员工具并当场启动循环；平台比根 session 活得久，下一次会话重接而不是再起一个。真机 5/5 PASS（无身份起根 → 子成员进同一平台 → 杀根后组织仍活 → 新会话重接且只有一个平台进程 → 清理干净），证据 `probe/logs/org-start-20261102T150800Z/report.md`。适配器 `0.6.0+platform.0.2.0`，平台 `210ed07` 未动（§8）。**）
 >
 > 两个人（或一个人隔几天回来）之间交接用。
@@ -662,7 +679,7 @@ close 等到了正常退出，所以按 F 的语义 `pane_close_forced` 为空�
 | `at-most-once`（取走即消费）的丢失代价 | 用 journal 缓解，但没有实测过崩溃频率下的影响 |
 | 相关性分级（`mentions_me` / `from_parent`）在真实群里够不够 | 仍未验证。第 4 级只有 1 个子成员、1 个群，样本不够；若不够，才考虑启用门控 |
 | 同一个 cwd 的两个成员会互相覆盖文件 | 平台没有文件空间；靠 spawn 时指定 cwd 约束 |
-| 平台进程由 agent 起，不归任何 session 所有 | **有意如此，也是新的运维面**（§2.4 / 设计说明 §8.4）。`pg_org_start` 起的是 detached 进程：根 session 退出、pane 关闭、适配器重启都不影响它，`session_shutdown` 明确不碰它。后果：① 跑过一次 `pg_org_start` 的机器会留下一个监听 localhost 的平台进程，没有 session 认领；② pid 会被复用，停之前必须核对 `/proc/<pid>/cmdline` 里的 `src/main.ts`（Linux 上还有 `PIGROUPS_DATA`），适配器自己就是这么做的（`looksLikePlatformProcess`，有变异测试守着）；③ 没有 systemd 或退出钩子，机器重启后进程没了，但 `org.json` 与数据目录还在，下一次 `pg_org_start` 用同一个端口 / 数据目录把它拉回来（`reattached:true`）。要停就按 `org.json` 的 pid 停，不要按端口猜 |
+| 平台进程由 agent 起，不归任何 session 所有 | **有意如此，也是新的运维面**（§2.4 / 设计说明 §8.4）。`pg_org_start` 起的是 detached 进程：根 session 退出、pane 关闭、适配器重启都不影响它，`session_shutdown` 明确不碰它。后果：① 跑过一次 `pg_org_start` 的机器会留下一个监听 localhost 的平台进程，没有 session 认领；② pid 会被复用，停之前必须核对 `/proc/<pid>/cmdline` 里的 `src/main.ts`（Linux 上还有 `PIGROUPS_DATA`），适配器当时就是这么做的（`looksLikePlatformProcess`，有变异测试守着；0.14.0 起改为不对记录的 pid 发信号，该函数已删除）；③ 没有 systemd 或退出钩子，机器重启后进程没了，但 `org.json` 与数据目录还在，下一次 `pg_org_start` 用同一个端口 / 数据目录把它拉回来（`reattached:true`）。要停就按 `org.json` 的 pid 停，不要按端口猜 |
 | `<adapterDir>/org.json` 是新状态文件 | **有意如此，且是唯一的持久记录**（设计说明 §8.3）。内容是 `{url, token, admin_token, pid, data_dir}`，目录 0700、文件 0600、先写临时文件再 rename。**它含根成员 token 与管理员 token，泄露等于把组织交出去**：不要提交、不要放进共享目录。并发调用靠同目录的 `org.lock` 串行化（死持有者或超过 120 s 视为陈旧） |
 | 人删掉 `org.json` 之后 | **不是“重置”，是“失忆”**（§7 上一行、设计说明 §8.4）。适配器失去旧平台的 pid 与端口，**不会**去杀旧进程；而默认数据目录仍是同一个 `<adapterDir>/platform-data`，所以新调用会挑一个空闲端口、起第二个进程写同一个 SQLite 库——两个 URL、一份数据，旧平台继续服务旧 token。要换组织：先停旧 pid（或先调一次 `pg_org_start` 拿回记录再停），或显式给新的 `data_dir`；只删 `org.json` 不够 |
 
