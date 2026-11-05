@@ -126,6 +126,27 @@ function freePort(): Promise<number> {
   });
 }
 
+/** An unrelated HTTP service on the seed port: it answers, but it is not PiGroups. */
+async function foreignService(): Promise<{ port: number; close(): Promise<void> }> {
+  const port = await freePort();
+  const server = createHttpServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ hello: 'not a pigroups platform' }));
+  });
+  await new Promise<void>((res, rej) => {
+    server.once('error', rej);
+    server.listen(port, '127.0.0.1', () => res());
+  });
+  return {
+    port,
+    close: () =>
+      new Promise<void>((res) => {
+        server.closeAllConnections();
+        server.close(() => res());
+      }),
+  };
+}
+
 interface OccupiedPlatform {
   port: number;
   url: string;
@@ -171,7 +192,10 @@ async function occupiedPlatform(opts: { platformId: string; answerAfterMs?: numb
       });
       return;
     }
-    json(503, { error: { code: 'starting', message: 'not ready' } });
+    // The documented starting shape: a PiGroups platform that has bound its port
+    // but is not ready yet still names itself, so a competitor can tell it apart
+    // from an unrelated service.
+    json(503, { status: 'starting', version: '0.3.0', platform_id: opts.platformId });
   });
   await new Promise<void>((res, rej) => {
     server.once('error', rej);
@@ -724,6 +748,84 @@ test('a restart passes the recorded platform id to the platform process', async 
 // B: never start a second platform for the same organisation
 // ---------------------------------------------------------------------------
 
+// 0.14.0: the adapter no longer picks a free port by binding and releasing one.
+// It hands the platform a seed and follows whatever the platform actually bound.
+test('a new organisation follows the platform past a seed port held by another service', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const dataDir = await tempDir('pigroups-orgdata-');
+  const held = await foreignService();
+  t.after(async () => {
+    await held.close();
+    await rm(adapterDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const started = await startOrg({
+    adapterDir,
+    name: 'moved',
+    dataDir,
+    platformDir: PLATFORM_DIR,
+    port: held.port,
+    healthTimeoutMs: 8000,
+  });
+
+  const actual = Number(new URL(started.url).port);
+  assert.ok(actual > held.port, `the platform moved past ${held.port} and the adapter followed to ${actual}`);
+  assert.equal(started.reattached, false, 'it is a new organisation, not a reattach');
+
+  const state = JSON.parse(await readFile(started.orgFile, 'utf8')) as { url: string; platform_id: string };
+  assert.equal(state.url, started.url, 'org.json records the address that actually answered');
+  const endpoint = JSON.parse(
+    await readFile(join(dataDir, 'platforms', state.platform_id, 'endpoint.json'), 'utf8'),
+  ) as { port: number; platform_id: string };
+  assert.equal(endpoint.platform_id, state.platform_id, 'the endpoint names the same platform');
+  assert.equal(endpoint.port, actual, 'the endpoint is where the adapter found the platform');
+});
+
+// 0.14.0: org.json.url can be stale after a port change; the platform's endpoint
+// record is the address, and the record must follow it (url and serving pid).
+test('an existing organisation follows the endpoint when org.json.url is stale', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const dataDir = await tempDir('pigroups-orgdata-');
+  t.after(async () => {
+    await cleanupOrg(adapterDir);
+    await rm(adapterDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const first = await startOrg({ adapterDir, name: 'moved-again', dataDir, platformDir: PLATFORM_DIR });
+  const stateFile = first.orgFile;
+  process.kill(first.pid, 'SIGTERM');
+  await waitUntilGone(first.url);
+  await waitUntilProcessGone(first.pid);
+
+  const saved = JSON.parse(await readFile(stateFile, 'utf8')) as {
+    url: string;
+    token: string;
+    admin_token: string;
+    pid: number;
+    data_dir: string;
+    platform_id: string;
+  };
+  // The endpoint still names the platform; org.json points at a dead port.
+  const stalePort = await freePort();
+  const staleUrl = `http://127.0.0.1:${stalePort}`;
+  assert.notEqual(stalePort, Number(new URL(saved.url).port));
+  await writeFile(stateFile, JSON.stringify({ ...saved, url: staleUrl }));
+
+  const second = await startOrg({ adapterDir, name: 'moved-again', platformDir: PLATFORM_DIR });
+  assert.equal(second.reattached, true, 'the organisation was reattached, not rebuilt');
+  assert.notEqual(second.url, staleUrl, 'the stale URL was not trusted');
+  assert.equal(new URL(second.url).port, new URL(saved.url).port, 'the endpoint port is the address');
+
+  const rewritten = JSON.parse(await readFile(stateFile, 'utf8')) as { url: string; pid: number };
+  assert.equal(rewritten.url, second.url, 'org.json follows the endpoint');
+  assert.equal(rewritten.pid, second.pid, 'org.json names the process that actually serves');
+  assert.notEqual(rewritten.pid, saved.pid, 'the dead pid was replaced');
+});
+
 // B1: a recorded port that is occupied may belong to the very platform another
 // session just brought back. Waiting for health is how a restart becomes a
 // reattach; choosing a free port would be a second platform on one database.
@@ -762,7 +864,13 @@ test('an occupied recorded port is reattached when health answers, never replace
 
   assert.equal(started.reattached, true, 'the service that won the port became the organisation again');
   assert.equal(started.url, occupied.url, 'the URL stayed the recorded one');
-  assert.equal(existsSync(join(orgDir, 'platform.log')), false, 'no platform process was started');
+  // A platform was spawned and exited as a duplicate; the serving process, not the
+  // child, is the one the record must name.
+  assert.equal(
+    (JSON.parse(await readFile(join(orgDir, 'org.json'), 'utf8')) as { pid: number }).pid,
+    999_999,
+    'the duplicate child did not replace the recorded serving pid',
+  );
 });
 
 // B1: if nothing answers health at the recorded port, there is no safe way to
@@ -804,12 +912,12 @@ test('an occupied recorded port with no health answer fails instead of starting 
     (err: Error) => {
       assert.match(err.message, new RegExp(`port ${occupied.port}`), 'the error names the occupied port');
       assert.match(err.message, /\/v1\/health/, 'the error names the answer that was missing');
-      assert.match(err.message, /second platform/i, 'the error says a second platform was refused');
-      assert.match(err.message, /600 ms|0\.6 s/, 'the error names the wait it performed');
+      assert.match(err.message, /no second process was started/i, 'the error says a second process was refused');
+      assert.match(err.message, /600 ms/, 'the error names the wait it performed');
       return true;
     },
   );
-  assert.equal(existsSync(join(orgDir, 'platform.log')), false, 'nothing was spawned, on this port or another');
+  assert.ok(existsSync(join(orgDir, 'platform.log')), 'the platform that refused to bind left its reason in the log');
   assert.equal(orgRecords(adapterDir).length, 1, 'the failed start did not write a second record');
 });
 
@@ -1032,7 +1140,7 @@ test('a missing platform checkout fails with every candidate path it tried', asy
   assert.equal(orgRecords(adapterDir).length, 0, 'a failed lookup writes no org record');
 });
 
-test('a recorded pid that is alive but is not this platform is never signalled', async (t) => {
+test('a record without a platform id is reattached or refused, never bootstrapped over', async (t) => {
   isolateEnv(t);
   const adapterDir = await tempDir('pigroups-orgstart-');
   const dataDir = await tempDir('pigroups-orgdata-');
@@ -1056,14 +1164,14 @@ test('a recorded pid that is alive but is not this platform is never signalled',
   await assert.rejects(
     startOrg({ adapterDir, platformDir: PLATFORM_DIR, name: 'stale-pid' }),
     (err: Error) => {
-      assert.match(err.message, new RegExp(String(process.pid)), 'the message names the pid it refused to kill');
-      assert.match(err.message, /still running/i);
+      assert.match(err.message, /names no platform_id/, 'the message says which fact is missing');
+      assert.match(err.message, /delete .*org\.json/, 'the message gives the way out');
       return true;
     },
   );
 
-  // If the guard were missing, this test process would have received SIGTERM and the
-  // suite would die here; reaching this line is the proof that it did not.
+  // Nothing in startOrg signals a recorded pid any more; reaching this line proves
+  // the test process was not touched, and the refusal wrote no second record.
   assert.equal(orgRecords(adapterDir).length, 1, 'the unreadable record is left for a person to inspect');
 });
 

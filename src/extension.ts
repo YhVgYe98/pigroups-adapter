@@ -93,7 +93,13 @@ export default function pigroupsExtension(pi: PiLike): void {
           type: 'object',
           properties: {
             name: { type: 'string', description: 'Name for the root member (the organisation\u2019s first name).' },
-            port: { type: 'number', description: 'Local port for the platform; a free port by default.' },
+            port: {
+              type: 'number',
+              description:
+                'First candidate port for a new platform. The platform keeps the port it bound in its own ' +
+                'endpoint record and advances past a candidate that belongs to another service, so this is ' +
+                'a starting point, not a guarantee.',
+            },
             data_dir: {
               type: 'string',
               description:

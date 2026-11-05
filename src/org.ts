@@ -16,7 +16,7 @@
  * that lets a later session reattach instead of starting a second organisation.
  */
 
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
   closeSync,
@@ -118,12 +118,11 @@ const LOCK_FILE = 'org.lock';
 const PLATFORM_ENTRY = join('src', 'main.ts');
 const HEALTH_TIMEOUT_MS = 1200;
 const START_TIMEOUT_MS = 6000;
+/** §8.2/§9: how long a start may wait for the platform to become healthy. */
+const DEFAULT_START_WAIT_MS = 30_000;
 const STOP_TIMEOUT_MS = 2000;
 const LOCK_WAIT_MS = 15_000;
 const LOCK_STALE_MS = 120_000;
-/** §8.2 d/B1: how long a recorded, occupied port may take to answer health before the start fails. */
-const DEFAULT_START_WAIT_MS = 30_000;
-const HEALTH_POLL_MS = 200;
 
 /** The adapter's own directory, independent of cwd: `src/org.ts` → repository root. */
 export function defaultAdapterRoot(): string {
@@ -289,7 +288,25 @@ async function reattachRecorded(
   orgFile: string,
   explicitDataDir?: string,
 ): Promise<OrgHandle | undefined> {
-  const health = await platformHealth(previous.url);
+  // The platform may have moved since the record was written (a restart that
+  // advanced past an occupied port). The platform's own endpoint record wins; the
+  // URL in org.json is only the fallback for a platform that has no record.
+  const endpoint =
+    previous.platform_id === undefined ? undefined : readPlatformEndpoint(resolve(previous.data_dir), previous.platform_id);
+  // A record can outlive the instance that wrote it: its port may now hold a
+  // different platform. That makes the record stale, not the organisation wrong,
+  // so fall back to the URL org.json already had and let the identity check judge
+  // that address.
+  let url = previous.url;
+  let health: PlatformHealth | undefined;
+  if (endpoint !== undefined && previous.platform_id !== undefined) {
+    const atEndpoint = await platformHealth(urlOfPort(endpoint.port));
+    if (atEndpoint !== undefined && platformIdOf(atEndpoint) === previous.platform_id) {
+      url = urlOfPort(endpoint.port);
+      health = atEndpoint;
+    }
+  }
+  if (health === undefined) health = await platformHealth(previous.url);
   if (health === undefined) return undefined;
   // One-time follow of a moved data root. It is only a candidate here: a live
   // platform is reattached first, and an unresponsive one is stopped against the
@@ -302,7 +319,7 @@ async function reattachRecorded(
     requested: undefined,
     recorded: previous.platform_id,
     health,
-    url: previous.url,
+    url,
     orgFile,
   });
   // A healthy URL does not make a wrong record right: if the record names a
@@ -311,10 +328,10 @@ async function reattachRecorded(
   assertRecordedPlatformDatabase(previous, migratedDataDir ?? resolve(previous.data_dir), orgFile);
   let root: { id: string; name: string };
   try {
-    root = await whoamiRoot(previous.url, previous.token);
+    root = await whoamiRoot(url, previous.token);
   } catch (err) {
     throw new OrgStartError(
-      `the platform at ${previous.url} (pid ${previous.pid}) answers /v1/health, but the member ` +
+      `the platform at ${url} (pid ${previous.pid}) answers /v1/health, but the member ` +
         `token in ${orgFile} was rejected (${describe(err)}). Refusing to start a second ` +
         `organisation on top of it: that would leave the old one running with no session able ` +
         `to reach it.\n` +
@@ -323,21 +340,31 @@ async function reattachRecorded(
     );
   }
   // A record written before the platform had ids gets one the first time it is
-  // seen again. Writing it now makes the next restart pin the same instance.
+  // seen again, and a platform that moved ports makes org.json follow it. Writing
+  // both now means the next start does not look at a dead address first.
   const platformId = previous.platform_id ?? platformIdOf(health);
-  if (migratedDataDir !== undefined || (previous.platform_id === undefined && platformId !== undefined)) {
+  const urlChanged = url !== previous.url;
+  const pidChanged = endpoint?.pid !== undefined && endpoint.pid !== previous.pid;
+  if (
+    migratedDataDir !== undefined ||
+    urlChanged ||
+    pidChanged ||
+    (previous.platform_id === undefined && platformId !== undefined)
+  ) {
     writeOrgState(orgFile, {
       ...previous,
+      url,
       data_dir: migratedDataDir ?? previous.data_dir,
+      ...(endpoint?.pid === undefined ? {} : { pid: endpoint.pid }),
       ...(platformId === undefined ? {} : { platform_id: platformId }),
     });
   }
   return {
     reattached: true,
-    url: previous.url,
+    url,
     token: previous.token,
     adminToken: previous.admin_token,
-    pid: previous.pid,
+    pid: endpoint?.pid ?? previous.pid,
     dataDir: migratedDataDir ?? previous.data_dir,
     orgKey: basename(dirname(orgFile)),
     orgFile,
@@ -360,9 +387,22 @@ async function startOrgLocked(
   if (previous !== undefined) {
     const reattached = await reattachRecorded(previous, adapterDir, orgFile, opts.dataDir);
     if (reattached !== undefined) return reattached;
-    // The platform process is gone (a reboot, a killed process). Keep its data dir
-    // and port so the same organisation comes back with the same URL and tokens.
-    await stopRecordedProcess(previous, orgFile);
+    // Nothing answered. Do not signal the recorded pid: a platform that is still
+    // starting, or that is briefly unreachable, is not a dead one, and killing it
+    // would turn a transient failure into an outage. The start below meets it on
+    // the platform's recorded port; it either exits as a duplicate or reports a
+    // port whose holder it cannot identify.
+    if (previous.platform_id === undefined) {
+      // A record from before platform ids cannot prove that a platform started now
+      // is the recorded one, and bootstrapping would replace that organisation's
+      // root. Reattach is the only safe move, and it just failed.
+      throw new OrgStartError(
+        `${orgFile} names no platform_id, and ${previous.url} does not answer GET /v1/health. ` +
+          `Without an id there is no way to prove a platform started now is the recorded one, and a ` +
+          `bootstrap would replace the old organisation's root. Start the recorded platform by hand, ` +
+          `or delete ${orgFile} to start a new organisation.`,
+      );
+    }
   }
 
   // The startup path must never create a platform in a directory that the record
@@ -374,49 +414,23 @@ async function startOrgLocked(
   // (a) Find the checkout only when a platform actually has to be started.
   const checkout = findPlatformDir({ platformDir: opts.platformDir, env, adapterRoot: opts.adapterRoot });
 
-  // (c) Start it: the recorded port for a restart, a free port for a new
+  // (c) Start it: the recorded port for a restart, the caller's port for a new
   // organisation; data under the adapter dir unless told otherwise; a fresh admin
   // token unless the old organisation had one (creating humans is the only use).
   //
-  // B1: once a record exists its port is part of the organisation's identity. If it
-  // is occupied, another session may have restarted this very platform there; wait
-  // for health and reattach. Choosing a random port would put a second process on
-  // the same SQLite database.
-  const recordedPort = portOf(previous?.url);
-  let port = previous !== undefined ? (recordedPort ?? opts.port) : opts.port;
-  if (port === undefined) {
-    port = await freePort();
-  } else if (!(await portIsFree(port))) {
-    if (previous !== undefined) {
-      const url = `http://127.0.0.1:${port}`;
-      const waitMs = envMs(env, 'PIGROUPS_START_WAIT_MS', DEFAULT_START_WAIT_MS);
-      if ((await waitForHealthAnswer(url, waitMs, opts.signal)) !== undefined) {
-        // The record may have been rewritten by the session that won the start race.
-        const current = readOrgState(orgFile) ?? previous;
-        const adopted = await reattachRecorded(current, adapterDir, orgFile, opts.dataDir);
-        if (adopted !== undefined) return adopted;
-      }
-      throw new OrgStartError(
-        `port ${port} is held by another process, but ${url} did not answer GET /v1/health within ` +
-          `${waitMs} ms (${waitMs / 1000} s); refusing to start a second platform on another port ` +
-          `while ${previous.data_dir} is still in use. Stop that process, or delete ${orgFile} to ` +
-          `start a new organisation.`,
-      );
-    }
-    if (opts.port !== undefined) {
-      throw new OrgStartError(
-        `port ${opts.port} is already in use; the platform was not started. ` +
-          `Pass a free port or drop the argument to let the tool choose one.`,
-      );
-    }
-    port = await freePort();
-  }
+  // This is only the *first candidate*. The platform owns the port: it prefers the
+  // port in its own endpoint record, and advances past a candidate that answers as
+  // another service. An existing organisation never probes: its candidate comes
+  // from the record. A new one with no `port` gets an ephemeral seed from
+  // `freePort()`; binding and releasing it reserves nothing, which is fine because
+  // the platform treats the seed as a candidate rather than as ownership.
+  const seedPort =
+    previous !== undefined ? (portOf(previous.url) ?? opts.port) : (opts.port ?? (await freePort()));
   // One data root per adapter directory, not one per organisation: the platform
   // makes `platforms/<platform_id>/` inside it. A new organisation therefore has to
   // name its own id, otherwise the platform reuses the only platform already there
   // and bootstrap would find that platform's root.
   const adminToken = previous?.admin_token ?? randomBytes(24).toString('base64url');
-  const url = `http://127.0.0.1:${port}`;
   const requestedPlatformId =
     previous === undefined ? generatePlatformId(dataDir, opts.platformIdSource) : previous.platform_id;
   // Each organisation logs beside its own record. The data root is shared, so a
@@ -426,7 +440,7 @@ async function startOrgLocked(
 
   const platform = launchPlatform({
     platformDir: checkout.dir,
-    port,
+    seedPort,
     dataDir,
     adminToken,
     platformId: requestedPlatformId,
@@ -436,8 +450,38 @@ async function startOrgLocked(
   let tokenError: string | undefined;
 
   try {
-    // (d) Wait bounded, then claim the root seat.
-    const health = await waitForPlatform(platform.child, url, opts.healthTimeoutMs ?? START_TIMEOUT_MS, opts.signal);
+    // (d) Wait bounded, then claim the root seat. The platform may have bound a
+    // different port than the seed, so the URL is discovered, not assumed.
+    const started = await waitForPlatform(platform.child, {
+      dataDir,
+      platformId: requestedPlatformId,
+      ...(seedPort === undefined ? {} : { candidatePort: seedPort }),
+      timeoutMs: opts.healthTimeoutMs ?? envMs(env, 'PIGROUPS_START_WAIT_MS', DEFAULT_START_WAIT_MS),
+      ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+    });
+
+    if (started.kind === 'duplicate') {
+      // Another process already serves this platform. That is the normal outcome
+      // of a restart racing its predecessor, not a failure: attach to the instance
+      // that owns the port, with the token the record already has.
+      if (previous === undefined) {
+        throw new OrgStartError(
+          `the platform for the new organisation ${requestedPlatformId} exited because that platform ` +
+            `is already bound on ${started.url}, and there is no recorded root token to attach with. ` +
+            `Delete ${orgFile} and pick a different organisation, or stop the process serving ` +
+            `${started.url}.`,
+        );
+      }
+      const adopted = await reattachRecorded({ ...previous, url: started.url }, adapterDir, orgFile, opts.dataDir);
+      if (adopted !== undefined) return adopted;
+      throw new OrgStartError(
+        `the platform reported that ${requestedPlatformId} is already served at ${started.url}, but that ` +
+          `address did not answer GET /v1/health with the recorded identity. Nothing was stopped and ` +
+          `${orgFile} was not rewritten; inspect the process holding that port (log: ${logFile}).`,
+      );
+    }
+
+    const { health, url } = started;
 
     // The platform that answered must be the instance org.json names, and a new
     // organisation must get exactly the id it asked for. This is checked before
@@ -465,6 +509,10 @@ async function startOrgLocked(
       );
     }
     const platformId = platformIdOf(health) ?? previous?.platform_id;
+    // The endpoint's pid is the process that actually holds the port. A duplicate
+    // start exits before binding, so `platform.pid` is only the fallback for a
+    // platform too old to write a record.
+    const servingPid = started.pid ?? platform.pid;
 
     if (previous !== undefined) {
       try {
@@ -473,7 +521,7 @@ async function startOrgLocked(
           url,
           token: previous.token,
           admin_token: adminToken,
-          pid: platform.pid,
+          pid: servingPid,
           data_dir: dataDir,
           ...(platformId === undefined ? {} : { platform_id: platformId }),
         };
@@ -485,7 +533,7 @@ async function startOrgLocked(
           adminToken,
           orgKey: basename(dirname(orgFile)),
           orgFile,
-          pid: platform.pid,
+          pid: servingPid,
           dataDir,
           platformDir: checkout.dir,
           root,
@@ -505,7 +553,7 @@ async function startOrgLocked(
       url,
       token: created.token,
       admin_token: adminToken,
-      pid: platform.pid,
+      pid: servingPid,
       data_dir: dataDir,
       ...(platformId === undefined ? {} : { platform_id: platformId }),
     };
@@ -517,7 +565,7 @@ async function startOrgLocked(
       adminToken,
       orgKey: basename(dirname(orgFile)),
       orgFile,
-      pid: platform.pid,
+      pid: servingPid,
       dataDir,
       platformDir: checkout.dir,
       root: { id: created.member.id, name: created.member.name },
@@ -541,10 +589,11 @@ async function startOrgLocked(
         `\nA flat ${PLATFORM_DB} in ${dataDir} could not be moved aside: ${describe(moveErr)}. ` +
         `Move it by hand before starting a 0.3.0 platform on this data root.`;
     }
-    throw new OrgStartError(
-      `${detail}${rejected}${debris}\n` +
-        `The platform process (pid ${platform.pid}) was stopped; its log may say why: ${logFile}`,
-    );
+    const disposition =
+      platform.child.exitCode === null && platform.child.signalCode === null
+        ? `The platform process (pid ${platform.pid}) was stopped; its log may say why: ${logFile}`
+        : `Nothing was left running; the platform's log may say why: ${logFile}`;
+    throw new OrgStartError(`${detail}${rejected}${debris}${logTail(logFile)}\n${disposition}`);
   }
 }
 
@@ -791,7 +840,8 @@ interface LaunchedPlatform {
  */
 function launchPlatform(opts: {
   platformDir: string;
-  port: number;
+  /** The first candidate. Absent lets the platform use its record or its own default. */
+  seedPort?: number;
   dataDir: string;
   adminToken: string;
   /** Absent only for a record written before platform ids existed. */
@@ -804,10 +854,13 @@ function launchPlatform(opts: {
   const log = openSync(opts.logFile, 'a', 0o600);
   const env: NodeJS.ProcessEnv = {
     ...opts.env,
-    PORT: String(opts.port),
     PIGROUPS_DATA: opts.dataDir,
     PIGROUPS_ADMIN_TOKEN: opts.adminToken,
   };
+  // The platform prefers the port in its own endpoint record; PORT only seeds a
+  // platform that has none. Inheriting an unrelated PORT would be a third opinion.
+  delete env.PORT;
+  if (opts.seedPort !== undefined) env.PORT = String(opts.seedPort);
   // Do not let an unrelated value inherited from the session choose a platform:
   // only the id recorded in org.json (or the fresh one for a new organisation) does.
   delete env.PIGROUPS_PLATFORM_ID;
@@ -834,38 +887,128 @@ interface PlatformHealth {
   platform_id?: string;
 }
 
+/**
+ * The platform's own record of the port it bound (`platforms/<id>/endpoint.json`).
+ * It is how a start that advanced past the seed port tells the adapter where the
+ * platform actually is. A record naming another platform is not ours.
+ */
+interface PlatformEndpoint {
+  platform_id: string;
+  port: number;
+  pid?: number;
+}
+
+function readPlatformEndpoint(dataDir: string, platformId: string): PlatformEndpoint | undefined {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(dataDir, 'platforms', platformId, 'endpoint.json'), 'utf8'));
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const record = parsed as Record<string, unknown>;
+    if (record.platform_id !== platformId) return undefined;
+    const port = record.port;
+    if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port > 65_535) return undefined;
+    return {
+      platform_id: platformId,
+      port,
+      ...(typeof record.pid === 'number' && Number.isInteger(record.pid) ? { pid: record.pid } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function describeExit(exit: { code: number | null; signal: NodeJS.Signals | null }): string {
+  if (exit.signal !== null) return `was killed by ${exit.signal}`;
+  return `exited (code ${exit.code ?? 'unknown'})`;
+}
+
+function urlOfPort(port: number): string {
+  return `http://127.0.0.1:${port}`;
+}
+
+/** The platform's exit code when another process already serves the same platform. */
+const DUPLICATE_EXIT_CODE = 2;
+
+type PlatformWait =
+  | { kind: 'ready'; url: string; health: PlatformHealth; pid?: number }
+  | { kind: 'duplicate'; url: string };
+
+/**
+ * Wait for the platform this call launched to answer, or for it to exit because
+ * another process already serves the organisation.
+ *
+ * The port is discovered, never assumed: the platform prefers its endpoint record
+ * and may advance past the seed, and the record is read before every probe so a
+ * platform that is still writing it is still found. `PIGROUPS_START_WAIT_MS` bounds
+ * the whole wait; a timeout is a report, not a reason to signal anything.
+ */
 async function waitForPlatform(
   child: ChildProcess,
-  url: string,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<PlatformHealth> {
-  let exited = child.exitCode !== null || child.signalCode !== null;
-  child.once('exit', () => {
-    exited = true;
+  opts: {
+    dataDir: string;
+    /** Absent for a record written before the platform had ids: no endpoint to read. */
+    platformId?: string;
+    candidatePort?: number;
+    timeoutMs: number;
+    signal?: AbortSignal;
+  },
+): Promise<PlatformWait> {
+  let exit: { code: number | null; signal: NodeJS.Signals | null } | null =
+    child.exitCode === null && child.signalCode === null
+      ? null
+      : { code: child.exitCode, signal: child.signalCode };
+  child.once('exit', (code, signal) => {
+    exit = { code, signal };
   });
 
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + opts.timeoutMs;
   for (;;) {
-    if (signal?.aborted === true) throw new OrgStartError('cancelled while waiting for the platform to answer');
-    if (exited) throw new OrgStartError(`the platform process at ${url} exited before answering`);
-    const health = await platformHealth(url);
-    if (health !== undefined) {
-      // Something answered at the URL, and it may not be the child we just started
-      // (an old process on the same port, a leftover from a previous run). If our
-      // child has already died, recording its pid in org.json would make the next
-      // session trust a process that does not exist.
-      if (exited || child.exitCode !== null || child.signalCode !== null) {
-        throw new OrgStartError(`the platform process at ${url} exited before answering`);
-      }
-      return health;
+    if (opts.signal?.aborted === true) throw new OrgStartError('cancelled while waiting for the platform to answer');
+
+    const endpoint =
+      opts.platformId === undefined ? undefined : readPlatformEndpoint(opts.dataDir, opts.platformId);
+    const url =
+      endpoint !== undefined
+        ? urlOfPort(endpoint.port)
+        : opts.candidatePort === undefined
+          ? undefined
+          : urlOfPort(opts.candidatePort);
+
+    if (exit !== null && exit.code !== DUPLICATE_EXIT_CODE) {
+      throw new OrgStartError(`the platform process ${describeExit(exit)} before answering`);
     }
+    const duplicate = exit !== null && exit.code === DUPLICATE_EXIT_CODE;
+
+    if (url !== undefined) {
+      const health = await platformHealth(url);
+      if (health !== undefined) {
+        // The child may have lost the port to an older instance after it answered;
+        // recording a dead pid would make the next session trust it.
+        if (duplicate) return { kind: 'duplicate', url };
+        if (exit !== null) {
+          throw new OrgStartError(`the platform process at ${url} ${describeExit(exit)} before answering`);
+        }
+        return { kind: 'ready', url, health, ...(endpoint?.pid === undefined ? {} : { pid: endpoint.pid }) };
+      }
+    }
+
     if (Date.now() >= deadline) {
-      throw new OrgStartError(`the platform at ${url} did not answer GET /v1/health within ${timeoutMs} ms`);
+      if (duplicate) {
+        throw new OrgStartError(
+          `the platform exited because this organisation is already served elsewhere, but ` +
+            (url === undefined ? 'no endpoint record says where' : `${url} did not answer GET /v1/health`) +
+            ` within ${opts.timeoutMs} ms. Nothing was stopped and no second process was started; ` +
+            `inspect the process holding the port.`,
+        );
+      }
+      throw new OrgStartError(
+        `the platform did not answer GET /v1/health within ${opts.timeoutMs} ms` +
+          (url === undefined ? '' : ` at ${url}`),
+      );
     }
     await sleep(50);
   }
 }
+
 
 /** Health is the platform's own word. A 404 from some other service is not a platform. */
 async function platformHealth(url: string): Promise<PlatformHealth | undefined> {
@@ -883,23 +1026,6 @@ async function platformHealth(url: string): Promise<PlatformHealth | undefined> 
     };
   } catch {
     return undefined;
-  }
-}
-
-/** B1: poll `GET /v1/health` until it answers or the bounded wait expires. */
-async function waitForHealthAnswer(
-  url: string,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<PlatformHealth | undefined> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (signal?.aborted === true) throw new OrgStartError('cancelled while waiting for the platform to answer');
-    const health = await platformHealth(url);
-    if (health !== undefined) return health;
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) return undefined;
-    await sleep(Math.min(HEALTH_POLL_MS, remaining));
   }
 }
 
@@ -969,37 +1095,6 @@ async function whoamiRoot(url: string, token: string): Promise<{ id: string; nam
   return { id: who.member.id, name: who.member.name };
 }
 
-/**
- * A recorded platform that does not answer health must not be replaced blindly:
- * starting a second process on the same SQLite data dir while the first is still
- * alive can corrupt it. Only a process we can identify as our platform (or a pid
- * that is already gone) is safe to clear.
- */
-async function stopRecordedProcess(previous: OrgState, orgFile: string): Promise<void> {
-  if (previous.pid <= 0 || !processExists(previous.pid)) return;
-  if (!looksLikePlatformProcess(previous.pid, previous.data_dir, previous.platform_id)) {
-    throw new OrgStartError(
-      `${orgFile} records pid ${previous.pid}, which is still running, but ${previous.url} does not ` +
-        `answer /v1/health. Refusing to start a second platform on ${previous.data_dir}; ` +
-        `stop that process first, or delete ${orgFile} to start a new organisation.`,
-    );
-  }
-  try {
-    process.kill(previous.pid, 'SIGTERM');
-  } catch (err) {
-    throw new OrgStartError(`could not stop the unresponsive platform pid ${previous.pid}: ${describe(err)}`);
-  }
-  const deadline = Date.now() + STOP_TIMEOUT_MS;
-  while (processExists(previous.pid) && Date.now() < deadline) await sleep(50);
-  if (processExists(previous.pid)) {
-    try {
-      process.kill(previous.pid, 'SIGKILL');
-    } catch {
-      // Already gone between the check and the kill.
-    }
-  }
-}
-
 async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<void>((resolveExit) => child.once('exit', () => resolveExit()));
@@ -1018,61 +1113,17 @@ async function stopChild(child: ChildProcess): Promise<void> {
   }
 }
 
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-/**
- * Cross-check a recorded pid before signalling it: a recycled pid must never be
- * killed. Linux exposes the argv in /proc; elsewhere `ps` is the portable fallback.
- * An unreadable answer means "not proven", and the caller refuses to proceed.
- */
-function looksLikePlatformProcess(pid: number, dataDir: string, platformId?: string): boolean {
-  let commandLine = '';
-  try {
-    commandLine = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').join(' ');
-  } catch {
-    try {
-      commandLine = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 2000 });
-    } catch {
-      return false;
-    }
-  }
-  if (!commandLine.includes('src/main.ts')) return false;
-  // On Linux the environment pins the process to the recorded data dir, which a
-  // recycled pid (or another org on this machine) would not match.
-  try {
-    const entries = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0');
-    if (!entries.includes(`PIGROUPS_DATA=${dataDir}`)) return false;
-    if (platformId === undefined) return true;
-    // Every organisation in one data root has the same PIGROUPS_DATA. When the
-    // process also names itself, the id is what proves it is this organisation and
-    // not a sibling whose pid happened to be reused. A pre-id process has no entry.
-    const prefix = 'PIGROUPS_PLATFORM_ID=';
-    const recorded = entries.find((entry) => entry.startsWith(prefix));
-    return recorded === undefined || recorded.slice(prefix.length) === platformId;
-  } catch {
-    return true;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Small shared helpers
 // ---------------------------------------------------------------------------
 
-function portIsFree(port: number): Promise<boolean> {
-  return new Promise((resolveFree) => {
-    const server = createServer();
-    server.once('error', () => resolveFree(false));
-    server.listen(port, '127.0.0.1', () => server.close(() => resolveFree(true)));
-  });
-}
-
+/**
+ * A seed for a new organisation. Binding port 0 and releasing it reserves
+ * nothing — the platform treats it as a candidate and advances if it was taken
+ * meanwhile. It exists only to spread new organisations out instead of making
+ * them all start their search at the platform's default port.
+ */
 function freePort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
     const server = createServer();
@@ -1090,6 +1141,13 @@ function freePort(): Promise<number> {
   });
 }
 
+function envMs(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 function portOf(url: string | undefined): number | undefined {
   if (url === undefined) return undefined;
   try {
@@ -1101,11 +1159,22 @@ function portOf(url: string | undefined): number | undefined {
   }
 }
 
-function envMs(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
-  const raw = env[name];
-  if (raw === undefined || raw.trim() === '') return fallback;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : fallback;
+/**
+ * The last few lines of the platform's own log. A platform that refuses to bind
+ * writes the reason there; repeating it in the adapter's error is the difference
+ * between "code 1" and an instruction a person can act on.
+ */
+function logTail(logFile: string, lines = 6): string {
+  try {
+    const all = readFileSync(logFile, 'utf8')
+      .split('\n')
+      .map((line) => line.trimEnd())
+      .filter((line) => line !== '');
+    if (all.length === 0) return '';
+    return `\nThe platform said:\n${all.slice(-lines).map((line) => `  ${line}`).join('\n')}`;
+  } catch {
+    return '';
+  }
 }
 
 function describe(err: unknown): string {
