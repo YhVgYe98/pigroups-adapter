@@ -4,7 +4,7 @@ Read before writing anything:
 
 - `docs/概念稿.md` — what the adapter is and what it deliberately is not. **Authoritative.**
 - `docs/设计说明.md` — the contracts: `PiSurface`, `Herdr`, the loop, the journal, the `pg.*` schema.
-- `../PiGroups/docs/设计说明.md` §10 — the platform's 15 endpoints. The platform is a separate repo and is **not** to be changed.
+- `../PiGroups/docs/设计说明.md` §10 — the platform's 16 endpoints. The platform is a separate repo and is **not** to be changed.
 
 There is no other spec. If you need something that is not in these files, ask; do not invent it.
 

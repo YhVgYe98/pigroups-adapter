@@ -68,8 +68,8 @@ description: 怎么带一个 PiGroups 团队——写一份不需要追问的简
 - 派完活以后，用 `pg_members('billing')` 找回它，而不是让上级替你记 id。
 - 名册里的 `relation` 是能力边界：`child` 才能 `pg_abort` / `pg_terminate`；`sibling`、`peer`
   能说话，不能指挥。`last_seen_at` 是**最近一次鉴权的时间，不是活着**。
-- 名册只列**活着**的成员。孩子进程是否还在，由适配器按心跳与 pane 判断；真要重开用
-  `pg_respawn`（§6），不要 `pg_terminate` 再 `pg_spawn`。
+- 名册只列**活着**的成员。孩子进程是否还在，由适配器按 **pane** 判断（心跳只是事实，不判死）；真要重开用
+  `pg_respawn()`（§6），不要 `pg_terminate` 再 `pg_spawn`。
 
 ## 3. 读遥测
 
@@ -86,7 +86,8 @@ description: 怎么带一个 PiGroups 团队——写一份不需要追问的简
 | `recovered` | 刚离开某个状态，`of` 说明是哪一个 | 不用动作，知道它好了即可 |
 
 `gone` **不是**遥测状态（0.13.0 起删掉）：成员被删除后直接从名册和遥测里消失，不会再出现一行 `gone`。
-不要等一个 `gone` 来告诉你它没了——它没了的证据是心跳缺席加 pane 里没有那个 session。
+不要等一个 `gone` 来告诉你它没了——它没了的证据是 pane 里没有那个 session；
+心跳缺席只说明“喂心跳的循环没在跑”，不证明进程退出。
 
 `pg_children()` 的每一行还带 `last`：最后一条助手文本（截断）和最后一个工具调用
 （名字、参数预览、`ok`）。`ok: false` 是 pi 报的错误；`ok: true` **不等于**任务成功。
@@ -117,10 +118,10 @@ description: 怎么带一个 PiGroups 团队——写一份不需要追问的简
 
 - 这个分支确定不再需要（人走了、方向废了、重复派生了一个）。
 - 不要为了"重启它"而 terminate + spawn：成员保留自己的 session 和上下文，重启会丢；
-  先试 abort / say。要重开一个**身份还在、进程没了**的孩子，用 `pg_respawn(scope?)`：
-  它按 `children/<id>.json` 里的 session 重开、沿用原 token（绝不重发）；已经在跑的只发一条
-  `pg.respawn`，让它去修自己的子树。`pg_terminate` 删的是身份，`pg_spawn` 造的是新身份，
-  两者都不是"重启"。
+  先试 abort / say。要重开一个**身份还在、进程没了**的孩子，用 `pg_respawn()`：它没有参数，范围就是你的子树；
+  它按 `children/<id>.json` 里的 session 重开、沿用原 token（绝不重发）；pane 里已经在跑的只发一条
+  `pg.respawn`，让它去修自己的子树；pane 列表读不到时不启动。`pg_terminate` 删的是身份，
+  `pg_spawn` 造的是新身份，两者都不是"重启"。
 - 删之前想一下：级联会带走它的所有下级，以及它们欠你的回复。
 
 ## 7. 什么时候自己干

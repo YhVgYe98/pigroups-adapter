@@ -1,3 +1,27 @@
+## v0.15.0（2026-11-06，与平台 0.7.0 配套）
+
+### 启动自动、运行时手动；pane 是唯一“在跑”证据
+
+- **respawn 决策改成 pane-only。** 一个 pane 的 `agent_session.value` 等于子成员的 session 文件，
+  就是“已在跑”，只发 `pg.respawn`；没有就启动；`pane list` 返回 `null` 时只发控制、不启动。
+  删除 `PIGROUPS_RESPAWN_FRESH_MS`、`last_seen_at`/心跳启动门、`2 × freshMs` 失败冷却、
+  周期 `reconcileMembers` repair 与四个 `[repair]` 周期测试。
+- **启动自动、运行时手动。** `init()` 第一次 `whoami` 成功后，自动 pass 先发控制，在
+  `connectedAt + PIGROUPS_RESPAWN_GRACE_MS`（默认 30 s）内不启动；到期做**一次** pane 检查。
+  显式 `pg_respawn()` 立即执行，无参数，范围 = 调用者子树；`pg.respawn` 控制在接收者 settle 内也延后。
+- **不再自动判死。** 心跳只作为事实；`PgUnavailable` 永不因 20 次停止；30 秒扫描只关平台 `gone` 的 pane。
+- **root-only 启动。** 记录路径不再调 `startOrg`/`recoveryVerdict`，不退回 `pg_org_start`；用
+  `saved.orgUrl` 或本地 `recordedOrgUrl` 起 loop。只有 `parentId === null` 的记录有 `ensurePlatform`，
+  由 loop 在 `PgUnavailable` 时调 `startOrg({mayBootstrap:false})`、更新 `PgClient.url`、重置 init。
+  `parentId` 缺失是未知，不是 root；whoami 只能降级；`init` 不会把 child 记录改写成 root。
+- **一个成员一个消费者。** `consumers/<sha1(token)>.json` = `{pid, pid_start, at}`；在注册工具前获取，
+  第二个 pane 不注册工具/不 poll/不心跳；`/reload` 同 pid+start 用新 `at` 接管，旧 release 不会误删；
+  释放放在 `stop()` 最后并 `try/finally`。
+- **平台 0.7.0 契约。** endpoint 首启 claim、候选发布、无 `.start.lock`；空根显式 id；适配器
+  `SUPPORTED_PLATFORM_MINORS` 增加 `0.7`；版本 `0.15.0+platform.0.7.0`。
+- 测试：287 条全绿；新增租约（4）、启动 settle、control vs manual、shell pane、transient getMember、
+  scoped terminated、child-record-down、`parentId` 三态、25 次不可达、工具无参等。
+
 ## v0.14.1（2026-11-06，与平台 0.6.0 配套）
 
 ### skill 与实现对齐

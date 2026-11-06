@@ -16,7 +16,7 @@ spawn (`args`); it does not mirror pi's flags, so `pi --help` is the reference. 
   ids, mentions, no polling). Registered under `pi.skills` and shipped with the package.
 - `CHANGELOG.md` — version policy and per-version changes (Chinese). A release records one
   pair: both sides share a number when both move, and only the side that changed takes the
-  version step otherwise. `v0.6.0+platform.0.2.0` is the adapter alone, on platform 0.2.0;
+  version step otherwise. `v0.15.0+platform.0.7.0` is the current pair;
   the metadata records what it was tested against and is not a compatibility gate.
 
 ## Quick start: ask the agent to start an org
@@ -46,9 +46,12 @@ binds a socket, keeps it for its lifetime, and records the port it got in
 `platforms/<platform_id>/endpoint.json` before it opens the database. An existing organisation
 starts from that recorded port, so two sessions cannot end up serving one platform on two ports.
 A candidate held by the same platform makes the new process exit `2`, and the adapter reattaches
-instead of treating it as a failure. A temporary health failure does not establish member death,
-and nothing signals a recorded pid any more; agent liveness and respawn remain adapter
-responsibilities. See §8.2 of [the adapter design](docs/设计说明.md).
+instead of treating it as a failure. A temporary health failure does not establish member death, and nothing signals a recorded
+pid any more. The endpoint record is the port rendezvous: a first start creates it with its
+seed candidate, publishes each candidate it walks to, and rewrites it with the bound port;
+there is no `.start.lock`. Agent respawn is explicit: the automatic pass runs once after a
+startup settle, and runtime repair is `pg_respawn()`. See §8.2 of
+[the adapter design](docs/设计说明.md).
 
 A member that was **handed an identity** is the other path: start pi with `PIGROUPS_URL` and
 `PIGROUPS_TOKEN` in its environment. It registers the twelve member tools at startup and does not

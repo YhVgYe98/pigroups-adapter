@@ -1,3 +1,9 @@
+> **启动协议交接补充（适配器 0.15.0 / 平台 0.7.0，已实现）**：下文是历史记录。当前契约：
+> 平台用 `endpoint.json` 的 `wx` claim 做首次启动的端口会合点（无 `.start.lock`），空数据根必须显式
+> `PIGROUPS_PLATFORM_ID`，0.2 旧库只人工搬迁；适配器的记录路径不再调 `startOrg`，只有 root 在 loop
+> 里 ensure；respawn 启动自动、运行时手动，pane 是唯一“在跑”证据，心跳不判死；一个成员一个
+> `consumers/<sha1(token)>.json` 租约。以 `docs/设计说明.md` §8/§12 为准。
+
 # 交接文档
 
 
