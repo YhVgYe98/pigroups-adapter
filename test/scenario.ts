@@ -46,8 +46,9 @@ export interface LoopConfigOverrides {
   deliveryWindowMs?: number;
   spawnReadyMs?: number;
   autoRespawn?: boolean;
-  respawnFreshMs?: number;
   respawnGraceMs?: number;
+  parentId?: string | null;
+  sleep?: (ms: number) => Promise<void>;
   heartbeatMs?: number;
   heartbeatMiss?: number;
   /** The pi session file a real extension reads from ctx.sessionManager (§12.3). */
@@ -98,14 +99,22 @@ export async function createLoop(
     spawnReadyMs: opts.spawnReadyMs ?? 5000,
     spawnCmd: 'pi',
     autoRespawn: opts.autoRespawn ?? false,
-    respawnFreshMs: opts.respawnFreshMs,
     respawnGraceMs: opts.respawnGraceMs,
     heartbeatMs: opts.heartbeatMs ?? 15_000,
     heartbeatMiss: opts.heartbeatMiss ?? 3,
     orgKey: opts.orgKey,
+    parentId: opts.parentId,
   };
   const pg = new PgClient({ url: config.url, token: config.token });
-  const loop = new AdapterLoop({ pg, surface, herdr, config, now: clock.now, sessionFile: opts.sessionFile });
+  const loop = new AdapterLoop({
+    pg,
+    surface,
+    herdr,
+    config,
+    now: clock.now,
+    sessionFile: opts.sessionFile,
+    ...(opts.sleep === undefined ? {} : { sleep: opts.sleep }),
+  });
 
   return {
     surface,

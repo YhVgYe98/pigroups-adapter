@@ -238,7 +238,7 @@ function captureWarnings(t: { after(fn: () => void): void }): string[] {
 }
 
 test('a failing brief warns once, still becomes ready, and still respawns', async (t) => {
-  const s = await scenario({ role: 'child', autoRespawn: true, respawnFreshMs: 0, respawnGraceMs: 0 });
+  const s = await scenario({ role: 'child', autoRespawn: true, respawnGraceMs: 0 });
   t.after(() => s.close());
   const child = await childToRepair(s, 'brief-failure-child');
 
@@ -272,7 +272,7 @@ test('a failing brief warns once, still becomes ready, and still respawns', asyn
 });
 
 test('a failing reconciliation warns once, still becomes ready, and still respawns', async (t) => {
-  const s = await scenario({ role: 'child', siblings: 1, autoRespawn: true, respawnFreshMs: 0, respawnGraceMs: 0 });
+  const s = await scenario({ role: 'child', siblings: 1, autoRespawn: true, respawnGraceMs: 0 });
   t.after(() => s.close());
   const sibling = s.siblings[0]!;
   const peerDm = dmId(s.me.id, sibling.id);

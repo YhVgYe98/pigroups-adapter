@@ -1,6 +1,6 @@
 // 设计说明 §12: respawn reopens a member whose platform row is still alive but whose
-// process is gone. It never reissues a token, never starts a second process, and never
-// brings back a terminated member.
+// process is gone. Herdr pane presence is the only running evidence; it never reissues
+// a token, never starts a second process, and never brings back a terminated member.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,6 +9,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { writeChildRecord, writeMemberSessionFile } from '../src/records.ts';
+import { PgUnavailable } from '../src/pgclient.ts';
 import type { ChildRecord } from '../src/records.ts';
 import { scenario, pollUntil } from './scenario.ts';
 import type { Scenario } from './scenario.ts';
@@ -84,27 +85,119 @@ test('respawn skips a terminated record, because terminate must not become "star
   assert.equal(s.herdr.spawns.length, 0);
 });
 
-test('a fresh member is not restarted: it gets the recursive pg.respawn control only', async (t) => {
+test('a pane running the child session is already running: control only', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
 
-  const child = await childOf(s, 'fresh-child');
-  await whoami(s.platform, child.token); // stamps last_seen_at
+  const child = await childOf(s, 'pane-child');
+  const sessionFile = '/tmp/pigroups-child/pane.jsonl';
   writeChildRecord(s.adapterDir, recordFor(s, child));
-  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/fresh.jsonl');
+  writeMemberSessionFile(s.adapterDir, child.id, sessionFile);
+  s.herdr.paneList.push({
+    pane_id: 'pane-already-running',
+    agent_status: 'idle',
+    agent_session: { kind: 'path', source: 'herdr:pi', value: sessionFile },
+  });
 
   const result = await s.loop.respawn();
 
   assert.deepEqual(result.alreadyRunning, [child.id]);
   assert.deepEqual(result.restarted, []);
-  assert.equal(s.herdr.spawns.length, 0, 'a running member is never given a second process');
+  assert.equal(s.herdr.spawns.length, 0, 'a pane running that session is never given a second process');
   const controls = await controlsOf(s.platform, child.token);
   assert.ok(
     controls.items.some((item) => item.kind === 'control' && item.cmd === 'pg.respawn'),
     'the running child is asked to fix its own layer',
   );
 });
+test('a scoped respawn still skips a terminated record', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await childOf(s, 'terminated-scoped');
+  writeChildRecord(s.adapterDir, recordFor(s, child, { intent: 'terminated' }));
+  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/terminated-scoped.jsonl');
 
+  const result = await s.loop.respawn(child.id);
+  assert.deepEqual(result.restarted, []);
+  assert.ok(result.skipped.some((entry) => entry.id === child.id && /terminated/i.test(entry.reason)));
+  assert.equal(s.herdr.spawns.length, 0, 'the tombstone is absolute');
+});
+
+test('a shell pane without an agent session is started beside, not closed', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await childOf(s, 'shell-child');
+  const sessionFile = '/tmp/pigroups-child/shell.jsonl';
+  writeChildRecord(s.adapterDir, recordFor(s, child));
+  writeMemberSessionFile(s.adapterDir, child.id, sessionFile);
+  s.herdr.paneList.push({ pane_id: 'shell-pane', agent_status: 'unknown' });
+
+  const result = await s.loop.respawn();
+  assert.deepEqual(result.restarted, [child.id]);
+  assert.equal(s.herdr.spawns.length, 1);
+  assert.deepEqual(s.herdr.closed, [], 'the shell is not the child and is not closed');
+});
+
+test('a transient getMember failure still uses the pane list', async (t) => {
+  const s = await scenario({ role: 'root' });
+  t.after(() => s.close());
+  const child = await childOf(s, 'transient-child');
+  writeChildRecord(s.adapterDir, recordFor(s, child));
+  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/pigroups-child/transient.jsonl');
+  const realGetMember = s.pg.getMember.bind(s.pg);
+  let first = true;
+  s.pg.getMember = async (id) => {
+    if (first) {
+      first = false;
+      throw new PgUnavailable(1, 'transient');
+    }
+    return realGetMember(id);
+  };
+
+  const result = await s.loop.respawn();
+  assert.deepEqual(result.restarted, [child.id]);
+  assert.equal(s.herdr.spawns.length, 1);
+});
+
+test('the automatic settle starts at the first successful whoami, not at construction', async (t) => {
+  const s = await scenario({ role: 'root', autoRespawn: true, respawnGraceMs: 30_000 });
+  t.after(() => s.close());
+  const realWhoami = s.pg.whoami.bind(s.pg);
+  s.pg.whoami = async () => {
+    s.clock.advance(25_000);
+    return realWhoami();
+  };
+  const child = await childOf(s, 'late-connect-child');
+  writeChildRecord(s.adapterDir, recordFor(s, child));
+  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/pigroups-child/late.jsonl');
+
+  await s.loop.pollOnce();
+  assert.equal(s.herdr.spawns.length, 0, 'the settle begins after the late whoami');
+
+  s.clock.advance(29_000); // t=54s, still inside 25s + 30s
+  s.loop.tick();
+  assert.equal(s.herdr.spawns.length, 0, 'the settle is measured from the successful connection');
+
+  s.clock.advance(2_000); // t=56s
+  s.loop.tick();
+  await waitFor(() => s.herdr.spawns.length === 1, 'the automatic pass after the real settle');
+});
+
+test('a pg.respawn control during the settle defers; the manual tool is immediate', async (t) => {
+  const s = await scenario({ role: 'child', respawnGraceMs: 5_000 });
+  t.after(() => s.close());
+  const child = await childOf(s, 'control-settle');
+  writeChildRecord(s.adapterDir, recordFor(s, child));
+  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/pigroups-child/control-settle.jsonl');
+
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.respawn', { v: 1 });
+  await s.loop.pollOnce();
+  assert.equal(s.herdr.spawns.length, 0, 'the control only sends the next control during the settle');
+
+  s.clock.advance(5_001);
+  s.loop.tick();
+  await waitFor(() => s.herdr.spawns.length === 1, 'the deferred control to start after the settle');
+});
 test('a stale member with no session file is reported as unreopenable, not guessed', async (t) => {
   const s = await scenario({ role: 'root' });
   t.after(() => s.close());
@@ -156,23 +249,6 @@ test('a stale member with a session file is started once with --session, then to
     controls.items.some((item) => item.kind === 'control' && item.cmd === 'pg.respawn'),
     'the restarted child is asked to fix its own layer',
   );
-});
-
-test('respawnFreshMs moves the line between already running and stale', async (t) => {
-  const s = await scenario({ role: 'root', respawnFreshMs: 1_000 });
-  t.after(() => s.close());
-
-  const child = await childOf(s, 'threshold-child');
-  s.clock.set(Date.now());
-  await whoami(s.platform, child.token);
-  writeChildRecord(s.adapterDir, recordFor(s, child));
-  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/pigroups-child/threshold.jsonl');
-
-  s.clock.advance(2_000); // older than the configured 1 s window
-  const result = await s.loop.respawn();
-
-  assert.deepEqual(result.restarted, [child.id], 'the configured window decides freshness, not a hard-coded one');
-  assert.equal(s.herdr.spawns.length, 1);
 });
 
 test('two respawn calls start one process, never two', async (t) => {
@@ -228,7 +304,7 @@ test('pg.respawn from a non-parent is ignored and starts nothing', async (t) => 
 });
 
 test('pg.respawn from the direct parent runs this layer without injecting context', async (t) => {
-  const s = await scenario({ role: 'child' });
+  const s = await scenario({ role: 'child', respawnGraceMs: 0 });
   t.after(() => s.close());
 
   const child = await childOf(s, 'parent-triggered');
@@ -245,7 +321,7 @@ test('pg.respawn from the direct parent runs this layer without injecting contex
 });
 
 test('startup respawn runs when enabled and stays off when disabled', async (t) => {
-  const enabled = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 0, respawnGraceMs: 0 });
+  const enabled = await scenario({ role: 'root', autoRespawn: true, respawnGraceMs: 0 });
   t.after(() => enabled.close());
   const child = await childOf(enabled, 'auto-child');
   writeChildRecord(enabled.adapterDir, recordFor(enabled, child));
@@ -307,24 +383,26 @@ test('pg_respawn(scope) rejects an id that is not this member\'s direct child', 
 
 // C: time cannot tell "not started" from "just started"; a herdr pane can. The
 // automatic path asks `pane list` before it starts anything.
-test('automatic respawn starts a stale child immediately when herdr reports no pane for its session', async (t) => {
-  const s = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 5_000, respawnGraceMs: 30_000 });
+test('automatic respawn sends controls during the settle and starts after it', async (t) => {
+  const s = await scenario({ role: 'root', autoRespawn: true, respawnGraceMs: 5_000 });
   t.after(() => s.close());
 
   const child = await childOf(s, 'fact-child');
   writeChildRecord(s.adapterDir, recordFor(s, child));
   writeMemberSessionFile(s.adapterDir, child.id, '/tmp/pigroups-child/fact.jsonl');
 
-  // No clock advance: the configured 30 s grace must not apply when herdr answered.
   await s.loop.pollOnce();
-  await waitFor(() => s.herdr.spawns.length === 1, 'the automatic path to start the child without waiting');
+  assert.equal(s.herdr.spawns.length, 0, 'the settle sends only the control');
+  const control = await pollUntil(s.platform, child.token, 'pg.respawn');
+  assert.equal(control.cmd, 'pg.respawn', 'the child is told to repair its own layer during the settle');
+
+  s.clock.advance(5_001);
+  s.loop.tick();
+  await waitFor(() => s.herdr.spawns.length === 1, 'the automatic pass to start after the settle');
   assert.deepEqual(s.herdr.spawns[0]!.args, ['--session', '/tmp/pigroups-child/fact.jsonl', '--model', 'vendor/model']);
 });
-
-// C: a pane carrying this child's session file is the child already running, even
-// when its last_seen_at is old. Starting a second process would split its cursor.
 test('automatic respawn treats a pane already running that session as already running', async (t) => {
-  const s = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 5_000, respawnGraceMs: 0 });
+  const s = await scenario({ role: 'root', autoRespawn: true, respawnGraceMs: 0 });
   t.after(() => s.close());
 
   const child = await childOf(s, 'pane-child');
@@ -347,7 +425,7 @@ test('automatic respawn treats a pane already running that session as already ru
 // C: an unreadable pane list is not evidence of absence. The automatic path may send
 // the control, but it must never start a process while herdr cannot answer.
 test('automatic respawn never starts a child while herdr cannot list panes', async (t) => {
-  const s = await scenario({ role: 'root', autoRespawn: true, respawnFreshMs: 5_000, respawnGraceMs: 5_000 });
+  const s = await scenario({ role: 'root', autoRespawn: true, respawnGraceMs: 5_000 });
   t.after(() => s.close());
 
   const child = await childOf(s, 'herdr-down-child');
@@ -366,10 +444,10 @@ test('automatic respawn never starts a child while herdr cannot list panes', asy
 
   await s.loop.pollOnce();
   await waitFor(
-    () => warnings.some((warning) => /startup grace period/i.test(warning)),
-    'the fallback grace notification to be sent',
+    () => warnings.some((warning) => /startup settle/i.test(warning)),
+    'the settle notification to be sent',
   );
-  assert.equal(s.herdr.spawns.length, 0, 'inside the grace the automatic path only sends the control');
+  assert.equal(s.herdr.spawns.length, 0, 'inside the settle the automatic path only sends the control');
 
   s.clock.advance(5_001);
   s.loop.tick();
@@ -384,7 +462,7 @@ test('automatic respawn never starts a child while herdr cannot list panes', asy
 // §12.5 says the grace is for the *automatic* path ("只通报、不起进程"); a person who
 // called `pg_respawn` asked for the repair, so the tool must act even inside the grace.
 test('an explicit respawn starts the child even inside the startup grace period', async (t) => {
-  const s = await scenario({ role: 'root', autoRespawn: false, respawnFreshMs: 5_000, respawnGraceMs: 5_000 });
+  const s = await scenario({ role: 'root', autoRespawn: false, respawnGraceMs: 5_000 });
   t.after(() => s.close());
 
   const child = await childOf(s, 'manual-child');
@@ -455,8 +533,8 @@ test('a stale or dead lock is removed and the start proceeds', async (t) => {
 
 // F4: a failed start used to become a permanent "already running" marker, so the
 // member could never be repaired by this process again.
-test('a failed start is retried after the cooldown instead of blocking forever', async (t) => {
-  const s = await scenario({ role: 'root', respawnFreshMs: 1_000 });
+test('a failed start is retried on the next explicit call', async (t) => {
+  const s = await scenario({ role: 'root' });
   t.after(() => s.close());
 
   const child = await childOf(s, 'retry-child');
@@ -471,22 +549,13 @@ test('a failed start is retried after the cooldown instead of blocking forever',
   assert.match(first.failed[0]!.error, /tab create failed/);
   assert.equal(existsSync(lockPath(s, child.id)), false, 'a failed attempt leaves no lock behind');
 
-  const second = await s.loop.respawn();
-  assert.equal(s.herdr.spawns.length, 1, 'inside 2 x freshMs the failed attempt is not retried');
-  assert.ok(
-    second.skipped.some((entry) => entry.id === child.id && /cooldown|retry|attempt/i.test(entry.reason)),
-    `expected a cooldown skip, got ${JSON.stringify(second)}`,
-  );
-
   s.herdr.failSpawn = undefined;
-  s.clock.advance(2_001);
-  const third = await s.loop.respawn();
-  assert.deepEqual(third.restarted, [child.id], 'after the cooldown the repair is allowed again');
-  assert.equal(s.herdr.spawns.length, 2);
+  const second = await s.loop.respawn();
+  assert.deepEqual(second.restarted, [child.id], 'the next explicit call retries immediately');
+  assert.equal(s.herdr.spawns.length, 2, 'the failed attempt and the successful retry are both observed');
 });
-
 test('the respawn deadline follows the injected clock, not wall time', async (t) => {
-  const s = await scenario({ role: 'root', respawnFreshMs: 1_000, spawnReadyMs: 60_000 });
+  const s = await scenario({ role: 'root', spawnReadyMs: 60_000 });
   t.after(() => s.close());
   s.herdr.authenticate = false;
 
@@ -504,7 +573,7 @@ test('the respawn deadline follows the injected clock, not wall time', async (t)
 });
 
 test('a start that fails after creating a pane closes it', async (t) => {
-  const s = await scenario({ role: 'root', respawnFreshMs: 1_000, spawnReadyMs: 0 });
+  const s = await scenario({ role: 'root', spawnReadyMs: 0 });
   t.after(() => s.close());
   s.herdr.authenticate = false;
 

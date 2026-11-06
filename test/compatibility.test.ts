@@ -9,15 +9,15 @@ import { ADAPTER_VERSION, SUPPORTED_PLATFORM_MINORS, platformCompatibilityWarnin
 import { scenario } from './scenario.ts';
 
 test('a platform outside the supported majors.minors yields one warning naming both versions', () => {
-  const warning = platformCompatibilityWarning('0.7.9');
+  const warning = platformCompatibilityWarning('0.8.9');
 
   assert.deepEqual(
     SUPPORTED_PLATFORM_MINORS,
-    ['0.3', '0.4', '0.5', '0.6'],
-    '0.6 owns the listening port; older supported lines keep their hard gates',
+    ['0.3', '0.4', '0.5', '0.6', '0.7'],
+    '0.7 owns the endpoint claim; older supported lines keep their hard gates',
   );
   assert.equal(typeof warning, 'string', 'an unsupported platform is reported');
-  assert.match(warning as string, /platform 0\.7\.9/, 'the warning names the platform version it saw');
+  assert.match(warning as string, /platform 0\.8\.9/, 'the warning names the platform version it saw');
   assert.ok((warning as string).includes(ADAPTER_VERSION), 'the warning names the adapter version doing the warning');
   assert.equal(platformCompatibilityWarning('0.3.0'), undefined, 'the 0.3 line is supported and logs nothing');
   assert.equal(platformCompatibilityWarning('v0.3.9'), undefined, 'the patch level does not matter');
@@ -25,6 +25,7 @@ test('a platform outside the supported majors.minors yields one warning naming b
   assert.equal(platformCompatibilityWarning('v0.4.9'), undefined, 'the patch level does not matter on 0.4 either');
   assert.equal(platformCompatibilityWarning('0.5.0'), undefined, 'the 0.5 heartbeat line is supported');
   assert.equal(platformCompatibilityWarning('0.6.0'), undefined, 'the 0.6 endpoint line is supported');
+  assert.equal(platformCompatibilityWarning('0.7.0'), undefined, 'the 0.7 endpoint claim line is supported');
   assert.match(
     platformCompatibilityWarning('0.2.0') ?? '',
     /platform 0\.2\.0/,
@@ -55,7 +56,7 @@ test('starting against a supported platform logs no compatibility warning', asyn
 test('an unsupported platform warns once at startup and the loop keeps working', async (t) => {
   const s = await scenario({ sessionFile: '/tmp/pigroups-compat-unsupported.jsonl' });
   const realWhoami = s.pg.whoami.bind(s.pg);
-  s.pg.whoami = async () => ({ ...(await realWhoami()), server: { version: '0.7.9' } });
+  s.pg.whoami = async () => ({ ...(await realWhoami()), server: { version: '0.8.9' } });
 
   const original = console.warn;
   const warnings: string[] = [];
@@ -69,7 +70,7 @@ test('an unsupported platform warns once at startup and the loop keeps working',
 
   await s.cycle();
   assert.equal(warnings.length, 1, `exactly one warning, got ${JSON.stringify(warnings)}`);
-  assert.match(warnings[0], /platform 0\.7\.9/);
+  assert.match(warnings[0], /platform 0\.8\.9/);
   assert.ok(warnings[0].includes(ADAPTER_VERSION));
 
   await s.cycle();

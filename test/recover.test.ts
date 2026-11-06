@@ -1,6 +1,7 @@
 // §12.3/§12.5: a session record is a claim about identity, not proof. A record whose
-// token is dead or whose member is gone must fall back to the no-identity path: only
-// `pg_org_start`, no member tools and no polling against an identity that cannot work.
+// token is dead or whose member is gone must NOT fall back to the no-identity path:
+// a record-bearing session always stays a member, and only a session with no record
+// may be offered `pg_org_start`.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -99,16 +100,15 @@ async function fixture(t: { after(fn: () => Promise<void> | void): void }): Prom
   return { platform, adapterDir, pi, tools, fire, close };
 }
 
-async function assertFallsBackToOrgStart(
+async function assertRecordStaysMember(
   f: RecoverFixture,
   root: MemberRef,
   me: MemberRef,
   sessionFile: string,
-  warnings: string[],
 ): Promise<void> {
-  // The member's session record names its organisation; the org record is what
-  // lets the startup path ensure (or reattach to) the platform before the identity
-  // check. Without it a record without orgKey is not allowed to start anything.
+  // The member's session record names its organisation; the org record exists so a
+  // root record could ensure the platform. A dead token must not turn this session
+  // into a root: the member tools stay, and pg_org_start is never registered.
   const orgDir = join(f.adapterDir, 'orgs', 'recover');
   await mkdir(orgDir, { recursive: true });
   await writeFile(
@@ -132,18 +132,11 @@ async function assertFallsBackToOrgStart(
   pigroupsExtension(f.pi);
   await f.fire('session_start', { reason: 'startup' }, ctxFor(sessionFile));
 
-  assert.deepEqual([...f.tools.keys()], ['pg_org_start'], 'a dead identity gets the no-identity tool surface');
-  assert.ok(
-    warnings.some((warning) => /record|identity/i.test(warning) && /invalid|expired|gone|reissue/i.test(warning)),
-    `expected a clear invalid-record warning, got ${JSON.stringify(warnings)}`,
-  );
-  assert.ok(
-    warnings.some((warning) => /pg_org_start|parent/i.test(warning)),
-    'the warning says how to get a working identity back',
-  );
+  assert.equal(f.tools.has('pg_org_start'), false, 'a record-bearing session never gets the no-identity door');
+  assert.equal(f.tools.size, 12, 'a dead identity keeps the member tools; the loop reports the verdict');
 }
 
-test('an invalid token in a session record falls back to the no-identity path', async (t) => {
+test('an invalid token in a session record never falls back to the no-identity path', async (t) => {
   const f = await fixture(t);
   const root = await bootstrapRoot(f.platform);
   const bad = { id: root.id, name: root.name, token: 'not-a-valid-token' };
@@ -157,13 +150,13 @@ test('an invalid token in a session record falls back to the no-identity path', 
   });
 
   try {
-    await assertFallsBackToOrgStart(f, root, bad, '/tmp/pigroups-recover/bad-token.jsonl', warnings);
+    await assertRecordStaysMember(f, root, bad, '/tmp/pigroups-recover/bad-token.jsonl');
   } finally {
     console.warn = originalWarn;
   }
 });
 
-test('a session record for a gone member falls back to the no-identity path', async (t) => {
+test('a session record for a gone member never falls back to the no-identity path', async (t) => {
   const f = await fixture(t);
   const root = await bootstrapRoot(f.platform);
   const gone = await createMember(f.platform, root, 'recover-gone');
@@ -178,7 +171,7 @@ test('a session record for a gone member falls back to the no-identity path', as
   });
 
   try {
-    await assertFallsBackToOrgStart(f, root, gone, '/tmp/pigroups-recover/gone.jsonl', warnings);
+    await assertRecordStaysMember(f, root, gone, '/tmp/pigroups-recover/gone.jsonl');
   } finally {
     console.warn = originalWarn;
   }

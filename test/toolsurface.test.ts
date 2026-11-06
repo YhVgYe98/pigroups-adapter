@@ -85,6 +85,16 @@ test('the registered tool surface is exactly the twelve tools, with no pg_steer'
     assert.match(ack.description, /silent acking/i, 'the tool tells the model what a run of acks is taken for');
     assert.match(ack.description, /pg_read/i, 'a seq past what it has seen needs a read first');
 
+    const respawn = tools.get('pg_respawn')!;
+    assert.deepEqual(
+      respawn.parameters,
+      { type: 'object', properties: {}, additionalProperties: false },
+      'the caller’s tree position defines the scope; the tool takes no arguments',
+    );
+    assert.match(respawn.description, /pane/i, 'pane presence is the running evidence');
+    assert.match(respawn.description, /settle/i, 'the automatic startup pass waits out the settle');
+    assert.match(respawn.description, /immediately/i, 'the tool itself is immediate');
+
     const schedule = tools.get('pg_schedule')!;
     assert.match(schedule.description, /one-shot|once/i, 'a wake is one-shot');
     assert.match(schedule.description, /In memory only/i, 'a restart drops pending wakes');

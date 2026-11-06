@@ -8,6 +8,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { scenario } from './scenario.ts';
+import { readSessionRecord, writeSessionRecords } from '../src/records.ts';
 import { whoami } from './support.ts';
 
 function hash(file: string): string {
@@ -121,4 +122,37 @@ test('pg_spawn writes the child record and pg_terminate keeps it with intent:ter
   assert.ok(result.terminated.includes(spawned.id));
   assert.ok(existsSync(childPath), 'the record is kept, not deleted');
   assert.equal(readJson(childPath).intent, 'terminated', 'a terminated child is never auto-restarted');
+});
+
+test('a record without parentId reads as unknown, not root', async (t) => {
+  const s = await scenario({});
+  t.after(() => s.close());
+  const sessionFile = '/tmp/pigroups-session-records/unknown-parent.jsonl';
+
+  writeSessionRecords(s.adapterDir, {
+    memberId: s.me.id,
+    orgUrl: s.platform.url,
+    token: s.me.token,
+    parentId: undefined,
+    sessionFile,
+  });
+  assert.equal(readSessionRecord(s.adapterDir, sessionFile)?.parentId, undefined, 'absent is unknown');
+
+  writeSessionRecords(s.adapterDir, {
+    memberId: s.me.id,
+    orgUrl: s.platform.url,
+    token: s.me.token,
+    parentId: null,
+    sessionFile,
+  });
+  assert.equal(readSessionRecord(s.adapterDir, sessionFile)?.parentId, null, 'null is the root');
+
+  writeSessionRecords(s.adapterDir, {
+    memberId: s.me.id,
+    orgUrl: s.platform.url,
+    token: s.me.token,
+    parentId: 'm_parent1',
+    sessionFile,
+  });
+  assert.equal(readSessionRecord(s.adapterDir, sessionFile)?.parentId, 'm_parent1', 'a string is a child');
 });

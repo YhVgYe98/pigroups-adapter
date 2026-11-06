@@ -4,6 +4,7 @@
 // `docs/设计说明.md` §2/§4/§7 and `../PiGroups/docs/设计说明.md` §10.
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { createServer } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -55,7 +56,14 @@ export async function bootPlatform(): Promise<Platform> {
   let child: ChildProcessByStdio<null, Readable, Readable>;
   try {
     child = spawn(process.execPath, [join(PLATFORM_DIR, 'src', 'main.ts')], {
-      env: { ...process.env, PORT: String(port), PIGROUPS_DATA: dataDir, PIGROUPS_ADMIN_TOKEN: ADMIN_TOKEN },
+      env: {
+        ...process.env,
+        PORT: String(port),
+        PIGROUPS_DATA: dataDir,
+        // Platform 0.7 refuses an empty data root without an explicit id.
+        PIGROUPS_PLATFORM_ID: `p_${randomBytes(4).toString('hex')}`,
+        PIGROUPS_ADMIN_TOKEN: ADMIN_TOKEN,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {

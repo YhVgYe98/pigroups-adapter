@@ -54,19 +54,6 @@ test('PIGROUPS_AUTO_RESPAWN defaults on and 0/false turn the startup repair off'
   assert.equal(loopConfig('http://127.0.0.1:1', 'token', { PIGROUPS_AUTO_RESPAWN: 'false' }).autoRespawn, false);
 });
 
-test('PIGROUPS_RESPAWN_FRESH_MS is read from the environment', () => {
-  assert.equal(
-    loopConfig('http://127.0.0.1:1', 'token', {}).respawnFreshMs,
-    120_000,
-    'the documented default is two minutes',
-  );
-  assert.equal(
-    loopConfig('http://127.0.0.1:1', 'token', { PIGROUPS_RESPAWN_FRESH_MS: '5000' }).respawnFreshMs,
-    5_000,
-    'the freshness window and the startup grace are configurable together',
-  );
-});
-
 test('PIGROUPS_HEARTBEAT_MS and PIGROUPS_HEARTBEAT_MISS are the two liveness knobs', () => {
   const base = loopConfig('http://127.0.0.1:1', 'token', {});
   assert.equal(base.heartbeatMs, 15_000, 'a member feeds a heartbeat every 15 s by default');

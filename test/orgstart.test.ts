@@ -444,6 +444,12 @@ test('a resumed member whose platform is down starts the recorded organisation i
   await fake.fire('session_start', { reason: 'resume' }, ctxWithSession(sessionFile));
 
   assert.equal(fake.tools.size, 12, 'the resumed member is a full member again, not a zombie behind pg_org_start');
+  // The loop owns the root ensure; drive no tool until the platform answers.
+  const deadline = Date.now() + 15_000;
+  while (!(await answers(before.url))) {
+    if (Date.now() > deadline) throw new Error('the resumed root never restarted its platform');
+    await delay(50);
+  }
   const who = await callTool(fake, 'pg_whoami');
   assert.equal(who.who.member.id, before.root.id, 'the recorded identity is the one that came back');
   assert.ok(await answers(before.url), 'the platform answers on the URL the record named');
@@ -529,12 +535,58 @@ test('a session record with no orgKey and no matching org record does not start 
     console.warn = originalWarn;
   }
 
-  assert.deepEqual([...fake.tools.keys()], ['pg_org_start'], 'without an organisation record the session takes the one door');
+  assert.equal(fake.tools.has('pg_org_start'), false, 'a record-bearing session never takes the one door');
+  assert.equal(fake.tools.size, 12, 'the session keeps its member tools while the platform is unreachable');
   assert.ok(
-    warnings.some((warning) => /orgKey|orgs\/|organisation record/i.test(warning) && /pg_org_start/i.test(warning)),
+    warnings.some((warning) => /organisation record/i.test(warning)),
     `expected a warning naming the missing organisation record, got ${JSON.stringify(warnings)}`,
   );
   assert.equal(orgRecords(adapterDir).length, 0, 'no platform was started and no org.json was written');
+});
+
+test('a child record does not enable the platform ensure, even when the platform is down', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  const dataDir = await tempDir('pigroups-child-data-');
+  process.env.PIGROUPS_ADAPTER_DIR = adapterDir;
+  t.after(() => cleanupOrg(adapterDir));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+
+  const orgDir = join(adapterDir, 'orgs', 'child');
+  await mkdir(orgDir, { recursive: true });
+  const orgFile = join(orgDir, 'org.json');
+  const orgRecord = JSON.stringify({
+    url: 'http://127.0.0.1:1',
+    token: 'root-token',
+    admin_token: 'admin-token',
+    pid: 999_999,
+    data_dir: dataDir,
+    platform_id: 'p_child001',
+  });
+  await writeFile(orgFile, orgRecord);
+
+  const sessionFile = join(adapterDir, 'pi-session.jsonl');
+  writeSessionRecords(adapterDir, {
+    memberId: 'm_child1',
+    orgUrl: 'http://127.0.0.1:1',
+    token: 'child-token',
+    parentId: 'm_parent1',
+    sessionFile,
+    orgKey: 'child',
+  });
+
+  const fake = fakePi();
+  t.after(async () => {
+    await fake.fire('session_shutdown', { reason: 'quit' }).catch(() => undefined);
+  });
+  pigroupsExtension(fake.pi);
+  await fake.fire('session_start', { reason: 'resume' }, ctxWithSession(sessionFile));
+
+  assert.equal(fake.tools.has('pg_org_start'), false, 'a child record never gets the root door');
+  assert.equal(fake.tools.size, 12, 'the child keeps its member tools');
+  await delay(250);
+  assert.equal(await readFile(orgFile, 'utf8'), orgRecord, 'no ensure rewrote the organisation record');
+  assert.deepEqual(await readdir(dataDir), [], 'no platform was started for a child');
 });
 
 // ---------------------------------------------------------------------------
@@ -550,6 +602,23 @@ function orgRecords(adapterDir: string): string[] {
     .map((key) => join(root, key, 'org.json'))
     .filter((file) => existsSync(file));
 }
+
+test('mayBootstrap:false refuses to mint a new root', async (t) => {
+  isolateEnv(t);
+  const adapterDir = await tempDir('pigroups-orgstart-');
+  t.after(() => cleanupOrg(adapterDir));
+  await assert.rejects(
+    startOrg({
+      adapterDir,
+      name: 'no-bootstrap',
+      platformDir: PLATFORM_DIR,
+      mayBootstrap: false,
+    }),
+    /refusing to bootstrap/,
+    'a record-bearing session must not create a second root',
+  );
+  assert.equal(orgRecords(adapterDir).length, 0, 'no organisation record is written');
+});
 
 test('pg_org_start starts a platform, bootstraps a root, wires the member tools, and is idempotent', async (t) => {
   isolateEnv(t);

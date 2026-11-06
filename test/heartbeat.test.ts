@@ -1,11 +1,12 @@
-// §5.4 (0.13.0): liveness is observed, not announced. The member feeds a heartbeat;
-// the parent judges death by heartbeat absence plus the pane list. `gone` is no longer
-// an attention state, and an automatic repair reports its own outcome.
+// §5.4: the member feeds a heartbeat as a fact. The parent no longer judges death from
+// it: the 30 s scan only closes panes the platform says are gone, and a manual
+// `pg_respawn` uses the pane list. `gone` is not an attention state.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { formatLocalMinute } from '../src/format.ts';
+import { PgUnavailable } from '../src/pgclient.ts';
 import { writeChildRecord, writeMemberSessionFile } from '../src/records.ts';
 
 import {
@@ -196,40 +197,36 @@ test('an old-style pg.attention gone is dropped with one warn per child and neve
   );
 });
 
-test('a stale heartbeat with no pane is treated as dead, restarted, and reported with its heartbeat time', async (t) => {
+test('a stale heartbeat with no pane is not started by the periodic scan', async (t) => {
   const s = await scenario({
     role: 'root',
     autoRespawn: true,
     heartbeatMs: 1_000,
     heartbeatMiss: 3,
-    respawnFreshMs: 1_000,
   });
   t.after(() => s.close());
   await s.cycle(); // startup runs before the recorded child exists
-  const { child, heartbeatAt: beatAt, sessionFile } = await staleChild(s, 'stale-worker');
+  const { child } = await staleChild(s, 'stale-worker');
 
   await s.cycle();
-  await waitFor(() => s.herdr.spawns.length === 1, 'the stale child to be restarted');
-  assert.deepEqual((s.herdr.spawns[0]!.args ?? []).slice(0, 2), ['--session', sessionFile]);
-
-  const line = await waitForRepair(s, child.id);
-  assert.match(line, /^\[repair\] /, `the repair reports itself: ${line}`);
-  assert.ok(line.includes(child.id), `the line names the child: ${line}`);
-  assert.ok(line.includes(child.name), `the line carries the name: ${line}`);
-  assert.ok(
-    line.includes(`no heartbeat since ${formatLocalMinute(beatAt)}`),
-    `the line carries the heartbeat time ${formatLocalMinute(beatAt)}: ${line}`,
+  await quiet(300);
+  assert.equal(s.herdr.spawns.length, 0, 'the periodic scan never starts a child');
+  assert.equal(
+    s.surface.texts().some((text) => text.includes('[repair]') && text.includes(child.id)),
+    false,
+    'the periodic scan does not report a repair it no longer performs',
   );
-  assert.match(line, /; restarted \d{2}:\d{2}$/, `the line carries the restart time: ${line}`);
-});
 
+  const result = await s.loop.respawn();
+  assert.deepEqual(result.restarted, [child.id], 'the explicit tool still starts it');
+  assert.equal(s.herdr.spawns.length, 1);
+});
 test('a stale heartbeat with a live pane is quiet, not restarted', async (t) => {
   const s = await scenario({
     role: 'root',
     autoRespawn: true,
     heartbeatMs: 1_000,
     heartbeatMiss: 3,
-    respawnFreshMs: 1_000,
   });
   t.after(() => s.close());
   await s.cycle();
@@ -252,65 +249,27 @@ test('a stale heartbeat with a live pane is quiet, not restarted', async (t) => 
   );
 });
 
-test('a child with a newer last_seen_at than heartbeat is running, not restarted', async (t) => {
-  const s = await scenario({ role: 'root', autoRespawn: false, respawnFreshMs: 30_000 });
-  t.after(() => s.close());
-  await s.cycle();
-  const { child } = await recordedChild(s, 'seen-worker');
-
-  // Every authenticated request refreshes `last_seen_at`, so it is a superset of the
-  // heartbeat: an old heartbeat must not override a newer sighting of the same child.
-  s.clock.set(Date.now());
-  const realGetMember = s.pg.getMember.bind(s.pg);
-  s.pg.getMember = async (id) => {
-    const detail = await realGetMember(id);
-    if (id !== child.id) return detail;
-    return { ...detail, heartbeat_at: s.clock.now() - 60_000, last_seen_at: s.clock.now() - 10_000 };
-  };
-
-  const result = await s.loop.respawn(child.id);
-
-  assert.equal(s.herdr.spawns.length, 0, 'a child seen ten seconds ago is running, whatever its heartbeat says');
-  assert.deepEqual(result.alreadyRunning, [child.id], 'the child is told to repair its own layer instead');
-  assert.deepEqual(result.restarted, [], 'no process was started');
-});
-
-test('an unreadable herdr never starts a child and never reports a repair', async (t) => {
+test('an unreadable herdr list does not start a child in the periodic scan', async (t) => {
   const s = await scenario({
     role: 'root',
     autoRespawn: true,
     heartbeatMs: 1_000,
     heartbeatMiss: 3,
-    respawnFreshMs: 1_000,
   });
   t.after(() => s.close());
   await s.cycle();
-  const { child } = await staleChild(s, 'unknown-worker');
-  // null is "could not ask", not "no pane". Starting a process on that answer would
-  // put a second process on one identity.
+  const { child } = await staleChild(s, 'unreadable-worker');
   s.herdr.failListPanes = new Error('herdr is not running');
 
-  const result = await s.loop.respawn(child.id);
-  assert.equal(s.herdr.spawns.length, 0, 'an explicit respawn also refuses to start on an unknown answer');
-  assert.equal(result.restarted.length, 0, 'nothing was started');
-  assert.ok(
-    result.skipped.some((entry) => /could not list panes|answer is unknown/i.test(entry.reason)),
-    `the skip explains that herdr could not answer: ${JSON.stringify(result)}`,
-  );
-
-  // The automatic reconcile sees the same unreadable answer and must stay quiet too.
-  s.clock.advance(30_000);
   await s.cycle();
-  await quiet(200);
-  assert.equal(s.herdr.spawns.length, 0, 'the death gate never treats an unknown answer as death');
-  await s.timer(WINDOW);
+  await quiet(300);
+  assert.equal(s.herdr.spawns.length, 0, 'an unreadable pane list never starts a process');
   assert.equal(
-    s.surface.textsOfKind('nudge').filter((text) => text.includes('[repair]') && text.includes(child.id)).length,
-    0,
-    `an unknown answer is not a repair: ${JSON.stringify(s.surface.texts())}`,
+    s.surface.texts().some((text) => text.includes('[repair]') && text.includes(child.id)),
+    false,
+    'the scan does not invent a repair report',
   );
 });
-
 test('a 0.4 platform gets no heartbeat requests and one warning', async (t) => {
   const s = await scenario({ heartbeatMs: 1_000 });
   t.after(() => s.close());
@@ -360,147 +319,22 @@ test('a heartbeat that never settles is abandoned so later ticks can beat again'
   await waitFor(() => calls === 2, 'the in-flight flag to be released after the timeout');
 });
 
-test('one reconcile pass asks herdr for the pane list once, not once per dead child', async (t) => {
-  const s = await scenario({
-    role: 'root',
-    autoRespawn: true,
-    heartbeatMs: 1_000,
-    heartbeatMiss: 3,
-    respawnFreshMs: 1_000,
-  });
+test('25 consecutive PgUnavailable failures do not stop the loop', async (t) => {
+  const s = await scenario({ role: 'root', sleep: async () => {} });
   t.after(() => s.close());
-  await s.cycle();
-
-  const a = await recordedChild(s, 'pass-a');
-  const b = await recordedChild(s, 'pass-b');
-  s.clock.set(Date.now());
-  await heartbeat(s.platform, a.child.token, a.child.id);
-  await heartbeat(s.platform, b.child.token, b.child.id);
-  s.clock.advance(4_001);
-  s.herdr.paneList.push(
-    { pane_id: 'pane-pass-a', agent_status: 'idle', agent_session: { kind: 'path', value: a.sessionFile } },
-    { pane_id: 'pane-pass-b', agent_status: 'idle', agent_session: { kind: 'path', value: b.sessionFile } },
-  );
-
-  await s.cycle();
-  await quiet(200);
-
-  assert.equal(s.herdr.spawns.length, 0, 'both children still have a live pane');
-  assert.equal(s.herdr.listPanesCalls, 1, `the pass reads the pane list once for both children, got ${s.herdr.listPanesCalls}`);
-});
-
-test('a crash cascade repairs dead children one at a time', async (t) => {
-  const s = await scenario({
-    role: 'root',
-    autoRespawn: true,
-    heartbeatMs: 1_000,
-    heartbeatMiss: 3,
-    respawnFreshMs: 1_000,
-  });
-  t.after(() => s.close());
-  await s.cycle();
-
-  const a = await recordedChild(s, 'cascade-a');
-  const b = await recordedChild(s, 'cascade-b');
-  s.clock.set(Date.now());
-  await heartbeat(s.platform, a.child.token, a.child.id);
-  await heartbeat(s.platform, b.child.token, b.child.id);
-  s.clock.advance(4_001);
-
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let running = 0;
-  let most = 0;
-  s.herdr.onSpawn = async () => {
-    running += 1;
-    most = Math.max(most, running);
-    await gate;
-    running -= 1;
+  const loop = s.loop as unknown as {
+    handlePollError(error: unknown): Promise<void>;
+    stopped: boolean;
   };
 
-  await s.cycle();
-  await waitFor(() => s.herdr.spawns.length === 1, 'the first dead child to start');
-  await delay(150);
-  const beforeRelease = s.herdr.spawns.length;
-  release();
-  await waitFor(() => s.herdr.spawns.length === 2, 'the second child to start after the first finished');
-  await quiet(300);
+  for (let i = 0; i < 25; i += 1) {
+    await loop.handlePollError(new PgUnavailable(1, `platform down ${i}`));
+  }
 
-  assert.equal(beforeRelease, 1, 'the second child waits for the first repair to finish');
-  assert.equal(most, 1, 'never two respawns in the air at once');
-});
-
-test('a failed restart reports why once and does not repeat on the next check', async (t) => {
-  const s = await scenario({
-    role: 'root',
-    autoRespawn: true,
-    heartbeatMs: 1_000,
-    heartbeatMiss: 3,
-    respawnFreshMs: 1_000,
-  });
-  t.after(() => s.close());
-  await s.cycle();
-  const { child } = await staleChild(s, 'failing-worker');
-  s.herdr.failSpawn = new Error('herdr tab create failed');
-
-  await s.cycle();
-  const first = await waitForRepair(s, child.id);
-  assert.match(first, /restart failed: .*herdr tab create failed/, `the failure is named: ${first}`);
+  assert.equal(loop.stopped, false, 'weather never stops the loop');
   assert.equal(
-    s.surface.textsOfKind('nudge').filter((text) => text.includes('[repair]') && text.includes(child.id)).length,
-    1,
-    'one line for the failed repair',
-  );
-
-  // Past the 30 s pane-check bound and the failure cooldown, the repair is retried.
-  s.clock.advance(30_000);
-  await s.cycle();
-  await waitFor(() => s.herdr.spawns.length === 2, 'the failed restart to be retried');
-  s.clock.advance(WINDOW);
-  s.loop.tick();
-  await delay(50);
-  await s.loop.flush();
-
-  assert.equal(
-    s.surface.textsOfKind('nudge').filter((text) => text.includes('[repair]') && text.includes(child.id)).length,
-    1,
-    `the same failed outcome is not repeated: ${JSON.stringify(s.surface.texts())}`,
-  );
-});
-
-test('a child that dies again with a new heartbeat observation is reported again', async (t) => {
-  const s = await scenario({
-    role: 'root',
-    autoRespawn: true,
-    heartbeatMs: 1_000,
-    heartbeatMiss: 3,
-    respawnFreshMs: 1_000,
-  });
-  t.after(() => s.close());
-  await s.cycle();
-  const { child } = await staleChild(s, 'twice-worker');
-
-  await s.cycle();
-  await waitFor(() => s.herdr.spawns.length === 1, 'the first death to be restarted');
-  const first = await waitForRepair(s, child.id);
-  assert.match(first, /; restarted \d{2}:\d{2}$/);
-
-  // The restarted child dies again. Its new heartbeat is a new observation, not a retry
-  // of the one the first [repair] line already named.
-  s.herdr.paneList.length = 0;
-  s.clock.set(Date.now());
-  const secondBeat = await heartbeat(s.platform, child.token, child.id);
-  // Also past the pane-check TTL stamped when the first restart ran.
-  s.clock.advance(60_001);
-  await s.cycle();
-  await waitFor(() => s.herdr.spawns.length === 2, 'the second death to be restarted');
-
-  const lines = await waitForRepairs(s, child.id, 2);
-  assert.equal(lines.length, 2, `a second death is a second line: ${JSON.stringify(lines)}`);
-  assert.ok(
-    lines[1]!.includes(`no heartbeat since ${formatLocalMinute(secondBeat.heartbeat_at)}`),
-    `the second line names the new observation: ${lines[1]}`,
+    s.surface.texts().some((text) => /platform unreachable|blocked/i.test(text)),
+    false,
+    'no blocked line is produced',
   );
 });
