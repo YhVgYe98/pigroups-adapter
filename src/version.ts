@@ -11,7 +11,7 @@
  * change that needs no adapter change is answered by republishing the same numeric
  * version with new metadata, not by moving the number.
  */
-export const ADAPTER_VERSION = '0.14.1+platform.0.6.0';
+export const ADAPTER_VERSION = '0.15.0+platform.0.7.0';
 
 /**
  * Platform major.minor versions this adapter is built for. The list itself is a
@@ -23,7 +23,7 @@ export const ADAPTER_VERSION = '0.14.1+platform.0.6.0';
  * older than 0.3.0 reports no id and ignores `PIGROUPS_PLATFORM_ID`, so `startOrg`
  * refuses it. Extend this list when a new platform minor has been exercised.
  */
-export const SUPPORTED_PLATFORM_MINORS = ['0.3', '0.4', '0.5', '0.6'];
+export const SUPPORTED_PLATFORM_MINORS = ['0.3', '0.4', '0.5', '0.6', '0.7'];
 
 /**
  * §5.4: `PUT /v1/members/{id}/heartbeat` exists from platform 0.5. This is a gate,

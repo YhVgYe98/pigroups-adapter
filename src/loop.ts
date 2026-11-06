@@ -68,10 +68,15 @@ export interface LoopConfig {
   deliveryWindowMs: number;
   /** How long a spawned child gets to authenticate before the parent is told it never did. */
   spawnReadyMs: number;
-  /** §12.4: a member seen inside this window is already running and is not restarted. */
-  respawnFreshMs?: number;
-  /** §12.5: startup grace for the automatic repair (default 30 s). */
+  /** §12.5: startup settle for the automatic repair (default 30 s). */
   respawnGraceMs?: number;
+  /** `null` = the session record says root; `undefined`/string = not a platform owner. */
+  parentId?: string | null;
+  /**
+   * Root-only: ensure the platform when it is unreachable. The loop calls this on
+   * the `PgUnavailable` path, never from `session_start`; it returns the current URL.
+   */
+  ensurePlatform?: () => Promise<string | undefined>;
   /** §12.5: run respawn once at startup when this member has child records. Tests turn it off. */
   autoRespawn?: boolean;
 }
@@ -146,6 +151,8 @@ export interface LoopDeps {
   now: () => number;
   /** `ctx.sessionManager.getSessionFile()`; absent when pi has not created a file yet. */
   sessionFile?: string;
+  /** Test seam: the unreachable-platform backoff; production uses real time. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface PendingDelivery {
@@ -218,7 +225,6 @@ const POLL_CONFLICT_LIMIT = 5;
 const POLL_CONFLICT_REST_MS = 30_000;
 /** §9: connection failures back off exponentially, capped here. */
 const CONNECT_BACKOFF_MAX_MS = 30_000;
-const CONNECT_FAILURE_LIMIT = 20;
 /** §8: the exit report gives up after two seconds. */
 const REPORT_TIMEOUT_MS = 2000;
 /**
@@ -309,18 +315,10 @@ function yieldOnce(): Promise<void> {
 const DEFAULT_INSPECT_TIMEOUT_MS = 10_000;
 /** Default for `spawnReadyMs`; tests override it through the config. */
 const SPAWN_READY_MS = 120_000;
-/** §12.4: how recently a member must have authenticated to count as already running. */
-const DEFAULT_RESPAWN_FRESH_MS = 120_000;
-/**
- * §12.5: how long the automatic repair waits when herdr cannot list panes. This is
- * the fallback, not the rule: a pane carrying the child's session file means it is
- * already running, and a readable pane list without one means start now.
- */
+/** §12.5: the automatic startup settle: controls first, one pane check after it. */
 const DEFAULT_RESPAWN_GRACE_MS = 30_000;
 /** §12.4: a lock younger than this, held by a live pid, still means "another process is starting it". */
 const RESPAWN_LOCK_TTL_MS = 300_000;
-/** §12.4: a failed start is retried only after `2 × freshMs`, not never. */
-const RESPAWN_FAILURE_COOLDOWN_FACTOR = 2;
 /** How often D1 is checked while a child starts. Its first poll lands in well under a second. */
 const READY_POLL_MS = 150;
 /** Only used to word the failure: "process never appeared" vs "it started and cannot reach us". */
@@ -335,6 +333,7 @@ export class AdapterLoop {
   private readonly config: LoopConfig;
   private readonly now: () => number;
   private readonly sessionFile: string | undefined;
+  private readonly sleepImpl: (ms: number) => Promise<void>;
 
   private readonly journal: Journal;
   private readonly watermark: Watermarks;
@@ -479,12 +478,6 @@ export class AdapterLoop {
    * that dies again later has a new heartbeat and deserves a new line.
    */
   private readonly repairReported = new Map<string, string>();
-  /**
-   * Failed respawn attempts, keyed by child id (§12.4). A failed start is not "already
-   * running": after `2 × freshMs` the same process may try again. The timestamp is on the
-   * loop's clock, so a test can cross the cooldown without sleeping.
-   */
-  private readonly respawnAttempts = new Map<string, number>();
   /** Starts in flight in this process; prevents two concurrent calls from sharing one stale timestamp. */
   private readonly respawnStarting = new Set<string>();
   /** §12.5 skip reasons already logged by this process; startup runs must not repeat them forever. */
@@ -492,8 +485,8 @@ export class AdapterLoop {
   /** §12.5: when the startup grace ends and the automatic path may actually start processes. */
   private autoRespawnDueAt: number | undefined;
   private autoRespawnDone = false;
-  /** When this loop was constructed, which is when the session's startup grace begins. */
-  private readonly startedAt: number;
+  /** First successful `whoami`; the startup settle is measured from here. */
+  private connectedAt: number | undefined;
   /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
   private aborting = false;
   /** Ends an in-flight abort wait when `stop()` runs (§3.2). */
@@ -503,6 +496,9 @@ export class AdapterLoop {
   private pollAbort: AbortController | undefined;
   private pollConflicts = 0;
   private connectionFailures = 0;
+  /** Root-only platform ensure: never two in flight; a whoami demotion disables it. */
+  private ensureInFlight = false;
+  private rootDemoted = false;
 
   constructor(deps: LoopDeps) {
     this.pg = deps.pg;
@@ -511,7 +507,7 @@ export class AdapterLoop {
     this.config = deps.config;
     this.now = deps.now;
     this.sessionFile = deps.sessionFile;
-    this.startedAt = deps.now();
+    this.sleepImpl = deps.sleep ?? sleep;
     this.journal = new Journal(deps.config.adapterDir);
     this.watermark = new Watermarks(deps.config.adapterDir);
     this.owed = new OwedLedger(deps.config.adapterDir);
@@ -1045,7 +1041,7 @@ export class AdapterLoop {
     await this.say(id, opts.brief);
 
     const env: Record<string, string> = {
-      PIGROUPS_URL: this.config.url,
+      PIGROUPS_URL: this.pg.url,
       PIGROUPS_TOKEN: token,
       PIGROUPS_ADAPTER_DIR: this.config.adapterDir,
       PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
@@ -1106,7 +1102,7 @@ export class AdapterLoop {
     }
     this.enqueue({
       text: sawProcess
-        ? `[spawn] ${name} (${id}) is in ${pane} but never connected to ${this.config.url} within ${this.config.spawnReadyMs} ms - it is not a member yet, check its pane`
+        ? `[spawn] ${name} (${id}) is in ${pane} but never connected to ${this.pg.url} within ${this.config.spawnReadyMs} ms - it is not a member yet, check its pane`
         : `[spawn] ${name} (${id}) never appeared in ${pane} and never connected within ${this.config.spawnReadyMs} ms - the process did not start`,
       kind: 'nudge',
     });
@@ -1291,19 +1287,15 @@ export class AdapterLoop {
    * layer. It never calls `POST /v1/members/:id/token`: reissuing a token overwrites
    * `token_hash`, which logs a living child out. The recorded token is used as-is.
    *
-   * Idempotence has independent guards, because neither is enough alone:
-   * - the heartbeat answers "is it already running?" across processes and restarts;
-   * - `respawnStarting` answers "did this process already start it?" inside the window
-   *   before the child's first heartbeat or authenticated request;
-   * - the on-disk lock answers the same question across processes;
-   * - `respawnAttempts` answers "did a start fail recently?" so a failure is not
-   *   permanently mistaken for a running process.
+   * The only running evidence is a herdr pane whose `agent_session.value` is the
+   * child's session file. `respawnStarting` and the on-disk lock cover the window
+   * before that pane exists; there is no heartbeat/freshness gate and no failure
+   * cooldown.
    *
-   * `allowStart:false` marks the automatic path. It no longer means "wait": the
-   * automatic repair asks herdr's pane list whether the child is already running, and
-   * starts it immediately when no pane carries its session file. When that list cannot
-   * be read, no process is started at all; during the startup grace the child only gets
-   * the control.
+   * `allowStart:false` marks the automatic startup settle: until `connectedAt + grace`
+   * it sends controls only. After the settle (or for the manual tool, immediately) a
+   * readable pane list with no matching pane starts the child; an unreadable list only
+   * sends the control.
    */
   async respawn(scope?: string, opts: { allowStart?: boolean } = {}): Promise<RespawnResult> {
     return (await this.performRespawn(scope, opts)).result;
@@ -1320,7 +1312,7 @@ export class AdapterLoop {
       result.skipped.push({ id: scope ?? 'self', reason: 'this adapter has no identity yet; nothing to respawn' });
       return { result, repairs };
     }
-    const freshMs = this.config.respawnFreshMs ?? DEFAULT_RESPAWN_FRESH_MS;
+
     let records = readChildRecords(this.config.adapterDir, selfId);
     if (scope !== undefined && scope !== '') {
       const selected = records.filter((record) => record.childId === scope);
@@ -1336,31 +1328,33 @@ export class AdapterLoop {
 
     for (const record of records) {
       const id = record.childId;
-      if (record.intent === 'terminated' && scope !== id) {
+      if (record.intent === 'terminated') {
         result.skipped.push({ id, reason: 'intent is terminated; a terminated member is never started automatically' });
         continue;
       }
-      // Mark the attempt before the first await that can start a process. A concurrent
-      // call must not read the same stale timestamp and start a second process.
       if (this.respawnStarting.has(id)) {
         result.alreadyRunning.push(id);
         continue;
       }
 
-      let detail: Awaited<ReturnType<PgClient['getMember']>>;
+      // §12.4: the platform's view is a courtesy, not the decision. A transient
+      // `getMember` failure must not hide a child whose pane is already there; a
+      // 404/410 is a verdict and skips it.
+      let detail: Awaited<ReturnType<PgClient['getMember']>> | undefined;
       try {
         detail = await this.pg.getMember(id);
       } catch (err) {
-        result.failed.push({ id, error: respawnError(err) });
-        continue;
+        if (err instanceof PgError && (err.status === 404 || err.status === 410)) {
+          result.skipped.push({ id, reason: `member is gone (${err.status} ${err.code})` });
+          continue;
+        }
+        detail = undefined;
       }
-      // Re-check after the await: another call may have entered while this one was
-      // waiting for the platform, and only one of them may spawn.
       if (this.respawnStarting.has(id)) {
         result.alreadyRunning.push(id);
         continue;
       }
-      if (detail.status === 'gone') {
+      if (detail?.status === 'gone') {
         result.skipped.push({
           id,
           reason: 'member is gone; its identity cannot be restored (the platform will not reissue a gone token)',
@@ -1368,23 +1362,33 @@ export class AdapterLoop {
         continue;
       }
 
-      // §5.4: every authenticated request refreshes `last_seen_at`, so it is a superset
-      // of the heartbeat. Taking the fresher of the two matters where being wrong starts
-      // a second process on one identity: an old heartbeat must not override a newer
-      // sighting, and on a pre-0.5 platform the heartbeat is absent altogether.
-      const heartbeatAt = typeof detail.heartbeat_at === 'number' ? detail.heartbeat_at : null;
-      const lastSeen = typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null;
-      const livenessAt = Math.max(heartbeatAt ?? 0, lastSeen ?? 0) || null;
-      const fresh = livenessAt !== null && this.now() - livenessAt < freshMs;
-      if (fresh) {
-        try {
-          await this.sendRespawnControl(id);
-          result.alreadyRunning.push(id);
-        } catch (err) {
-          result.failed.push({ id, error: respawnError(err) });
+      // §12.5: the automatic startup pass sends controls first and starts nothing
+      // during the settle. Its one-shot `fireDueAutoRespawn` runs the real pass after
+      // the window. A control-triggered run during the same window defers the same way.
+      if (opts.allowStart === false) {
+        const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
+        const connectedAt = this.connectedAt;
+        const graceEndsAt = connectedAt === undefined ? undefined : connectedAt + graceMs;
+        if (graceEndsAt === undefined || this.now() < graceEndsAt) {
+          try {
+            await this.sendRespawnControl(id);
+            result.skipped.push({
+              id,
+              reason:
+                `startup settle (${graceMs} ms): controls only until the pane list can be trusted; ` +
+                'pg_respawn starts it now',
+            });
+            if (graceEndsAt !== undefined) this.autoRespawnDueAt = graceEndsAt;
+            this.autoRespawnDone = false;
+          } catch (err) {
+            result.failed.push({ id, error: respawnError(err) });
+          }
+          continue;
         }
-        continue;
       }
+
+      const heartbeatAt = typeof detail?.heartbeat_at === 'number' ? detail.heartbeat_at : null;
+      const lastSeen = typeof detail?.last_seen_at === 'number' ? detail.last_seen_at : null;
 
       const sessionFile = readSessionFileForMember(this.config.adapterDir, id);
       if (sessionFile === undefined) {
@@ -1395,10 +1399,10 @@ export class AdapterLoop {
         continue;
       }
 
-      // §12.4/C: `pane list` is the fact that separates "not started" from "just
-      // started". A pane whose agent runs this child's session file is the child;
-      // notify it, never start a second process. `null` means herdr could not ask, and
-      // an unknown answer is never evidence that the child is absent.
+      // §12.4/C: `pane list` is the only fact that separates "not started" from
+      // "already running". A pane whose agent runs this child's session file is the
+      // child; notify it, never start a second process. `null` means herdr could not
+      // ask, and an unknown answer is never evidence that the child is absent.
       let panes: HerdrPane[] | null;
       try {
         panes = await this.herdr.listPanes();
@@ -1415,45 +1419,18 @@ export class AdapterLoop {
         continue;
       }
       if (panes === null) {
-        if (opts.allowStart === false) {
-          const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
-          const graceEndsAt = this.startedAt + graceMs;
-          if (this.now() < graceEndsAt) {
-            // §12.5 fallback: the control waits in the child's queue and is acted on
-            // after that child has authenticated; it is also what a fresh child gets.
-            try {
-              await this.sendRespawnControl(id);
-              result.skipped.push({
-                id,
-                reason:
-                  `startup grace period (${graceMs} ms): herdr could not list panes, ` +
-                  'not starting a process yet; pg_respawn starts it now',
-              });
-              // The automatic path retries once the grace is over; tick() drives it.
-              this.autoRespawnDueAt = graceEndsAt;
-              this.autoRespawnDone = false;
-            } catch (err) {
-              result.failed.push({ id, error: respawnError(err) });
-            }
-            continue;
-          }
-        }
         // Never start a process on an unknown answer, not even for an explicit
-        // `pg_respawn` or after the startup grace: a second process on one identity is
-        // the exact mistake this check exists to prevent.
-        result.skipped.push({
-          id,
-          reason: 'herdr could not list panes; not starting a process while the answer is unknown',
-        });
-        continue;
-      }
-
-      const failedAt = this.respawnAttempts.get(id);
-      if (failedAt !== undefined && this.now() - failedAt < freshMs * RESPAWN_FAILURE_COOLDOWN_FACTOR) {
-        result.skipped.push({
-          id,
-          reason: `a previous respawn attempt failed; cooling down for ${freshMs * RESPAWN_FAILURE_COOLDOWN_FACTOR} ms`,
-        });
+        // `pg_respawn` or after the startup settle: a second process on one identity
+        // is the exact mistake this check exists to prevent.
+        try {
+          await this.sendRespawnControl(id);
+          result.skipped.push({
+            id,
+            reason: 'herdr could not list panes; control sent, no process started while the answer is unknown',
+          });
+        } catch (err) {
+          result.failed.push({ id, error: respawnError(err) });
+        }
         continue;
       }
 
@@ -1472,7 +1449,7 @@ export class AdapterLoop {
         const spawned = await this.herdr.spawn({
           label: record.name,
           env: {
-            PIGROUPS_URL: this.config.url,
+            PIGROUPS_URL: this.pg.url,
             PIGROUPS_TOKEN: record.token,
             PIGROUPS_ADAPTER_DIR: this.config.adapterDir,
             PIGROUPS_SPAWN_CMD: this.config.spawnCmd,
@@ -1491,14 +1468,13 @@ export class AdapterLoop {
         // A member that has not connected can only produce a string of failures.
         await this.waitForRespawnConnection(id, lastSeen);
         await this.sendRespawnControl(id);
-        this.respawnAttempts.delete(id);
         result.restarted.push(id);
         repairs.push({
           id,
           name: record.name,
           heartbeatAt,
           lastSeenAt: lastSeen,
-          createdAt: typeof detail.created_at === 'number' ? detail.created_at : null,
+          createdAt: typeof detail?.created_at === 'number' ? detail.created_at : null,
           outcome: 'restarted',
           at: this.now(),
         });
@@ -1507,15 +1483,20 @@ export class AdapterLoop {
         // the recursive control cannot be sent). Close it before reporting the failed
         // attempt: leaving it behind is the shell a dead child's parent must not keep.
         const error = respawnError(err);
-        if (pane !== undefined) await this.closePane(id);
-        this.respawnAttempts.set(id, this.now());
+        if (pane !== undefined) {
+          try {
+            await this.herdr.close(pane);
+          } catch (closeError) {
+            console.warn(`[pigroups] could not close pane ${pane} of ${id}: ${respawnError(closeError)}`);
+          }
+        }
         result.failed.push({ id, error });
         repairs.push({
           id,
           name: record.name,
           heartbeatAt,
           lastSeenAt: lastSeen,
-          createdAt: typeof detail.created_at === 'number' ? detail.created_at : null,
+          createdAt: typeof detail?.created_at === 'number' ? detail.created_at : null,
           outcome: 'failed',
           error,
           at: this.now(),
@@ -1582,9 +1563,9 @@ export class AdapterLoop {
 
   /**
    * §12.5: startup repairs this layer in the background; it must not block `init()`.
-   * The automatic run starts immediately: `respawn` asks herdr whether the child's
-   * pane exists, so a stale `last_seen_at` no longer has to be waited out. The
-   * startup grace survives only as the fallback for an unreadable pane list.
+   * The first pass sends controls and starts nothing during the settle measured from
+   * the first successful `whoami`; `fireDueAutoRespawn` runs the real pane check once
+   * after that window.
    */
   private maybeAutoRespawn(): void {
     if (this.config.autoRespawn !== true || this.autoRespawnDone) return;
@@ -1617,10 +1598,6 @@ export class AdapterLoop {
    * found them, one `performRespawn` after another - the same ordering guarantee the
    * startup path gives by looping over the records instead of starting them at once.
    */
-  private runRepairPassInBackground(ids: string[]): void {
-    this.runRespawnJobs(ids.map((id) => () => this.performRespawn(id)));
-  }
-
   private runRespawnJobs(jobs: Array<() => Promise<RespawnRun>>): void {
     void (async () => {
       const result: RespawnResult = { restarted: [], alreadyRunning: [], skipped: [], failed: [] };
@@ -1786,24 +1763,15 @@ export class AdapterLoop {
   }
 
   /**
-   * Confirm every child the adapter knows from disk or telemetry is still alive, close
-   * the panes of the ones the platform says are deleted (§5.3), and judge a recorded
-   * child's liveness by heartbeat plus panes (§5.4).
+   * The 30 s cleanup scan: close the panes of children the platform says are deleted
+   * (§5.3), and forget their telemetry rows. It never starts a process and never
+   * judges death from a heartbeat.
    *
    * `terminate()` only sees deletes this adapter issued. A grandparent deleting this
    * adapter's direct child is a legal `DELETE` that never reaches this process; the
    * `children/` record survives a restart, so it keeps that child in the recheck even
-   * when telemetry is empty. `GET /v1/tree` cannot answer this: it is a 30 s snapshot,
-   * and absence from a stale snapshot is exactly the false-prune this file guards
-   * against. Ask about each member directly; only an explicit `status:'gone'` closes a
-   * pane, so a failed read keeps everything.
-   *
-   * Death is two observations, never a message (§5.1/§5.4): the child's freshest
-   * liveness timestamp (heartbeat on 0.5, `last_seen_at` on older platforms) is absent
-   * past `PIGROUPS_HEARTBEAT_MISS` intervals, and `pane list` has no pane running its
-   * session file. An unreadable pane list is not the second observation. The judgement
-   * itself never deletes a member, reissues a token or closes a pane; it only lets the
-   * repair path start the process.
+   * when telemetry is empty. Ask about each member directly; only an explicit
+   * `status:'gone'` closes a pane, so a failed read keeps everything.
    *
    * Telemetry contributes the children this member did not spawn or record (a child
    * created by an ancestor), whose `error` state has no other way of leaving the table.
@@ -1811,74 +1779,35 @@ export class AdapterLoop {
   private async reconcileMembers(): Promise<void> {
     const records =
       this.selfId === undefined ? [] : readChildRecords(this.config.adapterDir, this.selfId);
-    const recorded = new Map(records.map((record) => [record.childId, record]));
-    const candidates = new Set<string>(recorded.keys());
+    const candidates = new Set<string>(records.map((record) => record.childId));
     for (const entry of this.telemetry.snapshot()) candidates.add(entry.child);
     if (candidates.size === 0) return;
     const now = this.now();
-    const heartbeatMs = this.config.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
-    const heartbeatMiss = this.config.heartbeatMiss ?? DEFAULT_HEARTBEAT_MISS;
-    const missingAfterMs = heartbeatMs * heartbeatMiss;
-    // One pane list answers the whole pass. `undefined` means "not asked yet", `null`
-    // means "herdr could not answer"; the second is not evidence of absence.
-    let panes: HerdrPane[] | null | undefined;
-    const dead: string[] = [];
+
     for (const member of candidates) {
       const checkedAt = this.paneCheckedAt.get(member);
       if (checkedAt !== undefined && now >= checkedAt && now - checkedAt < PANE_CHECK_TTL_MS) continue;
       // Stamped before the request, not after the answer: "每个成员最多每 30 秒查一次" is a
-      // bound on the question, not on the reply. A failed read used to leave the timestamp
-      // untouched, so an unreachable platform turned every poll (25 s) and every settle into
-      // another attempt for every known child. It also keeps two concurrent callers apart.
+      // bound on the question, not on the reply. It also keeps two concurrent callers apart.
       this.paneCheckedAt.set(member, now);
       try {
         // Bounded like the roster read: a platform that does not answer must not turn
         // the poll/settle path into an unbounded wait.
         const detail = await withTimeout(this.pg.getMember(member), ROSTER_TIMEOUT_MS);
-        if (detail.status === 'gone') {
-          this.markGone(member);
-          const outcome = await this.closePane(member);
-          for (const failure of outcome.failures) {
-            console.warn(`[pigroups] could not close pane ${failure.pane} of gone member ${member}: ${failure.error}`);
-          }
-          for (const forced of outcome.forced) {
-            console.warn(`[pigroups] closed pane ${forced.pane} of gone member ${member} while its agent was still running`);
-          }
-          // The row only existed to keep a telemetry-only child in this recheck. Forget
-          // it after closePane: the name fallback still needs it to find the last pane
-          // when the child has no session record. Once the platform says gone, keeping
-          // it would ask about a dead child forever.
-          this.telemetry.forget(member);
-          continue;
+        if (detail.status !== 'gone') continue;
+        this.markGone(member);
+        const outcome = await this.closePane(member);
+        for (const failure of outcome.failures) {
+          console.warn(`[pigroups] could not close pane ${failure.pane} of gone member ${member}: ${failure.error}`);
         }
-
-        const record = recorded.get(member);
-        if (record === undefined || record.intent === 'terminated' || this.config.autoRespawn !== true) continue;
-        // The fresher of the two: `last_seen_at` is refreshed by every authenticated
-        // request, so on a pre-0.5 platform with no heartbeat it is the fallback. An old
-        // heartbeat must not overrule a newer sighting.
-        const heartbeatAt = typeof detail.heartbeat_at === 'number' ? detail.heartbeat_at : null;
-        const lastSeen = typeof detail.last_seen_at === 'number' ? detail.last_seen_at : null;
-        const livenessAt = Math.max(heartbeatAt ?? 0, lastSeen ?? 0) || null;
-        if (livenessAt !== null && now - livenessAt <= missingAfterMs) continue;
-        // No session file means no pane can be matched to it; that is not confirmation
-        // of absence, and the repair could not reopen it without guessing a path.
-        const sessionFile = readSessionFileForMember(this.config.adapterDir, member);
-        if (sessionFile === undefined) continue;
-        if (panes === undefined) {
-          try {
-            panes = await this.herdr.listPanes();
-          } catch {
-            panes = null;
-          }
+        for (const forced of outcome.forced) {
+          console.warn(`[pigroups] closed pane ${forced.pane} of gone member ${member} while its agent was still running`);
         }
-        // A question herdr could not answer is not evidence of death: never start a
-        // process when the answer is unknown.
-        if (panes === null) continue;
-        // A live pane means the process is there and merely quiet; starting another
-        // would split its cursor. Only both observations together are a death sentence.
-        if (panes.some((pane) => pane.agent_session?.value === sessionFile)) continue;
-        dead.push(member);
+        // The row only existed to keep a telemetry-only child in this recheck. Forget
+        // it after closePane: the name fallback still needs it to find the last pane
+        // when the child has no session record. Once the platform says gone, keeping
+        // it would ask about a dead child forever.
+        this.telemetry.forget(member);
       } catch (err) {
         // A 404 is the platform's other way of saying the member is gone; drop the
         // telemetry row like the explicit `status:'gone'` branch above.
@@ -1888,9 +1817,6 @@ export class AdapterLoop {
         // a living child; a late close loses nothing.
       }
     }
-    // One cascade is one repair pass. Starting every dead child at once would open a
-    // pane and a pi process per child in the same instant.
-    if (dead.length > 0) this.runRepairPassInBackground(dead);
   }
 
   // ---- startup -----------------------------------------------------------
@@ -1927,17 +1853,27 @@ export class AdapterLoop {
         );
       }
     }
+    this.connectedAt = this.now();
     this.selfId = who.member.id;
     this.selfName = who.member.name;
     this.parentId = who.member.parent_id;
+    // §12.3: the local record decides whether this session may own the platform;
+    // whoami may only demote. A record that says child never starts one, even if
+    // the token happens to name a root.
+    if (this.config.parentId === null && who.member.is_root !== true) {
+      this.rootDemoted = true;
+      console.warn('[pigroups] session record says root, but whoami does not; this session will not start the platform');
+    } else if (typeof this.config.parentId === 'string' && who.member.is_root === true) {
+      console.warn('[pigroups] session record says child, but whoami says root; this session will not start the platform');
+    }
     // §12.3: a session that has an identity records it under the one key it will still
     // know after a restart. No session file means there is no honest key — do not invent one.
     if (this.sessionFile !== undefined && this.sessionFile !== '') {
       writeSessionRecords(this.config.adapterDir, {
         memberId: who.member.id,
-        orgUrl: this.config.url,
+        orgUrl: this.pg.url,
         token: this.config.token,
-        parentId: who.member.parent_id,
+        parentId: typeof this.config.parentId === 'string' ? this.config.parentId : who.member.parent_id,
         sessionFile: this.sessionFile,
         ...(this.config.orgKey === undefined ? {} : { orgKey: this.config.orgKey }),
       });
@@ -2203,7 +2139,12 @@ export class AdapterLoop {
           return;
         }
         const scope = typeof payload.scope === 'string' && payload.scope !== '' ? payload.scope : undefined;
-        this.runRespawnInBackground(scope);
+        // A recursive startup control must not let a just-restored child start its
+        // grandchildren before its own settle; a human `pg_respawn` tool call does
+        // not go through here and stays immediate.
+        const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
+        const inSettle = this.connectedAt === undefined || this.now() < this.connectedAt + graceMs;
+        this.runRespawnInBackground(scope, inSettle ? { allowStart: false } : {});
         return;
       }
 
@@ -2751,38 +2692,6 @@ export class AdapterLoop {
     this.enqueue({ text: decision.text, kind: 'nudge' });
   }
 
-  /**
-   * §9: the platform itself is unreachable after the retry budget. This is not a ledger
-   * state (there is no conversation set), but `blocked` is still the word §9 uses, so it
-   * travels on the same `pg.attention` channel with an empty owed set.
-   */
-  private async reportBlocked(text: string): Promise<void> {
-    const parent = this.parentId;
-    const self = this.selfId;
-    if (!parent || !self) return;
-    try {
-      await withTimeout(
-        this.pg.sendControl({
-          to: parent,
-          id: randomUUID(),
-          cmd: 'pg.attention',
-          payload: {
-            v: 1,
-            child: self,
-            name: this.selfName,
-            state: 'blocked',
-            since: this.now(),
-            owed: [...this.blockedReported].sort(),
-            note: text,
-          },
-        }),
-        REPORT_TIMEOUT_MS,
-      );
-    } catch {
-      // Best effort: a parent that cannot be reached must not stop the loop.
-    }
-  }
-
   // ---- child-side telemetry: edge-triggered four states (§5.1) -----------
 
   private handleEvent(event: PiEvent): void {
@@ -2992,6 +2901,23 @@ export class AdapterLoop {
     }
   }
 
+  /** Root-only platform ensure, off the poll path. A new URL resets startup so the next poll re-inits. */
+  private async ensureRootPlatform(): Promise<void> {
+    try {
+      const url = await this.config.ensurePlatform?.();
+      if (url !== undefined && url !== '' && url !== this.pg.url) {
+        this.pg.setUrl(url);
+        this.connectedAt = undefined;
+        this.ready = false;
+        this.readyPromise = undefined;
+      }
+    } catch (err) {
+      console.warn(`[pigroups] root platform ensure failed: ${errorText(err)}; will retry`);
+    } finally {
+      this.ensureInFlight = false;
+    }
+  }
+
   private async handlePollError(err: unknown): Promise<void> {
     // A `PgGone` from any other stage of the pull means the same thing as a 410
     // answer (§9): the member is gone, so nothing may keep running.
@@ -3011,12 +2937,18 @@ export class AdapterLoop {
 
     if (err instanceof PgUnavailable) {
       this.connectionFailures += 1;
-      if (this.connectionFailures >= CONNECT_FAILURE_LIMIT) {
-        await this.reportBlocked(`platform unreachable after ${this.connectionFailures} attempts`);
-        await this.stop();
-        return;
+      // Root-only: a platform owner brings its own platform back. Children never
+      // start one; they keep retrying whatever URL their record names.
+      if (
+        this.config.parentId === null &&
+        !this.rootDemoted &&
+        this.config.ensurePlatform !== undefined &&
+        !this.ensureInFlight
+      ) {
+        this.ensureInFlight = true;
+        void this.ensureRootPlatform();
       }
-      await sleep(Math.min(CONNECT_BACKOFF_MAX_MS, 1000 * 2 ** (this.connectionFailures - 1)));
+      await this.sleepImpl(Math.min(CONNECT_BACKOFF_MAX_MS, 1000 * 2 ** (Math.min(this.connectionFailures, 6) - 1)));
       return;
     }
 

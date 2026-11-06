@@ -12,10 +12,10 @@ import { shellQuote } from './command.ts';
 import { AdapterLoop, DEFAULT_DELIVERY_MAX_CHARS } from './loop.ts';
 import type { LoopConfig } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
-import { defaultAdapterDir, findOrgKeyByUrl, isRecordedOrg, startOrg } from './org.ts';
+import { defaultAdapterDir, findOrgKeyByUrl, isRecordedOrg, recordedOrgUrl, startOrg } from './org.ts';
 import type { OrgHandle } from './org.ts';
-import { PgClient, PgError } from './pgclient.ts';
-import { readSessionRecord } from './records.ts';
+import { PgClient } from './pgclient.ts';
+import { acquireConsumerLease, readSessionRecord } from './records.ts';
 import { PiSurfaceAdapter } from './surface.ts';
 import type { PiContext, PiLike, PiToolDefinition } from './surface.ts';
 import { ADAPTER_VERSION } from './version.ts';
@@ -68,7 +68,20 @@ export default function pigroupsExtension(pi: PiLike): void {
   let orgToolRegistered = false;
 
   if (config !== null) {
-    session = openMemberSession(pi, config);
+    const lease = acquireConsumerLease(config.adapterDir, config.token);
+    if (lease === null) {
+      console.warn(
+        `[pigroups] this member is already open in another session (${config.url}); ` +
+          'not registering tools and not polling. Close that pane, then /reload.',
+      );
+      return;
+    }
+    try {
+      session = openMemberSession(pi, config, lease.release);
+    } catch (err) {
+      lease.release();
+      throw err;
+    }
     pi.on('session_start', (_event, ctx) => session?.start(ctx));
   } else {
     const registerOrgStart = (): void => {
@@ -128,7 +141,36 @@ export default function pigroupsExtension(pi: PiLike): void {
             signal,
           });
           org = started;
-          session = openMemberSession(pi, loopConfig(started.url, started.token, process.env, started.orgKey));
+          const adapterDir = defaultAdapterDir();
+          const lease = acquireConsumerLease(adapterDir, started.token);
+          if (lease === null) {
+            console.warn(
+              `[pigroups] this root is already open in another session (${started.url}); ` +
+                'not registering tools and not polling. Close that pane, then /reload.',
+            );
+            return text(
+              JSON.stringify(
+                {
+                  already_member: false,
+                  leased: false,
+                  url: started.url,
+                  note: 'another session already consumes this root token; close it and /reload',
+                },
+                null,
+                2,
+              ),
+            );
+          }
+          const config = loopConfig(started.url, started.token, process.env, started.orgKey);
+          config.parentId = null;
+          config.ensurePlatform = async () =>
+            (await startOrg({ adapterDir, name: started.orgKey, mayBootstrap: false })).url;
+          try {
+            session = openMemberSession(pi, config, lease.release);
+          } catch (err) {
+            lease.release();
+            throw err;
+          }
           session.start(ctx);
           return text(JSON.stringify({ already_member: false, ...orgAnswer(started, started.reattached) }, null, 2));
         },
@@ -138,60 +180,44 @@ export default function pigroupsExtension(pi: PiLike): void {
     pi.on('session_start', async (_event, ctx) => {
       if (session !== undefined) return;
       // §12.3: the session file is the only identity a manually resumed pi knows.
-      // A record found here is the third startup path, and it is a full member: the
-      // same twelve tools, no pg_org_start.
+      // A record is a full member: the twelve tools, no pg_org_start, and no way to
+      // start the platform unless this session is the root.
       const sessionFile = sessionFileOf(ctx);
       const adapterDir = defaultAdapterDir();
       const saved = sessionFile === undefined ? undefined : readSessionRecord(adapterDir, sessionFile);
       if (saved !== undefined) {
-        // §12.3/A: the record names the organisation directory (`orgKey`). A record
-        // written before that field existed is matched by URL against the small
-        // orgs/*/org.json files - never against a platform database. Without a
-        // record there is nothing to ensure, so do not invent a platform.
+        const lease = acquireConsumerLease(adapterDir, saved.token);
+        if (lease === null) {
+          console.warn(
+            `[pigroups] this member is already open in another session (${saved.orgUrl}); ` +
+              'not registering tools and not polling. Close that pane, then /reload.',
+          );
+          return;
+        }
+
         const orgKey = saved.orgKey ?? findOrgKeyByUrl(adapterDir, saved.orgUrl);
-        if (orgKey === undefined || !isRecordedOrg(adapterDir, orgKey)) {
+        const url = recordedOrgUrl(adapterDir, orgKey) ?? saved.orgUrl;
+        const config = loopConfig(url, saved.token, process.env, orgKey);
+        config.parentId = saved.parentId;
+        // Only a record that says root may bring its platform back. The ensure runs
+        // from the loop's PgUnavailable path, never from this handler.
+        if (saved.parentId === null && orgKey !== undefined && isRecordedOrg(adapterDir, orgKey)) {
+          config.ensurePlatform = async () =>
+            (await startOrg({ adapterDir, name: orgKey, mayBootstrap: false })).url;
+        } else if (saved.parentId === null) {
           console.warn(
-            `[pigroups] session record for ${saved.memberId} cannot name its organisation ` +
-              (saved.orgKey === undefined
-                ? `(no orgKey, and no orgs/*/org.json matches ${saved.orgUrl}); `
-                : `(orgKey '${saved.orgKey}', but its org.json is missing); `) +
-              'not starting a platform from this record. Falling back to pg_org_start: ' +
-              'start an organisation, or ask the parent to reissue the token.',
+            `[pigroups] root record ${saved.memberId} names no organisation record; ` +
+              'it will poll its recorded URL but cannot restart the platform',
           );
-          registerOrgStart();
-          return;
         }
-        // A: ensure the platform before asking whether this identity still works. A
-        // dead platform is no longer mistaken for a healthy identity: a session that
-        // resumed after a reboot brings its own organisation back on the recorded port.
-        let started: OrgHandle;
         try {
-          started = await startOrg({ adapterDir, name: orgKey });
+          session = openMemberSession(pi, config, lease.release);
         } catch (err) {
-          console.warn(
-            `[pigroups] could not ensure the platform for session record ${saved.memberId} ` +
-              `(orgs/${orgKey}): ${err instanceof Error ? err.message : String(err)}. ` +
-              'Falling back to pg_org_start: start an organisation, or ask the parent to reissue the token.',
-          );
-          registerOrgStart();
-          return;
+          lease.release();
+          throw err;
         }
-        // §12.3: a record is a claim, not proof. A token that the platform no longer
-        // accepts (or a member whose status is gone) must not trap this session behind
-        // twelve tools that cannot talk to anything. Fall back to the no-identity path
-        // and say exactly what happened, so a person can start over or a parent can
-        // reissue the token.
-        const verdict = await recoveryVerdict(started.url, saved.token, saved.memberId);
-        if (verdict.ok) {
-          session = openMemberSession(pi, loopConfig(started.url, saved.token, process.env, started.orgKey));
-          session.start(ctx);
-          return;
-        }
-        console.warn(
-          `[pigroups] session record for ${saved.memberId} is no longer usable (${verdict.reason}); ` +
-            'the token is invalid/expired or the member is gone. Falling back to pg_org_start: ' +
-            'start a new organisation, or ask the parent to reissue the token.',
-        );
+        session.start(ctx);
+        return;
       }
       registerOrgStart();
     });
@@ -217,7 +243,7 @@ interface MemberSession {
   stop(): Promise<void>;
 }
 
-function openMemberSession(pi: PiLike, config: LoopConfig): MemberSession {
+function openMemberSession(pi: PiLike, config: LoopConfig, releaseLease: () => void): MemberSession {
   const surface = new PiSurfaceAdapter(pi);
   const pg = new PgClient({ url: config.url, token: config.token });
   const herdr = new HerdrCli({ spawnCmd: config.spawnCmd });
@@ -245,11 +271,15 @@ function openMemberSession(pi: PiLike, config: LoopConfig): MemberSession {
     },
     async stop(): Promise<void> {
       const active = loop;
-      if (!active) return;
       loop = undefined;
       // §8.6: nothing is sent. The heartbeat stops with the loop, and the parent's
-      // liveness check observes the absence (§5.4).
-      await active.stop();
+      // liveness check observes the absence (§5.4). The consumer lease is released
+      // last: the old loop must not overlap a new incarnation.
+      try {
+        if (active) await active.stop();
+      } finally {
+        releaseLease();
+      }
     },
   };
 }
@@ -313,8 +343,6 @@ export function loopConfig(url: string, token: string, env: NodeJS.ProcessEnv = 
     // a window usually sees a whole batch; `tick()` (5 s) checks when it expires.
     deliveryWindowMs: envInt(env, 'PIGROUPS_DELIVERY_WINDOW_MS', 60_000),
     spawnReadyMs: envInt(env, 'PIGROUPS_SPAWN_READY_MS', 120_000),
-    // §7/§12.5: one number is both the "already running" window and the startup grace.
-    respawnFreshMs: envInt(env, 'PIGROUPS_RESPAWN_FRESH_MS', 120_000),
     // §12.5: the automatic repair waits this long after startup before starting anything.
     respawnGraceMs: envInt(env, 'PIGROUPS_RESPAWN_GRACE_MS', 30_000),
     autoRespawn: envBool(env, 'PIGROUPS_AUTO_RESPAWN', true),
@@ -336,29 +364,6 @@ function envBool(env: NodeJS.ProcessEnv, name: string, fallback: boolean): boole
   if (value === '0' || value === 'false') return false;
   if (value === '1' || value === 'true') return true;
   return fallback;
-}
-
-type RecoveryVerdict = { ok: true } | { ok: false; reason: string };
-
-/**
- * §12.3: a recorded identity is usable only while the platform still recognises it.
- * 401/404/410 and `status:'gone'` are answers, not transport failures: retrying them
- * forever would leave the session with a dead member's tool surface. Anything else
- * (an unreachable platform, a 5xx) keeps the old path, because the loop already owns
- * backoff and the identity may still be fine.
- */
-async function recoveryVerdict(orgUrl: string, token: string, memberId: string): Promise<RecoveryVerdict> {
-  try {
-    const who = await new PgClient({ url: orgUrl, token }).whoami();
-    if (who.member.status === 'gone') return { ok: false, reason: 'member is gone' };
-    if (who.member.id !== memberId) return { ok: false, reason: 'the record names a different member' };
-    return { ok: true };
-  } catch (err) {
-    if (err instanceof PgError && (err.status === 401 || err.status === 404 || err.status === 410)) {
-      return { ok: false, reason: `${err.status} ${err.code}` };
-    }
-    return { ok: true };
-  }
 }
 
 function buildTools(
@@ -609,23 +614,15 @@ function buildTools(
       name: 'pg_respawn',
       label: 'PiGroups respawn',
       description:
-        'Reopen this member’s direct children whose platform rows are still alive but whose processes are gone ' +
-        '(§12). For each recorded child: a gone member is reported as unrecoverable; a terminated one is skipped; ' +
-        'one seen by the platform recently is left running and is only sent a pg.respawn so it repairs its own ' +
-        'children; a stale one is started from its recorded session file with the recorded token, then sent the ' +
-        'same control. A live token is never reissued. No member is started twice, and no session path is guessed. ' +
-        'With no `scope`, every direct child is considered; with a member id, only that child is.',
-      parameters: {
-        type: 'object',
-        properties: {
-          scope: { type: 'string', description: 'Only this direct child member id; omit for every recorded child.' },
-        },
-        additionalProperties: false,
-      },
-      execute: async (_id, params) => {
-        const scope = typeof params.scope === 'string' && params.scope !== '' ? params.scope : undefined;
-        return text(JSON.stringify(await requireLoop().respawn(scope), null, 2));
-      },
+        'Reopen this member’s direct children whose processes are gone (design §12). The caller’s position ' +
+        'in the tree defines the scope: every recorded direct child is considered, and a started or running ' +
+        'child is sent pg.respawn so it repairs its own children in turn. Herdr pane presence is the only ' +
+        'evidence a child is already running: a pane carrying its session file gets the control; a missing ' +
+        'pane is started from the recorded session file and token; an unreadable pane list never starts a ' +
+        'process. A gone member is unrecoverable, a terminated one is skipped, and a live token is never ' +
+        'reissued. The automatic startup pass uses the same rule after a settle; this tool acts immediately.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      execute: async () => text(JSON.stringify(await requireLoop().respawn(), null, 2)),
     },
     {
       name: 'pg_whoami',

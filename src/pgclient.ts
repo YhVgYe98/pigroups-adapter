@@ -202,14 +202,23 @@ export interface PollOptions {
 }
 
 export class PgClient {
-  readonly url: string;
+  private currentUrl: string;
   readonly token: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: PgClientOptions) {
-    this.url = opts.url.replace(/\/+$/, '');
+    this.currentUrl = opts.url.replace(/\/+$/, '');
     this.token = opts.token;
     this.fetchImpl = globalThis.fetch;
+  }
+
+  /** The platform may move ports; a root ensure updates this in place. */
+  get url(): string {
+    return this.currentUrl;
+  }
+
+  setUrl(url: string): void {
+    this.currentUrl = url.replace(/\/+$/, '');
   }
 
   async health(): Promise<Health> {

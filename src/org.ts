@@ -93,6 +93,12 @@ export interface OrgStartOptions {
   healthTimeoutMs?: number;
   /** Test seam: where a new organisation's platform id comes from. */
   platformIdSource?: () => string;
+  /**
+   * A session that already has a record must never mint a new root. With `false`,
+   * an organisation whose recorded root token no longer works fails instead of
+   * bootstrapping a second root over the old one.
+   */
+  mayBootstrap?: boolean;
 }
 
 /** One place the adapter looked for the platform checkout, and why. */
@@ -255,6 +261,29 @@ function sameOrgUrl(a: string, b: string): boolean {
 }
 
 /**
+ * The current URL of a recorded organisation, read from local files only. The
+ * platform may have advanced past the recorded port; its endpoint record wins.
+ * Returns undefined when the record is missing or unreadable, so the caller can
+ * fall back to the URL stored in its own session record.
+ */
+export function recordedOrgUrl(adapterDir: string, key: string | undefined): string | undefined {
+  if (key === undefined || key === '') return undefined;
+  const clean = sanitizeOrgKey(key);
+  if (clean === undefined) return undefined;
+  try {
+    const state = readOrgState(join(adapterDir, ORG_DIR, clean, ORG_FILE));
+    if (state === undefined) return undefined;
+    if (state.platform_id !== undefined && state.data_dir !== '') {
+      const endpoint = readPlatformEndpoint(resolve(state.data_dir), state.platform_id);
+      if (endpoint !== undefined) return urlOfPort(endpoint.port);
+    }
+    return state.url;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Directory-safe key. The name wins; without one it is the basename of the working
  * directory, unless exactly one organisation is already recorded here - then that is the
  * one a later session means. Two records and no name is ambiguous, so the working
@@ -344,7 +373,11 @@ async function reattachRecorded(
   // both now means the next start does not look at a dead address first.
   const platformId = previous.platform_id ?? platformIdOf(health);
   const urlChanged = url !== previous.url;
-  const pidChanged = endpoint?.pid !== undefined && endpoint.pid !== previous.pid;
+  // A duplicate starter can leave a pre-bind endpoint claim whose pid is already
+  // gone; a dead pid must not replace the serving process the record names.
+  const endpointPid =
+    endpoint?.pid !== undefined && pidAlive(endpoint.pid) ? endpoint.pid : undefined;
+  const pidChanged = endpointPid !== undefined && endpointPid !== previous.pid;
   if (
     migratedDataDir !== undefined ||
     urlChanged ||
@@ -355,7 +388,7 @@ async function reattachRecorded(
       ...previous,
       url,
       data_dir: migratedDataDir ?? previous.data_dir,
-      ...(endpoint?.pid === undefined ? {} : { pid: endpoint.pid }),
+      ...(endpointPid === undefined ? {} : { pid: endpointPid }),
       ...(platformId === undefined ? {} : { platform_id: platformId }),
     });
   }
@@ -364,7 +397,7 @@ async function reattachRecorded(
     url,
     token: previous.token,
     adminToken: previous.admin_token,
-    pid: endpoint?.pid ?? previous.pid,
+    pid: endpointPid ?? previous.pid,
     dataDir: migratedDataDir ?? previous.data_dir,
     orgKey: basename(dirname(orgFile)),
     orgFile,
@@ -546,6 +579,14 @@ async function startOrgLocked(
       }
     }
 
+    if (opts.mayBootstrap === false) {
+      throw new OrgStartError(
+        `refusing to bootstrap a new root for ${orgFile}: this session already has a recorded identity, ` +
+          'and a bootstrap would replace the recorded organisation\'s root. ' +
+          (tokenError === undefined ? '' : `The recorded root token did not work: ${tokenError}. `) +
+          'Reissue the root token, or start a new organisation from a session with no record.',
+      );
+    }
     const created = await new PgClient({ url, token: adminToken }).bootstrap(
       opts.name === undefined ? {} : { name: opts.name },
     );
@@ -821,6 +862,15 @@ function lockIsStale(lockFile: string): boolean {
     return false;
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code !== 'ESRCH';
   }
 }
 

@@ -30,7 +30,8 @@ export interface SessionRecord {
   memberId: string;
   orgUrl: string;
   token: string;
-  parentId: string | null;
+  /** `null` is root; a string is a child; `undefined` is an old record that does not say. */
+  parentId: string | null | undefined;
   sessionFile: string;
   /** `<adapterDir>/orgs/<orgKey>/org.json`; absent from records written before organisations named themselves. */
   orgKey?: string;
@@ -149,7 +150,12 @@ export function readSessionRecord(adapterDir: string, sessionFile: string): Sess
     memberId,
     orgUrl,
     token,
-    parentId: typeof record.parentId === 'string' ? record.parentId : null,
+    parentId:
+      typeof record.parentId === 'string'
+        ? record.parentId
+        : record.parentId === null
+          ? null
+          : undefined,
     sessionFile: storedFile,
     ...(typeof orgKey === 'string' && orgKey !== '' ? { orgKey } : {}),
   };
@@ -282,4 +288,144 @@ function writePrivateJson(path: string, value: unknown): void {
     rmSync(temporary, { force: true });
     throw err;
   }
+}
+
+/**
+ * One consumer per member token (设计说明 §12.6). The token is the only identity
+ * every entry path knows before any network call; a member has exactly one token,
+ * so `sha1(token)` is a stable key. The lease records the process start time so a
+ * reboot or pid reuse cannot make a dead holder look alive.
+ */
+export interface ConsumerLease {
+  pid: number;
+  pid_start: number;
+  /** Acquisition timestamp; a release only removes the incarnation it acquired. */
+  at: number;
+}
+
+const CONSUMERS = 'consumers';
+
+export function consumerLeasePath(adapterDir: string, token: string): string {
+  return join(adapterDir, CONSUMERS, `${sessionFileHash(token)}.json`);
+}
+
+/** `/proc/<pid>/stat` field 22; undefined when the process or `/proc` is unavailable. */
+export function processStartTime(pid: number): number | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const close = stat.lastIndexOf(')');
+    if (close < 0) return undefined;
+    const fields = stat.slice(close + 2).trim().split(/\s+/);
+    // After the comm field the fields start at field 3 (state); starttime is field 22.
+    const start = Number(fields[19]);
+    return Number.isFinite(start) && start > 0 ? start : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function processAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code !== 'ESRCH';
+  }
+}
+
+export function readConsumerLease(adapterDir: string, token: string): ConsumerLease | undefined {
+  const path = consumerLeasePath(adapterDir, token);
+  const record = readJson(path);
+  if (record === undefined) return undefined;
+  const { pid, pid_start, at } = record;
+  if (
+    !Number.isInteger(pid) ||
+    pid <= 0 ||
+    !Number.isInteger(pid_start) ||
+    pid_start <= 0 ||
+    typeof at !== 'number' ||
+    !Number.isFinite(at)
+  ) {
+    console.warn(`[pigroups] ignoring ${path}: it is not a complete consumer lease`);
+    return undefined;
+  }
+  return { pid, pid_start, at };
+}
+
+/**
+ * Acquire the member's consumer seat before any tool is registered. Returns a
+ * release for this incarnation, or `null` when another live process holds it (or
+ * the lease file is unreadable: fail closed, a human removes it).
+ */
+export function acquireConsumerLease(
+  adapterDir: string,
+  token: string,
+): { at: number; release: () => void } | null {
+  const path = consumerLeasePath(adapterDir, token);
+  const ourPid = process.pid;
+  const ourStart = processStartTime(ourPid);
+  if (ourStart === undefined) {
+    console.warn('[pigroups] cannot read this process start time from /proc; refusing to claim a consumer seat');
+    return null;
+  }
+
+  const existing = readConsumerLease(adapterDir, token);
+  if (existing !== undefined) {
+    const holderStart = processStartTime(existing.pid);
+    const sameIncarnation = existing.pid === ourPid && holderStart === ourStart;
+    if (!sameIncarnation) {
+      if (processAlive(existing.pid) && holderStart === existing.pid_start) return null;
+      if (holderStart === undefined && processAlive(existing.pid)) {
+        // A live pid whose start cannot be proven is not a stale holder.
+        return null;
+      }
+    }
+  } else if (existsSync(path)) {
+    console.warn(`[pigroups] ignoring unreadable consumer lease ${path}; remove it if no other pane is running this member`);
+    return null;
+  }
+
+  const at = Math.max(Date.now(), (existing?.at ?? 0) + 1);
+  ensurePrivateDir(adapterDir);
+  ensurePrivateDir(join(adapterDir, CONSUMERS));
+  const payload = `${JSON.stringify({ pid: ourPid, pid_start: ourStart, at })}\n`;
+  if (existing === undefined) {
+    // Exactly one creator of a fresh seat; two processes that both saw "free"
+    // must not both win through a rename.
+    try {
+      writeFileSync(path, payload, { mode: 0o600, flag: 'wx' });
+      chmodSync(path, 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') return null;
+      throw err;
+    }
+  } else {
+    // A stale/taken-over seat is replaced atomically; the read-back below detects
+    // a racer that replaced it in the same window.
+    const temporary = `${path}.${ourPid}.${randomBytes(6).toString('hex')}.tmp`;
+    try {
+      writeFileSync(temporary, payload, { mode: 0o600 });
+      chmodSync(temporary, 0o600);
+      renameSync(temporary, path);
+    } catch (err) {
+      rmSync(temporary, { force: true });
+      throw err;
+    }
+  }
+
+  const written = readConsumerLease(adapterDir, token);
+  if (written === undefined || written.pid !== ourPid || written.pid_start !== ourStart || written.at !== at) {
+    return null;
+  }
+  return {
+    at,
+    release: (): void => {
+      const current = readConsumerLease(adapterDir, token);
+      if (current === undefined || current.pid !== ourPid || current.pid_start !== ourStart || current.at !== at) {
+        return;
+      }
+      rmSync(path, { force: true });
+    },
+  };
 }
