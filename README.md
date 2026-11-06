@@ -36,7 +36,7 @@ Then start `pi` and ask for an organisation:
 A session with no identity gets exactly one tool, `pg_org_start`. It finds the platform
 checkout (`platform_dir` argument, else `PIGROUPS_PLATFORM_DIR`, else `../PiGroups` next to
 this repository), starts the platform detached, bootstraps a root, writes
-`<adapter dir>/orgs/<name>/org.json`, and only then registers the ten member tools (`pg_say`, `pg_spawn`,
+`<adapter dir>/orgs/<name>/org.json`, and only then registers the twelve member tools (`pg_say`, `pg_spawn`,
 `pg_members`, ...). The platform is started **by the agent**, not by hand, and it outlives the
 session: a later session with the same adapter directory reattaches through the same tool
 instead of starting a second platform.
@@ -51,7 +51,7 @@ and nothing signals a recorded pid any more; agent liveness and respawn remain a
 responsibilities. See §8.2 of [the adapter design](docs/设计说明.md).
 
 A member that was **handed an identity** is the other path: start pi with `PIGROUPS_URL` and
-`PIGROUPS_TOKEN` in its environment. It registers the ten member tools at startup and does not
+`PIGROUPS_TOKEN` in its environment. It registers the twelve member tools at startup and does not
 get `pg_org_start` at all. A child spawned by `pg_spawn` inherits both variables, so nothing
 else needs configuring for the tree below the root.
 

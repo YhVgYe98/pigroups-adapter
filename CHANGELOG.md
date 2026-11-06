@@ -1,3 +1,20 @@
+## v0.14.1（2026-11-06，与平台 0.6.0 配套）
+
+### skill 与实现对齐
+
+两个 skill 是随包发布的模型指引，`v0.14.0` 里有几处已经和代码对不上：
+
+- `pigroups-org` 的遥测表把 `gone` 当成一个状态。0.13.0 起它不是状态：被删成员直接从名册和
+  遥测里消失。表里补上 `blocked`、`silent_acking`、`recovered`，并写清"孩子没了"的证据是
+  心跳缺席加 pane 里没有那个 session。
+- 名册的 `last_seen_at` 只是鉴权时间；重开一个身份还在、进程没了的孩子用 `pg_respawn`，
+  不是 `terminate` + `spawn`。
+- `pigroups-message` 补上 `pg_ack` 这个合法出口：不需要回复时清账，而不是沉默或用 ack 躲。
+- README 的成员工具数从 ten 改成 twelve（`pg_ack`、`pg_respawn` 之前就加了）。
+- 设计说明里的版本示例和 `SUPPORTED_PLATFORM_MINORS` 改成当前值，不再引用 0.11.0/0.4.0。
+
+只有文档、skill 与版本号变化，没有代码改动。
+
 ## v0.14.0（2026-11-06，与平台 0.6.0 配套）
 
 ### 端口归平台，适配器跟随
