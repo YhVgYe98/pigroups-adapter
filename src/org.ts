@@ -160,12 +160,16 @@ export function platformCandidates(
   candidates.push({ path: resolve(root, '..', '..', 'PiGroups'), source: '../../PiGroups' });
   candidates.push({ path: resolve(root, 'node_modules', 'pigroups'), source: 'node_modules/pigroups' });
   // The published adapter depends on the platform package. A local checkout still
-  // wins above, but an npm install finds the exact dependency here.
-  try {
-    const installed = createRequire(import.meta.url).resolve('pigroups/package.json');
-    candidates.push({ path: dirname(installed), source: 'installed pigroups npm package' });
-  } catch {
-    // Not installed: the lookup error lists every other candidate.
+  // wins above, but an npm install finds the exact dependency here. A test that
+  // overrides `adapterRoot` deliberately isolates the filesystem layout, so it must
+  // not inherit the developer's installed dependency.
+  if (opts.adapterRoot === undefined) {
+    try {
+      const installed = createRequire(import.meta.url).resolve('pigroups/package.json');
+      candidates.push({ path: dirname(installed), source: 'installed pigroups npm package' });
+    } catch {
+      // Not installed: the lookup error lists every other candidate.
+    }
   }
 
   const seen = new Set<string>();
