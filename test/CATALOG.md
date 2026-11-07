@@ -264,16 +264,16 @@ Every `node:test` case in `test/*.test.ts`, grouped by type and area. There are 
 | A-INT-093 | [orgstart.test.ts:785](./orgstart.test.ts#L785) | a restart passes the recorded platform id to the platform process |
 | A-INT-094 | [orgstart.test.ts:822](./orgstart.test.ts#L822) | a new organisation follows the platform past a seed port held by another service |
 | A-INT-095 | [orgstart.test.ts:857](./orgstart.test.ts#L857) | an existing organisation follows the endpoint when org.json.url is stale |
-| A-INT-096 | [orgstart.test.ts:901](./orgstart.test.ts#L901) | an occupied recorded port is reattached when health answers, never replaced by a new port |
-| A-INT-097 | [orgstart.test.ts:948](./orgstart.test.ts#L948) | an occupied recorded port with no health answer fails instead of starting a second platform |
-| A-INT-098 | [orgstart.test.ts:994](./orgstart.test.ts#L994) | two simultaneous starts of the same new organisation spawn one platform and share its URL |
-| A-INT-099 | [orgstart.test.ts:1021](./orgstart.test.ts#L1021) | a start that cannot take the lock adopts the healthy platform instead of waiting it out |
-| A-INT-100 | [orgstart.test.ts:1041](./orgstart.test.ts#L1041) | a platform whose id differs from org.json is refused without rewriting the record or bootstrapping |
-| A-INT-101 | [orgstart.test.ts:1119](./orgstart.test.ts#L1119) | a checkout from another platform version is refused before it can start |
-| A-INT-102 | [orgstart.test.ts:1177](./orgstart.test.ts#L1177) | a missing platform checkout fails with every candidate path it tried |
-| A-INT-103 | [orgstart.test.ts:1212](./orgstart.test.ts#L1212) | a record without a platform id is reattached or refused, never bootstrapped over |
-| A-INT-104 | [orgstart.test.ts:1247](./orgstart.test.ts#L1247) | a failed bootstrap kills the platform it just started |
-| A-INT-105 | [orgstart.test.ts:1324](./orgstart.test.ts#L1324) | two organisations with different names are two platforms and two records |
+| A-INT-096 | [orgstart.test.ts:902](./orgstart.test.ts#L902) | an occupied recorded port is reattached when health answers, never replaced by a new port |
+| A-INT-097 | [orgstart.test.ts:949](./orgstart.test.ts#L949) | an occupied recorded port with no health answer fails instead of starting a second platform |
+| A-INT-098 | [orgstart.test.ts:995](./orgstart.test.ts#L995) | two simultaneous starts of the same new organisation spawn one platform and share its URL |
+| A-INT-099 | [orgstart.test.ts:1022](./orgstart.test.ts#L1022) | a start that cannot take the lock adopts the healthy platform instead of waiting it out |
+| A-INT-100 | [orgstart.test.ts:1042](./orgstart.test.ts#L1042) | a platform whose id differs from org.json is refused without rewriting the record or bootstrapping |
+| A-INT-101 | [orgstart.test.ts:1120](./orgstart.test.ts#L1120) | a checkout from another platform version is refused before it can start |
+| A-INT-102 | [orgstart.test.ts:1178](./orgstart.test.ts#L1178) | a missing platform checkout fails with every candidate path it tried |
+| A-INT-103 | [orgstart.test.ts:1213](./orgstart.test.ts#L1213) | a record without a platform id is reattached or refused, never bootstrapped over |
+| A-INT-104 | [orgstart.test.ts:1248](./orgstart.test.ts#L1248) | a failed bootstrap kills the platform it just started |
+| A-INT-105 | [orgstart.test.ts:1325](./orgstart.test.ts#L1325) | two organisations with different names are two platforms and two records |
 
 ### owed
 

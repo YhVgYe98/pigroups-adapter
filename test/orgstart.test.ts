@@ -892,7 +892,8 @@ test('an existing organisation follows the endpoint when org.json.url is stale',
   const rewritten = JSON.parse(await readFile(stateFile, 'utf8')) as { url: string; pid: number };
   assert.equal(rewritten.url, second.url, 'org.json follows the endpoint');
   assert.equal(rewritten.pid, second.pid, 'org.json names the process that actually serves');
-  assert.notEqual(rewritten.pid, saved.pid, 'the dead pid was replaced');
+  // PID reuse is legal on Linux; the record must name the process that actually serves,
+  // not necessarily a numerically different pid from the old one.
 });
 
 // B1: a recorded port that is occupied may belong to the very platform another
