@@ -8,6 +8,7 @@
 import { execFile } from 'node:child_process';
 
 import { shellQuote, splitCommand } from './command.ts';
+import { logWarn } from './log.ts';
 
 export interface HerdrCloseResult {
   /**
@@ -187,12 +188,12 @@ export class HerdrCli implements Herdr {
       // `null` keeps the call non-throwing (cleanup for a committed delete relies on
       // that) while still telling a caller that herdr could not answer. A caller that
       // treats this as "no pane" would start a second process on a living identity.
-      console.warn(`[pigroups] could not read herdr pane list: ${(err as Error)?.message ?? String(err)}`);
+      logWarn(`[pigroups] could not read herdr pane list: ${(err as Error)?.message ?? String(err)}`);
       return null;
     }
     const panes = envelope?.panes;
     if (!Array.isArray(panes)) {
-      console.warn('[pigroups] herdr pane list returned no pane array');
+      logWarn('[pigroups] herdr pane list returned no pane array');
       return null;
     }
     const result: HerdrPane[] = [];

@@ -23,6 +23,8 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { logWarn } from './log.ts';
+
 export type ChildIntent = 'spawned' | 'terminated';
 
 /** `sessions/<hash>.json`: who this pi session is on the platform. */
@@ -143,7 +145,7 @@ export function readSessionRecord(adapterDir: string, sessionFile: string): Sess
     typeof storedFile !== 'string' ||
     (orgKey !== undefined && orgKey !== null && typeof orgKey !== 'string')
   ) {
-    console.warn(`[pigroups] ignoring ${path}: it is not a complete session record`);
+    logWarn(`[pigroups] ignoring ${path}: it is not a complete session record`);
     return undefined;
   }
   return {
@@ -206,7 +208,7 @@ function readChildFile(path: string): ChildRecord | undefined {
     !args.every((arg: unknown) => typeof arg === 'string') ||
     (cwd !== null && typeof cwd !== 'string')
   ) {
-    console.warn(`[pigroups] ignoring ${path}: it is not a complete child record`);
+    logWarn(`[pigroups] ignoring ${path}: it is not a complete child record`);
     return undefined;
   }
   return { parentId, childId, name, cwd: cwd ?? null, args, token, intent };
@@ -223,7 +225,7 @@ export function readRespawnLock(adapterDir: string, childId: string): RespawnLoc
   if (record === undefined) return undefined;
   const { pid, at } = record;
   if (!Number.isInteger(pid) || pid <= 0 || typeof at !== 'number' || !Number.isFinite(at)) {
-    console.warn(`[pigroups] ignoring ${path}: it is not a complete respawn lock`);
+    logWarn(`[pigroups] ignoring ${path}: it is not a complete respawn lock`);
     return undefined;
   }
   return { pid, at };
@@ -259,12 +261,12 @@ function readJson(path: string): Record<string, any> | undefined {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
     if (typeof parsed !== 'object' || parsed === null) {
-      console.warn(`[pigroups] ignoring ${path}: expected a JSON object`);
+      logWarn(`[pigroups] ignoring ${path}: expected a JSON object`);
       return undefined;
     }
     return parsed as Record<string, any>;
   } catch (err) {
-    console.warn(`[pigroups] ignoring ${path}: ${(err as Error)?.message ?? String(err)}`);
+    logWarn(`[pigroups] ignoring ${path}: ${(err as Error)?.message ?? String(err)}`);
     return undefined;
   }
 }
@@ -347,7 +349,7 @@ export function readConsumerLease(adapterDir: string, token: string): ConsumerLe
     typeof at !== 'number' ||
     !Number.isFinite(at)
   ) {
-    console.warn(`[pigroups] ignoring ${path}: it is not a complete consumer lease`);
+    logWarn(`[pigroups] ignoring ${path}: it is not a complete consumer lease`);
     return undefined;
   }
   return { pid, pid_start, at };
@@ -366,7 +368,7 @@ export function acquireConsumerLease(
   const ourPid = process.pid;
   const ourStart = processStartTime(ourPid);
   if (ourStart === undefined) {
-    console.warn('[pigroups] cannot read this process start time from /proc; refusing to claim a consumer seat');
+    logWarn('[pigroups] cannot read this process start time from /proc; refusing to claim a consumer seat');
     return null;
   }
 
@@ -382,7 +384,7 @@ export function acquireConsumerLease(
       }
     }
   } else if (existsSync(path)) {
-    console.warn(`[pigroups] ignoring unreadable consumer lease ${path}; remove it if no other pane is running this member`);
+    logWarn(`[pigroups] ignoring unreadable consumer lease ${path}; remove it if no other pane is running this member`);
     return null;
   }
 

@@ -22,6 +22,7 @@ import {
 } from './records.ts';
 import { NudgeBudget, TelemetryTable } from './state.ts';
 import { Watermarks } from './watermark.ts';
+import { logWarn, setLogIdentity } from './log.ts';
 import type {
   AttentionEvent,
   AttentionState,
@@ -45,6 +46,17 @@ import type { Herdr, HerdrPane } from './herdr.ts';
 import { ABORT_IDLE_TIMEOUT_MS } from './surface.ts';
 import { platformCompatibilityWarning, platformSupportsHeartbeat } from './version.ts';
 import type { DeliverKind, PiEvent, PiSurface } from './surface.ts';
+
+export interface MemberStatus {
+  /** This member's platform name, the same string on its herdr tab. */
+  name: string;
+  /** Platform id (`m_…`). */
+  id: string;
+  /** Root → … → self, names in tree order; always at least `[name]`. */
+  path: string[];
+  /** Direct children, as the platform counts them. */
+  childCount: number;
+}
 
 export interface LoopConfig {
   url: string;
@@ -79,6 +91,8 @@ export interface LoopConfig {
   ensurePlatform?: () => Promise<string | undefined>;
   /** §12.5: run respawn once at startup when this member has child records. Tests turn it off. */
   autoRespawn?: boolean;
+  /** UI-only: the identity line the extension puts in pi's footer status. Never model context. */
+  onStatus?: (status: MemberStatus) => void;
 }
 
 export interface InspectResult {
@@ -487,6 +501,16 @@ export class AdapterLoop {
   private autoRespawnDone = false;
   /** First successful `whoami`; the startup settle is measured from here. */
   private connectedAt: number | undefined;
+  /** Root → self names, filled by `whoami` immediately and by `/v1/tree` when available. */
+  private statusPath: string[] = [];
+  /**
+   * Direct **alive** children for the one-line status. The platform's whoami and
+   * `/v1/tree` use the same `status = 'alive'` predicate, so the source may switch
+   * without a visible jump. UI only; never used for decisions.
+   */
+  private statusChildCount = 0;
+  /** Incremented on every local child add/remove; keeps an older tree reply from undoing it. */
+  private statusEpoch = 0;
   /** A `pg.abort` is cutting the turn: no delivery may start one (§3.2). */
   private aborting = false;
   /** Ends an in-flight abort wait when `stop()` runs (§3.2). */
@@ -528,7 +552,7 @@ export class AdapterLoop {
       // shares any init already in flight. A finished startup is a no-op.
       if (!this.ready) {
         void this.ensureReady().catch((err: unknown) => {
-          console.warn(`[pigroups] startup retry failed: ${errorText(err)}`);
+          logWarn(`[pigroups] startup retry failed: ${errorText(err)}`);
         });
       }
       return;
@@ -719,7 +743,7 @@ export class AdapterLoop {
       // sides. `lastNudgeText` stays: the next due is still compared with what the
       // model actually saw.
       if (text === this.lastNudgeText) {
-        console.warn(
+        logWarn(
           `[pigroups] skipped a repeated nudge, identical to the last one this session: ${text}`,
         );
         for (const entry of nudged) this.nudges.record(entry.conv);
@@ -763,7 +787,7 @@ export class AdapterLoop {
     this.unacknowledged.push(batch);
     if (this.unacknowledged.length > UNACKNOWLEDGED_BATCH_LIMIT) {
       const dropped = this.unacknowledged.shift() ?? [];
-      console.warn(
+      logWarn(
         `[pigroups] ${UNACKNOWLEDGED_BATCH_LIMIT} delivered batches are still unacknowledged ` +
           `(one turn spanning that many windows); dropping the oldest, ${dropped.length} item(s): ` +
           `an abort will not replay it`,
@@ -837,7 +861,7 @@ export class AdapterLoop {
     this.queueReminder(now);
     if (!this.windowDue(now)) return;
     void this.flush().catch((err: unknown) => {
-      console.warn(`[pigroups] delivery failed: ${(err as Error)?.message ?? String(err)}`);
+      logWarn(`[pigroups] delivery failed: ${(err as Error)?.message ?? String(err)}`);
     });
   }
 
@@ -865,7 +889,7 @@ export class AdapterLoop {
         const reason = errorText(err);
         if (this.heartbeatWarned.has(reason)) return;
         this.heartbeatWarned.add(reason);
-        console.warn(`[pigroups] heartbeat failed: ${reason}; the loop keeps running`);
+        logWarn(`[pigroups] heartbeat failed: ${reason}; the loop keeps running`);
       })
       .finally(() => {
         this.heartbeatInFlight = false;
@@ -1035,6 +1059,9 @@ export class AdapterLoop {
     const created = await this.pg.createMember({ name: opts.name, request_id: requestId });
     const id = created.member.id;
     const name = created.member.name;
+    this.statusEpoch += 1;
+    this.statusChildCount += 1;
+    this.emitStatus();
     // A replayed create returns no token (platform §12); reissue for the direct child.
     const token = created.token ?? (await this.pg.reissueToken(id)).token;
 
@@ -1063,13 +1090,14 @@ export class AdapterLoop {
     } catch (err) {
       // The child is already running; a failed record write is a repair problem, not a
       // reason to report the spawn itself as failed.
-      console.warn(`[pigroups] could not write the respawn record for ${id}: ${(err as Error)?.message ?? String(err)}`);
+      logWarn(`[pigroups] could not write the respawn record for ${id}: ${(err as Error)?.message ?? String(err)}`);
     }
     this.paneCheckedAt.set(id, this.now());
     // Handing work to someone is not waiting for them to start: the child has its brief and a
     // pane, so the caller gets its answer now. Whether it ever connects is a fact that arrives
     // later and is worth interrupting for only if it never does.
     void this.watchSpawnedMember(id, name, pane);
+    void this.refreshStatusPath();
     return { id, name };
   }
 
@@ -1263,7 +1291,7 @@ export class AdapterLoop {
       // turning a terminate into a suggestion. The record stays; only its intent changes.
       markChildrenTerminated(this.config.adapterDir, [member, ...terminated]);
     } catch (err) {
-      console.warn(`[pigroups] could not mark terminated members in children/: ${(err as Error)?.message ?? String(err)}`);
+      logWarn(`[pigroups] could not mark terminated members in children/: ${(err as Error)?.message ?? String(err)}`);
     }
     // it must not be able to turn a successful `pg_terminate` into a tool error.
     //
@@ -1279,6 +1307,8 @@ export class AdapterLoop {
       pane_close_failed.push(...outcome.failures);
       pane_close_forced.push(...outcome.forced);
     }
+    this.statusEpoch += 1;
+    void this.refreshStatusPath();
     return { terminated, pane_close_failed, pane_close_forced };
   }
 
@@ -1487,7 +1517,7 @@ export class AdapterLoop {
           try {
             await this.herdr.close(pane);
           } catch (closeError) {
-            console.warn(`[pigroups] could not close pane ${pane} of ${id}: ${respawnError(closeError)}`);
+            logWarn(`[pigroups] could not close pane ${pane} of ${id}: ${respawnError(closeError)}`);
           }
         }
         result.failed.push({ id, error });
@@ -1619,15 +1649,15 @@ export class AdapterLoop {
           const key = `${skipped.id}\u0000${skipped.reason}`;
           if (this.respawnSkipWarned.has(key)) continue;
           this.respawnSkipWarned.add(key);
-          console.warn(`[pigroups] respawn skipped ${skipped.id}: ${skipped.reason}`);
+          logWarn(`[pigroups] respawn skipped ${skipped.id}: ${skipped.reason}`);
         }
         for (const failed of result.failed) {
-          console.warn(`[pigroups] respawn of ${failed.id} failed: ${failed.error}`);
+          logWarn(`[pigroups] respawn of ${failed.id} failed: ${failed.error}`);
         }
         this.reportRepairs(repairs);
       })
       .catch((err: unknown) => {
-        console.warn(`[pigroups] respawn failed: ${respawnError(err)}`);
+        logWarn(`[pigroups] respawn failed: ${respawnError(err)}`);
       });
   }
 
@@ -1691,7 +1721,7 @@ export class AdapterLoop {
     try {
       listed = await this.herdr.listPanes();
     } catch (err) {
-      console.warn(`[pigroups] could not list herdr panes for ${member}: ${(err as Error)?.message ?? String(err)}`);
+      logWarn(`[pigroups] could not list herdr panes for ${member}: ${(err as Error)?.message ?? String(err)}`);
     }
     if (listed === null) return { failures: [], forced: [] };
 
@@ -1783,6 +1813,7 @@ export class AdapterLoop {
     for (const entry of this.telemetry.snapshot()) candidates.add(entry.child);
     if (candidates.size === 0) return;
     const now = this.now();
+    let sawGone = false;
 
     for (const member of candidates) {
       const checkedAt = this.paneCheckedAt.get(member);
@@ -1796,12 +1827,14 @@ export class AdapterLoop {
         const detail = await withTimeout(this.pg.getMember(member), ROSTER_TIMEOUT_MS);
         if (detail.status !== 'gone') continue;
         this.markGone(member);
+        this.statusEpoch += 1;
+        sawGone = true;
         const outcome = await this.closePane(member);
         for (const failure of outcome.failures) {
-          console.warn(`[pigroups] could not close pane ${failure.pane} of gone member ${member}: ${failure.error}`);
+          logWarn(`[pigroups] could not close pane ${failure.pane} of gone member ${member}: ${failure.error}`);
         }
         for (const forced of outcome.forced) {
-          console.warn(`[pigroups] closed pane ${forced.pane} of gone member ${member} while its agent was still running`);
+          logWarn(`[pigroups] closed pane ${forced.pane} of gone member ${member} while its agent was still running`);
         }
         // The row only existed to keep a telemetry-only child in this recheck. Forget
         // it after closePane: the name fallback still needs it to find the last pane
@@ -1817,6 +1850,7 @@ export class AdapterLoop {
         // a living child; a late close loses nothing.
       }
     }
+    if (sawGone) void this.refreshStatusPath();
   }
 
   // ---- startup -----------------------------------------------------------
@@ -1833,6 +1867,7 @@ export class AdapterLoop {
   /** §8 startup: identity, briefing, owed reconciliation, journal replay, then the first prune. */
   private async init(): Promise<void> {
     const who = await this.pg.whoami();
+    setLogIdentity(who.member.name, who.member.id);
     // §8: after the platform answers, a major.minor outside the supported list is
     // one warning, not a refusal. A platform that cannot be reached never gets here;
     // the loop's unreachability reporting owns that case.
@@ -1840,14 +1875,14 @@ export class AdapterLoop {
       if (!this.compatibilityChecked) {
         this.compatibilityChecked = true;
         const warning = platformCompatibilityWarning(who.server.version);
-        if (warning !== undefined) console.warn(warning);
+        if (warning !== undefined) logWarn(warning);
       }
       // §5.4: heartbeat is a platform 0.5 feature. On 0.4 the death judgement falls
       // back to `last_seen_at` plus the pane list, exactly as it did before.
       this.heartbeatSupported = platformSupportsHeartbeat(who.server.version);
       if (!this.heartbeatSupported && !this.heartbeatSupportWarned) {
         this.heartbeatSupportWarned = true;
-        console.warn(
+        logWarn(
           `[pigroups] platform ${who.server.version} does not support heartbeats ` +
             '(the heartbeat route needs platform 0.5); liveness falls back to last_seen_at and the pane list',
         );
@@ -1857,14 +1892,17 @@ export class AdapterLoop {
     this.selfId = who.member.id;
     this.selfName = who.member.name;
     this.parentId = who.member.parent_id;
+    this.statusPath = [who.member.name];
+    this.statusChildCount = typeof who.member.child_count === 'number' ? who.member.child_count : 0;
+    this.emitStatus();
     // §12.3: the local record decides whether this session may own the platform;
     // whoami may only demote. A record that says child never starts one, even if
     // the token happens to name a root.
     if (this.config.parentId === null && who.member.is_root !== true) {
       this.rootDemoted = true;
-      console.warn('[pigroups] session record says root, but whoami does not; this session will not start the platform');
+      logWarn('[pigroups] session record says root, but whoami does not; this session will not start the platform');
     } else if (typeof this.config.parentId === 'string' && who.member.is_root === true) {
-      console.warn('[pigroups] session record says child, but whoami says root; this session will not start the platform');
+      logWarn('[pigroups] session record says child, but whoami says root; this session will not start the platform');
     }
     // §12.3: a session that has an identity records it under the one key it will still
     // know after a restart. No session file means there is no honest key — do not invent one.
@@ -1878,7 +1916,7 @@ export class AdapterLoop {
         ...(this.config.orgKey === undefined ? {} : { orgKey: this.config.orgKey }),
       });
     } else {
-      console.warn(
+      logWarn(
         '[pigroups] not writing session respawn records: pi did not provide a session file for this session',
       );
     }
@@ -1910,6 +1948,59 @@ export class AdapterLoop {
     // §12.5: identity is known and the platform answered whoami above. Start the repair
     // after `ready` so the normal startup path is already usable while it runs.
     this.maybeAutoRespawn();
+    // The status is cosmetic: fill the ancestor path in the background, never delay ready.
+    void this.refreshStatusPath();
+  }
+
+  /** Hand the current identity line to the extension. UI only; a broken consumer changes nothing here. */
+  private emitStatus(): void {
+    const id = this.selfId;
+    if (id === undefined) return;
+    const name = this.selfName === '' ? id : this.selfName;
+    const path = this.statusPath.length === 0 ? [name] : this.statusPath;
+    try {
+      this.config.onStatus?.({ name, id, path: [...path], childCount: this.statusChildCount });
+    } catch {
+      // A footer renderer must never be able to break the loop.
+    }
+  }
+
+  /**
+   * Fill root → self and the direct-child count from `GET /v1/tree`. A failure keeps the
+   * whoami fallback already emitted, so the status line degrades to the member's name.
+   */
+  private async refreshStatusPath(): Promise<void> {
+    // No footer consumer means no reason to spend a request on UI-only data. Tests and
+    // headless runs leave `onStatus` unset and keep the loop's request budget unchanged.
+    if (this.config.onStatus === undefined) return;
+    const self = this.selfId;
+    if (self === undefined) return;
+    if (this.stopped) return;
+    try {
+      const epoch = this.statusEpoch;
+      const { nodes } = await this.pg.tree(this.stopGate.signal);
+      const byId = new Map(nodes.map((node) => [node.id, node]));
+      const chain: string[] = [];
+      const seen = new Set<string>();
+      let cursor: string | null = self;
+      while (cursor !== null && !seen.has(cursor)) {
+        seen.add(cursor);
+        const node = byId.get(cursor);
+        if (node === undefined) break;
+        chain.unshift(node.name);
+        cursor = node.parent_id;
+      }
+      this.statusPath = chain.length === 0 ? [this.selfName === '' ? self : this.selfName] : chain;
+      // A tree request started before this process spawned/removed a child must not
+      // overwrite the newer local count. The path itself is stable and still useful.
+      if (this.stopped) return;
+      if (epoch === this.statusEpoch) {
+        this.statusChildCount = nodes.filter((node) => node.parent_id === self).length;
+      }
+      this.emitStatus();
+    } catch {
+      // The fallback from whoami is still on screen; a status read is not worth a log line.
+    }
   }
 
   /**
@@ -1920,7 +2011,7 @@ export class AdapterLoop {
     try {
       await run();
     } catch (err) {
-      console.warn(`[pigroups] startup step ${step} failed: ${errorText(err)}; continuing`);
+      logWarn(`[pigroups] startup step ${step} failed: ${errorText(err)}; continuing`);
     }
   }
 
@@ -2034,7 +2125,7 @@ export class AdapterLoop {
     // payload without it is a protocol error, not an empty message: report it and do
     // not inject `undefined` or '' into the model's context.
     if (typeof item.body !== 'string') {
-      console.warn(
+      logWarn(
         `[pigroups] poll message ${item.to}#${item.seq} from ${item.from_name} has no body field; skipping it`,
       );
       return;
@@ -2256,7 +2347,7 @@ export class AdapterLoop {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const cut = this.surface.abort(stop).catch((err: unknown) => {
-        if (!isAbort(err)) console.warn(`[pigroups] abort failed: ${(err as Error)?.message ?? String(err)}`);
+        if (!isAbort(err)) logWarn(`[pigroups] abort failed: ${(err as Error)?.message ?? String(err)}`);
       });
       const expired = new Promise<void>((resolve) => {
         timer = setTimeout(resolve, ABORT_IDLE_TIMEOUT_MS);
@@ -2324,7 +2415,7 @@ export class AdapterLoop {
     payload: Record<string, unknown>,
     journalId?: string,
   ): Promise<void> {
-    console.warn(
+    logWarn(
       `[pigroups] ignored ${item.cmd} from ${item.from_id}: the sender is not a direct child, ` +
         `so it cannot change this member's state; the control line is injected instead`,
     );
@@ -2332,7 +2423,7 @@ export class AdapterLoop {
   }
 
   private logIgnored(item: PollControlItem): void {
-    console.warn(
+    logWarn(
       `[pigroups] ignored ${item.cmd} from ${item.from_id}: only the direct parent or a human may control this member`,
     );
   }
@@ -2400,7 +2491,7 @@ export class AdapterLoop {
       // the old claim must not fill the log.
       if (!this.goneAttentionWarned.has(child)) {
         this.goneAttentionWarned.add(child);
-        console.warn(
+        logWarn(
           `[pigroups] dropped pg.attention state 'gone' from ${child}: gone is no longer an attention state ` +
             '(0.13.0); liveness is observed from the heartbeat, not from a message',
         );
@@ -2495,7 +2586,7 @@ export class AdapterLoop {
       const reaction = this.onSettled().catch((err: unknown) => {
         // A reaction is fire-and-forget: an unhandled rejection here would crash the
         // process instead of failing one settle.
-        console.warn(`[pigroups] settle reaction failed: ${(err as Error)?.message ?? String(err)}`);
+        logWarn(`[pigroups] settle reaction failed: ${(err as Error)?.message ?? String(err)}`);
       });
       this.settles.add(reaction);
       const done = (): void => {
@@ -2912,7 +3003,7 @@ export class AdapterLoop {
         this.readyPromise = undefined;
       }
     } catch (err) {
-      console.warn(`[pigroups] root platform ensure failed: ${errorText(err)}; will retry`);
+      logWarn(`[pigroups] root platform ensure failed: ${errorText(err)}; will retry`);
     } finally {
       this.ensureInFlight = false;
     }
@@ -2972,7 +3063,7 @@ export class AdapterLoop {
       return;
     }
 
-    console.warn(`[pigroups] poll failed: ${(err as Error)?.message ?? String(err)}`);
+    logWarn(`[pigroups] poll failed: ${(err as Error)?.message ?? String(err)}`);
     await sleep(1000);
   }
 

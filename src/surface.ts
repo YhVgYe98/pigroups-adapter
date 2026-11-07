@@ -8,6 +8,8 @@
  * `pi-coding-agent@1.4.0` (`dist/core/extensions/types.d.ts`) that are used.
  */
 
+import { logWarn } from './log.ts';
+
 export type DeliverKind = 'message' | 'control' | 'nudge' | 'digest' | 'scheduled';
 
 /** The only observability channel the loop has (设计说明 §2.1). */
@@ -73,6 +75,14 @@ export interface PiContext {
   shutdown(): void;
   /** pi supplies this on `session_start`; optional because older fakes and versions do not. */
   sessionManager?: PiSessionManager;
+  /**
+   * TUI surface; absent in older fakes/versions. The status is one line in the footer and
+   * never enters model context.
+   */
+  ui?: {
+    setStatus(key: string, text: string | undefined): void;
+    theme?: { bold(text: string): string };
+  };
 }
 
 /**
@@ -250,7 +260,7 @@ export class PiSurfaceAdapter implements PiSurface {
         // Giving up is allowed (§3.2) but must not be silent: staying busy past the
         // bound is exactly the failure `pg.abort` exists to prevent, and a silent
         // return makes it look like the cut succeeded.
-        console.warn(
+        logWarn(
           `[pigroups] abort() gave up after ${this.abortIdleTimeoutMs} ms: the turn is still running; the abort request stands`,
         );
         return;

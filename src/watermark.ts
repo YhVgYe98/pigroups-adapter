@@ -26,6 +26,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
+import { logWarn } from './log.ts';
+
 export interface WatermarkFile {
   v: 1;
   injected: Record<string, number>;
@@ -72,7 +74,7 @@ export class Watermarks {
     try {
       injected = (JSON.parse(raw) as Partial<WatermarkFile> | null)?.injected;
     } catch {
-      console.warn(`[pigroups] unreadable injection watermark at ${path}; starting with an empty one`);
+      logWarn(`[pigroups] unreadable injection watermark at ${path}; starting with an empty one`);
       // The file is there, so this member has started before: not a fresh spawn. Starting
       // empty may duplicate an injection (a lost message would be worse), and calling it a
       // spawn would silence a debt the parent's last instruction deserves.

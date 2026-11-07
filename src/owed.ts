@@ -24,6 +24,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
+import { logWarn } from './log.ts';
+
 /** One owed conversation, as the loop and the nudge text read it. */
 export interface OwedFlag {
   conv: string;
@@ -101,7 +103,7 @@ export class OwedLedger {
     try {
       parsed = JSON.parse(raw) as Partial<OwedFile> | null;
     } catch {
-      console.warn(`[pigroups] unreadable owed ledger at ${path}; reconciling from history instead`);
+      logWarn(`[pigroups] unreadable owed ledger at ${path}; reconciling from history instead`);
       return false;
     }
 

@@ -19,6 +19,8 @@ import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { logWarn } from './log.ts';
+
 export interface AdapterDirOptions {
   env?: NodeJS.ProcessEnv;
   /** Test seam / explicit home; production uses `os.homedir()`. */
@@ -76,7 +78,7 @@ export function resolveAdapterDir(opts: AdapterDirOptions = {}): string {
   const resolved = resolve(chosen);
   const oldDir = resolve(home, OLD_DIR_NAME);
   if (!explicitSource && resolved !== oldDir && !existsSync(resolved) && hasContent(oldDir)) {
-    const warn = opts.warn ?? ((message: string) => console.warn(message));
+    const warn = opts.warn ?? ((message: string) => logWarn(message));
     warn(
       `[pigroups] using the legacy adapter directory ${oldDir}: ${resolved} does not exist. ` +
         `Move ${oldDir} to ${resolved} when no platform is running from it; it will not be moved automatically.`,
@@ -96,7 +98,7 @@ export function defaultAdapterDir(env: NodeJS.ProcessEnv = process.env): string 
     warn: (message) => {
       if (warnedLegacy.has(message)) return;
       warnedLegacy.add(message);
-      console.warn(message);
+      logWarn(message);
     },
   });
 }

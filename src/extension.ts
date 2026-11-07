@@ -10,8 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 import { shellQuote } from './command.ts';
 import { AdapterLoop, DEFAULT_DELIVERY_MAX_CHARS } from './loop.ts';
-import type { LoopConfig } from './loop.ts';
+import type { LoopConfig, MemberStatus } from './loop.ts';
 import { HerdrCli } from './herdr.ts';
+import { logInfo, logWarn, setLogDir } from './log.ts';
 import { defaultAdapterDir, findOrgKeyByUrl, isRecordedOrg, recordedOrgUrl, startOrg } from './org.ts';
 import type { OrgHandle } from './org.ts';
 import { PgClient } from './pgclient.ts';
@@ -63,6 +64,7 @@ export default function pigroupsExtension(pi: PiLike): void {
   // same member session the configured path builds and starts it on the spot (the
   // `session_start` event has already fired by the time a tool can run).
   const config = readConfig();
+  if (config !== null) setLogDir(config.adapterDir);
   let session: MemberSession | undefined;
   let org: OrgHandle | undefined;
   let orgToolRegistered = false;
@@ -70,7 +72,7 @@ export default function pigroupsExtension(pi: PiLike): void {
   if (config !== null) {
     const lease = acquireConsumerLease(config.adapterDir, config.token);
     if (lease === null) {
-      console.warn(
+      logWarn(
         `[pigroups] this member is already open in another session (${config.url}); ` +
           'not registering tools and not polling. Close that pane, then /reload.',
       );
@@ -84,6 +86,9 @@ export default function pigroupsExtension(pi: PiLike): void {
     }
     pi.on('session_start', (_event, ctx) => session?.start(ctx));
   } else {
+    // Resolve and pin the root before any tool can fail. Otherwise a failed
+    // `pg_org_start` would exit with its diagnostics still in the pre-root buffer.
+    setLogDir(defaultAdapterDir());
     const registerOrgStart = (): void => {
       if (orgToolRegistered) return;
       orgToolRegistered = true;
@@ -142,9 +147,10 @@ export default function pigroupsExtension(pi: PiLike): void {
           });
           org = started;
           const adapterDir = defaultAdapterDir();
+          setLogDir(adapterDir);
           const lease = acquireConsumerLease(adapterDir, started.token);
           if (lease === null) {
-            console.warn(
+            logWarn(
               `[pigroups] this root is already open in another session (${started.url}); ` +
                 'not registering tools and not polling. Close that pane, then /reload.',
             );
@@ -184,11 +190,12 @@ export default function pigroupsExtension(pi: PiLike): void {
       // start the platform unless this session is the root.
       const sessionFile = sessionFileOf(ctx);
       const adapterDir = defaultAdapterDir();
+      setLogDir(adapterDir);
       const saved = sessionFile === undefined ? undefined : readSessionRecord(adapterDir, sessionFile);
       if (saved !== undefined) {
         const lease = acquireConsumerLease(adapterDir, saved.token);
         if (lease === null) {
-          console.warn(
+          logWarn(
             `[pigroups] this member is already open in another session (${saved.orgUrl}); ` +
               'not registering tools and not polling. Close that pane, then /reload.',
           );
@@ -205,7 +212,7 @@ export default function pigroupsExtension(pi: PiLike): void {
           config.ensurePlatform = async () =>
             (await startOrg({ adapterDir, name: orgKey, mayBootstrap: false })).url;
         } else if (saved.parentId === null) {
-          console.warn(
+          logWarn(
             `[pigroups] root record ${saved.memberId} names no organisation record; ` +
               'it will poll its recorded URL but cannot restart the platform',
           );
@@ -244,16 +251,27 @@ interface MemberSession {
 }
 
 function openMemberSession(pi: PiLike, config: LoopConfig, releaseLease: () => void): MemberSession {
+  setLogDir(config.adapterDir);
   const surface = new PiSurfaceAdapter(pi);
   const pg = new PgClient({ url: config.url, token: config.token });
   const herdr = new HerdrCli({ spawnCmd: config.spawnCmd });
 
   let loop: AdapterLoop | undefined;
+  let statusCtx: PiContext | undefined;
+  let lastStatus: MemberStatus | undefined;
+  let statusActive = true;
+  const applyStatus = (status: MemberStatus): void => {
+    if (!statusActive) return;
+    lastStatus = status;
+    renderStatus(statusCtx, status);
+  };
+  config.onStatus = applyStatus;
 
   for (const tool of buildTools(() => loop, pg, surface)) pi.registerTool(tool);
 
   return {
     start(ctx: PiContext): void {
+      statusCtx = ctx;
       // `session_start` installs the first context; a `session_tree` jump replaces it
       // with a fresh one. Attach before deciding whether the loop exists: a delivery
       // that is queued during a jump must never reach the invalidated context.
@@ -262,16 +280,24 @@ function openMemberSession(pi: PiLike, config: LoopConfig, releaseLease: () => v
         // Idempotent. If the first startup never became ready, this also retries the
         // identity/records handshake; a tree jump is a new chance to repair the session.
         loop.start();
+        if (lastStatus !== undefined) renderStatus(statusCtx, lastStatus);
         return;
       }
       // The one startup line: which adapter this member is running, and against what.
-      console.log(`[pigroups] adapter ${ADAPTER_VERSION} starting against ${config.url}`);
+      logInfo(`[pigroups] adapter ${ADAPTER_VERSION} starting against ${config.url}`);
       loop = new AdapterLoop({ pg, surface, herdr, config, now: () => Date.now(), sessionFile: sessionFileOf(ctx) });
       loop.start();
     },
     async stop(): Promise<void> {
       const active = loop;
       loop = undefined;
+      statusActive = false;
+      // The status line belongs to this session; remove it before waiting for anything.
+      try {
+        statusCtx?.ui?.setStatus('pigroups', undefined);
+      } catch {
+        // A gone TUI is not an error on shutdown.
+      }
       // §8.6: nothing is sent. The heartbeat stops with the loop, and the parent's
       // liveness check observes the absence (§5.4). The consumer lease is released
       // last: the old loop must not overlap a new incarnation.
@@ -642,4 +668,32 @@ function buildTools(
 
 function text(value: string): { content: { type: 'text'; text: string }[]; details?: unknown } {
   return { content: [{ type: 'text', text: value }] };
+}
+
+export interface StatusTheme {
+  bold?(text: string): string;
+}
+
+/**
+ * One footer line: `PG name(id) · root → … → name (n kids)`. The self name is bold when
+ * the active theme supports it; a missing theme must not change the text's identity.
+ */
+export function formatStatus(status: MemberStatus, theme?: StatusTheme): string {
+  const bold = (value: string): string => theme?.bold?.(value) ?? value;
+  const path = status.path.length === 0 ? [status.name] : status.path;
+  const renderedPath = path
+    .map((name, index) => (index === path.length - 1 ? bold(name) : name))
+    .join(' → ');
+  const kids = status.childCount === 1 ? '1 kid' : `${status.childCount} kids`;
+  return `PG ${bold(status.name)}(${status.id}) · ${renderedPath} (${kids})`;
+}
+
+function renderStatus(ctx: PiContext | undefined, status: MemberStatus): void {
+  const ui = ctx?.ui;
+  if (ui === undefined) return;
+  try {
+    ui.setStatus('pigroups', formatStatus(status, ui.theme));
+  } catch {
+    // The footer is cosmetic; a failed render must never affect the agent loop.
+  }
 }
