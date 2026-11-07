@@ -19,7 +19,7 @@ import { PgClient } from './pgclient.ts';
 import { acquireConsumerLease, readSessionRecord } from './records.ts';
 import { PiSurfaceAdapter } from './surface.ts';
 import type { PiContext, PiLike, PiToolDefinition } from './surface.ts';
-import { ADAPTER_VERSION } from './version.ts';
+import { ADAPTER_VERSION, EXPECTED_PLATFORM_VERSION } from './version.ts';
 
 const INSPECT_TIMEOUT_MS = 10_000;
 
@@ -660,7 +660,18 @@ function buildTools(
         const loop = getLoop();
         // `adapter_version` is this adapter; `who.server.version` is the platform. Both
         // are in the answer so a person can tell which pair a member is running (§5.3).
-        return text(JSON.stringify({ adapter_version: ADAPTER_VERSION, who, adapter: loop?.state() ?? null }, null, 2));
+        return text(
+          JSON.stringify(
+            {
+              adapter_version: ADAPTER_VERSION,
+              expected_platform_version: EXPECTED_PLATFORM_VERSION,
+              who,
+              adapter: loop?.state() ?? null,
+            },
+            null,
+            2,
+          ),
+        );
       },
     },
   ];

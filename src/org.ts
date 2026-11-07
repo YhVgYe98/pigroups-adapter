@@ -31,11 +31,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
+import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defaultAdapterDir } from './datadir.ts';
 import { PgClient, PgError } from './pgclient.ts';
+import { EXPECTED_PLATFORM_VERSION, platformVersionError, platformVersionMatches } from './version.ts';
 
 export { defaultAdapterDir } from './datadir.ts';
 
@@ -156,6 +158,15 @@ export function platformCandidates(
   }
   candidates.push({ path: resolve(root, '..', 'PiGroups'), source: '../PiGroups next to the adapter' });
   candidates.push({ path: resolve(root, '..', '..', 'PiGroups'), source: '../../PiGroups' });
+  candidates.push({ path: resolve(root, 'node_modules', 'pigroups'), source: 'node_modules/pigroups' });
+  // The published adapter depends on the platform package. A local checkout still
+  // wins above, but an npm install finds the exact dependency here.
+  try {
+    const installed = createRequire(import.meta.url).resolve('pigroups/package.json');
+    candidates.push({ path: dirname(installed), source: 'installed pigroups npm package' });
+  } catch {
+    // Not installed: the lookup error lists every other candidate.
+  }
 
   const seen = new Set<string>();
   return candidates.filter((candidate) => {
@@ -163,6 +174,29 @@ export function platformCandidates(
     seen.add(candidate.path);
     return true;
   });
+}
+
+/** The checkout's own package version. A checkout without a readable version is not usable. */
+function readPlatformPackageVersion(dir: string): string {
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: unknown };
+    if (typeof raw.version !== 'string' || raw.version === '') {
+      throw new Error('package.json has no version');
+    }
+    return raw.version;
+  } catch (err) {
+    throw new OrgStartError(
+      `cannot read the platform version from ${join(dir, 'package.json')}: ${describe(err)}. ` +
+        `This adapter requires pigroups@${EXPECTED_PLATFORM_VERSION}; install that package or point ` +
+        'PIGROUPS_PLATFORM_DIR at its checkout.',
+    );
+  }
+}
+
+/** Refuse a platform from another release before it can start or migrate data. */
+function assertPlatformVersion(actual: string, where: string): void {
+  if (platformVersionMatches(actual)) return;
+  throw new OrgStartError(`${where}: ${platformVersionError(actual)}`);
 }
 
 /** Resolve the checkout by the one fact that matters: `src/main.ts` exists. */
@@ -337,6 +371,7 @@ async function reattachRecorded(
   }
   if (health === undefined) health = await platformHealth(previous.url);
   if (health === undefined) return undefined;
+  assertPlatformVersion(health.version, `the platform at ${url}`);
   // One-time follow of a moved data root. It is only a candidate here: a live
   // platform is reattached first, and an unresponsive one is stopped against the
   // data dir its process was actually started with before anything is rewritten.
@@ -444,8 +479,11 @@ async function startOrgLocked(
   const dataDir = resolveStartDataDir(opts, previous, adapterDir, orgFile);
   assertRecordedPlatformDatabase(previous, dataDir, orgFile);
 
-  // (a) Find the checkout only when a platform actually has to be started.
+  // (a) Find the checkout only when a platform actually has to be started. The
+  // checkout version is checked before spawning: an old checkout must not migrate
+  // or touch the shared data root.
   const checkout = findPlatformDir({ platformDir: opts.platformDir, env, adapterRoot: opts.adapterRoot });
+  assertPlatformVersion(readPlatformPackageVersion(checkout.dir), `platform checkout ${checkout.dir}`);
 
   // (c) Start it: the recorded port for a restart, the caller's port for a new
   // organisation; data under the adapter dir unless told otherwise; a fresh admin
@@ -515,6 +553,7 @@ async function startOrgLocked(
     }
 
     const { health, url } = started;
+    assertPlatformVersion(health.version, `the platform at ${url}`);
 
     // The platform that answered must be the instance org.json names, and a new
     // organisation must get exactly the id it asked for. This is checked before

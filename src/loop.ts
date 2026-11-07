@@ -44,7 +44,7 @@ import type {
 } from './pgclient.ts';
 import type { Herdr, HerdrPane } from './herdr.ts';
 import { ABORT_IDLE_TIMEOUT_MS } from './surface.ts';
-import { platformCompatibilityWarning, platformSupportsHeartbeat } from './version.ts';
+import { platformVersionError, platformVersionMatches } from './version.ts';
 import type { DeliverKind, PiEvent, PiSurface } from './surface.ts';
 
 export interface MemberStatus {
@@ -443,8 +443,6 @@ export class AdapterLoop {
 
   private started = false;
   private stopped = false;
-  /** §8: the compatibility warning is emitted once per process, even if startup retries. */
-  private compatibilityChecked = false;
   private inLoop = false;
   private runPromise: Promise<void> | undefined;
   private settleUnsub: (() => void) | undefined;
@@ -479,9 +477,6 @@ export class AdapterLoop {
   private heartbeatAt = Number.NEGATIVE_INFINITY;
   /** Single-flight: at most one heartbeat request is in the air at a time. */
   private heartbeatInFlight = false;
-  /** §5.4: the heartbeat route exists from platform 0.5; `init()` reads the version. */
-  private heartbeatSupported = true;
-  private heartbeatSupportWarned = false;
   /** Distinct heartbeat failures already warned about, so one outage is one line. */
   private readonly heartbeatWarned = new Set<string>();
   /** A `pg.attention{state:'gone'}` claim from this child was already reported. */
@@ -871,9 +866,6 @@ export class AdapterLoop {
    * slow. A failure is warned once per distinct error, not once per attempt.
    */
   private feedHeartbeat(now: number): void {
-    // §5.4: the route only exists from platform 0.5; `init()` warned once already. On an
-    // older platform liveness falls back to `last_seen_at` plus the pane list.
-    if (!this.heartbeatSupported) return;
     const selfId = this.selfId;
     if (selfId === undefined || this.heartbeatInFlight) return;
     const interval = this.config.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
@@ -1868,25 +1860,10 @@ export class AdapterLoop {
   private async init(): Promise<void> {
     const who = await this.pg.whoami();
     setLogIdentity(who.member.name, who.member.id);
-    // §8: after the platform answers, a major.minor outside the supported list is
-    // one warning, not a refusal. A platform that cannot be reached never gets here;
-    // the loop's unreachability reporting owns that case.
-    if (typeof who.server?.version === 'string') {
-      if (!this.compatibilityChecked) {
-        this.compatibilityChecked = true;
-        const warning = platformCompatibilityWarning(who.server.version);
-        if (warning !== undefined) logWarn(warning);
-      }
-      // §5.4: heartbeat is a platform 0.5 feature. On 0.4 the death judgement falls
-      // back to `last_seen_at` plus the pane list, exactly as it did before.
-      this.heartbeatSupported = platformSupportsHeartbeat(who.server.version);
-      if (!this.heartbeatSupported && !this.heartbeatSupportWarned) {
-        this.heartbeatSupportWarned = true;
-        logWarn(
-          `[pigroups] platform ${who.server.version} does not support heartbeats ` +
-            '(the heartbeat route needs platform 0.5); liveness falls back to last_seen_at and the pane list',
-        );
-      }
+    // No compatibility range: a platform from another release is the wrong layer,
+    // not a warning. Fail before identity, journal, or delivery work is touched.
+    if (typeof who.server?.version !== 'string' || !platformVersionMatches(who.server.version)) {
+      throw new Error(platformVersionError(typeof who.server?.version === 'string' ? who.server.version : 'unknown'));
     }
     this.connectedAt = this.now();
     this.selfId = who.member.id;
