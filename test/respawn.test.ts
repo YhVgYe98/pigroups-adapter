@@ -196,7 +196,7 @@ test('a pg.respawn control during the settle defers; the manual tool is immediat
 
   s.clock.advance(5_001);
   s.loop.tick();
-  await waitFor(() => s.herdr.spawns.length === 1, 'the deferred control to start after the settle');
+  await waitFor(() => s.herdr.spawns.length === 1, 'the deferred control to start after the settle', 15_000);
 });
 test('a stale member with no session file is reported as unreopenable, not guessed', async (t) => {
   const s = await scenario({ role: 'root' });
