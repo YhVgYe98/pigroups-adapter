@@ -16,7 +16,7 @@ spawn (`args`); it does not mirror pi's flags, so `pi --help` is the reference. 
   ids, mentions, no polling). Registered under `pi.skills` and shipped with the package.
 - `CHANGELOG.md` — version policy and per-version changes (Chinese). A release records one
   pair: both sides share a number when both move, and only the side that changed takes the
-  version step otherwise. `v0.15.0+platform.0.7.0` is the current pair;
+  version step otherwise. `v0.16.0+platform.0.7.0` is the current pair;
   the metadata records what it was tested against and is not a compatibility gate.
 
 ## Quick start: ask the agent to start an org
@@ -60,7 +60,12 @@ else needs configuring for the tree below the root.
 
 `PIGROUPS_ADAPTER_DIR` (default `~/.pi/pigroups`, or `<PI_CODING_AGENT_DIR>/pigroups`
 for a custom profile) holds the journal, per-member state, per-organisation `org.json`,
-and by default the shared platform data root.
+and by default the shared platform data root. Diagnostics go to
+`<adapter dir>/adapter.log`; they are not printed into pi's TUI.
+
+The pi footer carries one status line from this extension:
+`PG billing-api(m_a1b2c3) · quant-lab → planner → billing-api (2 kids)`.
+It is UI only and never enters model context.
 
 ## Clone for development
 

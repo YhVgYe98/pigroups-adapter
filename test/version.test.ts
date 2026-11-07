@@ -13,17 +13,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import pigroupsExtension from '../src/extension.ts';
-import type { PiLike, PiToolDefinition } from '../src/surface.ts';
+import type { PiContext, PiLike, PiToolDefinition } from '../src/surface.ts';
 import { ADAPTER_VERSION } from '../src/version.ts';
 
-import { bootPlatform, bootstrapRoot, type MemberRef, type Platform } from './support.ts';
+import { bootPlatform, bootstrapRoot, waitFor, type MemberRef, type Platform } from './support.ts';
 
 function readJson(relative: string): Record<string, any> {
   return JSON.parse(readFileSync(new URL(relative, import.meta.url), 'utf8'));
 }
 
-test('this release is 0.15.0 for the platform 0.7 endpoint claim', () => {
-  assert.equal(ADAPTER_VERSION, '0.15.0+platform.0.7.0', 'the release records the platform it was exercised against');
+test('this release is 0.16.0 for the platform 0.7 endpoint claim', () => {
+  assert.equal(ADAPTER_VERSION, '0.16.0+platform.0.7.0', 'the release records the platform it was exercised against');
 });
 
 test('ADAPTER_VERSION is the version package.json and its lockfile publish', () => {
@@ -72,15 +72,15 @@ interface Session {
   me: MemberRef;
   tools: Map<string, PiToolDefinition>;
   /** Fire the handler the extension registered for that pi event, and wait for it. */
-  fire(event: string, payload?: unknown): Promise<void>;
+  fire(event: string, payload?: unknown, ctx?: PiContext): Promise<void>;
   /** session_shutdown, then the platform and the temp adapter directory. */
   close(): Promise<void>;
 }
 
-const CTX = { isIdle: () => true, abort: () => undefined, shutdown: () => undefined };
+const CTX: PiContext = { isIdle: () => true, abort: () => undefined, shutdown: () => undefined };
 
 /** A live member session with the extension loaded through its real entry point. */
-async function memberSession(): Promise<Session> {
+async function memberSession(ctx: PiContext = CTX): Promise<Session> {
   const platform = await bootPlatform();
   const adapterDir = await mkdtemp(join(tmpdir(), 'pigroups-version-'));
 
@@ -123,7 +123,7 @@ async function memberSession(): Promise<Session> {
 
     pigroupsExtension(pi);
     // The factory registers tools; session_start starts the loop.
-    await fire('session_start', { reason: 'startup' }, CTX);
+    await fire('session_start', { reason: 'startup' }, ctx);
 
     return { platform, me, tools, fire, close };
   } catch (err) {
@@ -168,6 +168,66 @@ test('the one startup log line names the adapter version and the platform it tal
   try {
     const expected = `[pigroups] adapter ${ADAPTER_VERSION} starting against ${session.platform.url}`;
     assert.deepEqual(lines, [expected], 'exactly one startup line, and it names the version');
+  } finally {
+    await session.close();
+  }
+});
+
+test('the extension paints one footer status and clears it on shutdown', async () => {
+  const firstCalls: Array<[string, string | undefined]> = [];
+  const first: PiContext = {
+    ...CTX,
+    ui: {
+      setStatus: (key, text) => firstCalls.push([key, text]),
+      theme: { bold: (value) => `**${value}**` },
+    },
+  };
+  const secondCalls: Array<[string, string | undefined]> = [];
+  const session = await memberSession(first);
+  try {
+    await waitFor(
+      () => firstCalls.some(([key, text]) => key === 'pigroups' && typeof text === 'string' && text.includes('**')),
+      'the first status line',
+    );
+
+    const second: PiContext = {
+      ...CTX,
+      ui: {
+        setStatus: (key, text) => secondCalls.push([key, text]),
+        theme: { bold: (value) => `**${value}**` },
+      },
+    };
+    await session.fire('session_tree', {}, second);
+    await waitFor(
+      () => secondCalls.some(([key, text]) => key === 'pigroups' && typeof text === 'string' && text.includes('PG ')),
+      'a session_tree repaint into the new context',
+    );
+    const painted = secondCalls.filter(([key, text]) => key === 'pigroups' && text !== undefined).at(-1)?.[1];
+    assert.match(painted ?? '', /^PG \*\*.+\*\*\(m_[0-9a-f]+\) · /, 'the status names the member and its path');
+  } finally {
+    await session.close();
+  }
+
+  await waitFor(
+    () => secondCalls.some(([key, text]) => key === 'pigroups' && text === undefined),
+    'the shutdown clear in the current context',
+  );
+});
+
+test('a throwing setStatus cannot break the member tools', async () => {
+  const ctx: PiContext = {
+    ...CTX,
+    ui: {
+      setStatus: () => {
+        throw new Error('footer is gone');
+      },
+      theme: { bold: (value) => value },
+    },
+  };
+  const session = await memberSession(ctx);
+  try {
+    const answer = await callWhoami(session.tools);
+    assert.equal(answer.who.member.id, session.me.id, 'the loop survives a broken footer');
   } finally {
     await session.close();
   }

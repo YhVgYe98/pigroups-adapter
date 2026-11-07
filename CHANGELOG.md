@@ -1,3 +1,18 @@
+## v0.16.0（2026-11-07，与平台 0.7.0 配套）
+
+### 一行身份状态；诊断日志离开 TUI
+
+- **pi footer 多一行身份**：`ctx.ui.setStatus('pigroups', …)` 显示
+  `PG billing-api(m_a1b2c3) · quant-lab → planner → billing-api (2 kids)`。成员名用主题加粗，
+  路径用真正的 `→`，括号是直接子成员数。`whoami` 先显示自己，`/v1/tree` 补祖先链；
+  `pg_spawn`/`pg_terminate`/30 秒 `gone` 扫描后校正。状态只在 UI，不进模型上下文。
+- **`[pigroups] …` 诊断不再打印到 TUI**：新增 `src/log.ts`，`console.log/warn` 全部改为
+  `logInfo/logWarn`，生产路径写 `<adapterDir>/adapter.log`（ISO 时间 + LEVEL + `[name(id)]` + 原文，
+  目录 0700、文件 0600）；`whoami` 前先缓冲，`setLogDir` 后 flush，避免创建默认目录；写失败不退回 stderr。测试环境仍走 console，现有警告断言不变。
+- 文档补 `docs/修改说明-status-and-logs.md` 与设计说明 §8.7；`adapter.log` 进入数据布局。
+- 测试：294 条全绿；新增状态格式、loop 路径/子成员数、extension 的 setStatus 生命周期与异常、生产日志只落文件、legacy 目录缓冲。
+- 版本 `0.16.0+platform.0.7.0`；平台仍为 0.7.0。
+
 ## v0.15.0（2026-11-06，与平台 0.7.0 配套）
 
 ### 启动自动、运行时手动；pane 是唯一“在跑”证据
