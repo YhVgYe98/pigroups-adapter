@@ -309,7 +309,7 @@ test('a new organisation whose platform reports a different id is refused before
   const adapterDir = await tempDir('pigroups-orgrepair-');
   const dataDir = await tempDir('pigroups-orgrepair-data-');
   const checkout = await fakePlatformCheckout('pigroups-orgrepair-wrong-id-', {
-    version: '0.7.1',
+    version: '0.7.2',
     platformId: 'p_22222222',
   });
   t.after(() => cleanup(adapterDir, dataDir, checkout));

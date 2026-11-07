@@ -16,7 +16,7 @@ spawn (`args`); it does not mirror pi's flags, so `pi --help` is the reference. 
   ids, mentions, no polling). Registered under `pi.skills` and shipped with the package.
 - `CHANGELOG.md` — version policy and per-version changes (Chinese). A release records one
   pair: both sides share a number when both move, and only the side that changed takes the
-  version step otherwise. `v0.17.0` pairs with platform `v0.7.1`; the adapter pins that exact platform
+  version step otherwise. `v0.17.1` pairs with platform `v0.7.2`; the adapter pins that exact platform
   release. There is no cross-version compatibility range.
 
 ## Install
@@ -26,7 +26,7 @@ pi install npm:pigroups-adapter-pi
 pi list                                          # should show pigroups-adapter-pi
 ```
 
-The published adapter depends on the exact `pigroups@0.7.1` server package. For development,
+The published adapter depends on the exact `pigroups@0.7.2` server package. For development,
 install this checkout instead, with the platform checkout next to it:
 
 ```bash

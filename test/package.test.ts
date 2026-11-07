@@ -27,7 +27,7 @@ test('the package is public, licensed, and pins the exact platform release', () 
   assert.equal(pkg.private, false, 'a published package is not private');
   assert.equal(pkg.license, 'MIT');
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'npm strips build metadata; package versions must be plain');
-  assert.equal(pkg.dependencies.pigroups, '0.7.1', 'the platform dependency is exact, not a compatibility range');
+  assert.equal(pkg.dependencies.pigroups, '0.7.2', 'the platform dependency is exact, not a compatibility range');
   assert.equal(pkg.repository.type, 'git');
   assert.match(pkg.repository.url, /^git\+https:/);
   const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');

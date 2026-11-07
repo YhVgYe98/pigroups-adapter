@@ -105,7 +105,7 @@ test('stop() waits for a settle that is still reading the roster, and a stopped 
   const pg = {
     whoami: async () => ({
       member: { id: SELF, name: 'me', parent_id: null },
-      server: { version: '0.7.1' },
+      server: { version: '0.7.2' },
     }),
     conversations: async () => ({ items: [{ to: dm }] }),
     messages: async () => ({

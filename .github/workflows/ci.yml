@@ -40,6 +40,21 @@ jobs:
       - name: Catalog is current
         working-directory: adapter
         run: npm run test:catalog:check
-      - name: Package contents
+      - name: Local tarball smoke
         working-directory: adapter
-        run: npm pack --dry-run
+        run: |
+          set -euo pipefail
+          tarball=$(npm pack --silent)
+          tar -tzf "$tarball" > /tmp/tarball-files
+          grep -qx 'package/src/extension.ts' /tmp/tarball-files
+          grep -qx 'package/src/log.ts' /tmp/tarball-files
+          grep -qx 'package/skills/pigroups-org/SKILL.md' /tmp/tarball-files
+          grep -qx 'package/skills/pigroups-message/SKILL.md' /tmp/tarball-files
+          grep -qx 'package/LICENSE' /tmp/tarball-files
+          if grep -Eq '^package/(test|probe)/|^package/docs/handoff' /tmp/tarball-files; then
+            echo 'tarball contains test/probe/handoff files' >&2
+            exit 1
+          fi
+          mkdir -p /tmp/tarball
+          tar -xzf "$tarball" -C /tmp/tarball
+          node --experimental-strip-types -e "import('/tmp/tarball/package/src/extension.ts').then((m) => { if (typeof m.default !== 'function') process.exit(1); })"

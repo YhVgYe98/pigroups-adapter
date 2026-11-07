@@ -123,7 +123,8 @@ const ORG_DIR = 'orgs';
 const PLATFORM_DATA_DIR = 'platform-data';
 const PLATFORM_DB = 'pigroups.db';
 const LOCK_FILE = 'org.lock';
-const PLATFORM_ENTRY = join('src', 'main.ts');
+const PLATFORM_SOURCE_ENTRY = join('src', 'main.ts');
+const PLATFORM_BUILT_ENTRY = join('dist', 'main.js');
 const HEALTH_TIMEOUT_MS = 1200;
 const START_TIMEOUT_MS = 6000;
 /** §8.2/§9: how long a start may wait for the platform to become healthy. */
@@ -203,23 +204,34 @@ function assertPlatformVersion(actual: string, where: string): void {
   throw new OrgStartError(`${where}: ${platformVersionError(actual)}`);
 }
 
-/** Resolve the checkout by the one fact that matters: `src/main.ts` exists. */
+/** A source checkout uses src/main.ts; a published package uses dist/main.js. */
+function platformEntry(dir: string): string | undefined {
+  for (const entry of [PLATFORM_SOURCE_ENTRY, PLATFORM_BUILT_ENTRY]) {
+    if (existsSync(join(dir, entry))) return entry;
+  }
+  return undefined;
+}
+
+/** Resolve the checkout by the one fact that matters: a runnable platform entry exists. */
 export function findPlatformDir(
   opts: { platformDir?: string; env?: NodeJS.ProcessEnv; adapterRoot?: string } = {},
 ): {
   dir: string;
+  entry: string;
   tried: PlatformCandidate[];
 } {
   const tried = platformCandidates(opts);
-  const found = tried.find((candidate) => existsSync(join(candidate.path, PLATFORM_ENTRY)));
-  if (found !== undefined) return { dir: found.path, tried };
+  for (const candidate of tried) {
+    const entry = platformEntry(candidate.path);
+    if (entry !== undefined) return { dir: candidate.path, entry, tried };
+  }
   throw new OrgStartError(platformLookupMessage(tried));
 }
 
 function platformLookupMessage(tried: PlatformCandidate[]): string {
   const lines = tried.map((candidate) => `  - ${candidate.path}  (${candidate.source})`);
   return [
-    'cannot find the PiGroups platform checkout: none of these paths has src/main.ts:',
+    'cannot find the PiGroups platform checkout: none of these paths has src/main.ts or dist/main.js:',
     ...lines,
     'Pass `platform_dir`, set PIGROUPS_PLATFORM_DIR, or clone PiGroups next to this adapter.',
   ].join('\n');
@@ -515,6 +527,7 @@ async function startOrgLocked(
 
   const platform = launchPlatform({
     platformDir: checkout.dir,
+    platformEntry: checkout.entry,
     seedPort,
     dataDir,
     adminToken,
@@ -933,6 +946,7 @@ interface LaunchedPlatform {
  */
 function launchPlatform(opts: {
   platformDir: string;
+  platformEntry: string;
   /** The first candidate. Absent lets the platform use its record or its own default. */
   seedPort?: number;
   dataDir: string;
@@ -960,7 +974,7 @@ function launchPlatform(opts: {
   if (opts.platformId !== undefined) env.PIGROUPS_PLATFORM_ID = opts.platformId;
   let child: ChildProcess;
   try {
-    child = spawn(process.execPath, [join(opts.platformDir, PLATFORM_ENTRY)], {
+    child = spawn(process.execPath, [join(opts.platformDir, opts.platformEntry)], {
       detached: true,
       stdio: ['ignore', log, log],
       env,

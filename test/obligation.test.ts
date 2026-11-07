@@ -751,7 +751,7 @@ async function makeLoop(tree: (signal?: AbortSignal) => Promise<unknown>): Promi
   const pg = {
     whoami: async () => ({
       member: { id: SELF_ID, name: 'me', parent_id: null },
-      server: { version: '0.7.1' },
+      server: { version: '0.7.2' },
     }),
     conversations: async () => ({ items: [{ to: PEER_DM }] }),
     messages: async () => ({

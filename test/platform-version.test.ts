@@ -15,24 +15,24 @@ import { join } from 'node:path';
 test('the platform version matcher is exact', () => {
   assert.equal(platformVersionMatches(EXPECTED_PLATFORM_VERSION), true);
   assert.equal(platformVersionMatches(` ${EXPECTED_PLATFORM_VERSION} `), true);
-  assert.equal(platformVersionMatches('0.7.0'), false, 'an older patch is a different layer');
-  assert.equal(platformVersionMatches('0.7.2'), false, 'a newer patch is not assumed compatible');
+  assert.equal(platformVersionMatches('0.7.1'), false, 'an older patch is a different layer');
+  assert.equal(platformVersionMatches('0.7.3'), false, 'a newer patch is not assumed compatible');
   assert.equal(platformVersionMatches('0.8.0'), false);
-  assert.equal(platformVersionMatches('v0.7.1'), false, 'the platform reports a bare x.y.z');
-  assert.match(platformVersionError('0.7.0'), /0\.7\.1/);
-  assert.match(platformVersionError('0.7.0'), /no cross-version support/);
+  assert.equal(platformVersionMatches('v0.7.2'), false, 'the platform reports a bare x.y.z');
+  assert.match(platformVersionError('0.7.1'), /0\.7\.1/);
+  assert.match(platformVersionError('0.7.1'), /no cross-version support/);
 });
 
 test('a whoami from another platform release stops before ready or delivery', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   const realWhoami = s.pg.whoami.bind(s.pg);
-  s.pg.whoami = async () => ({ ...(await realWhoami()), server: { version: '0.7.0' } });
+  s.pg.whoami = async () => ({ ...(await realWhoami()), server: { version: '0.7.1' } });
 
   await assert.rejects(
     s.loop.pollOnce(),
     (err: Error) => {
-      assert.match(err.message, /platform version 0\.7\.0/);
+      assert.match(err.message, /platform version 0\.7\.1/);
       assert.match(err.message, /0\.7\.1/);
       return true;
     },

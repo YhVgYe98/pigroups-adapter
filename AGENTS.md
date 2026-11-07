@@ -18,6 +18,7 @@ Documents are Chinese. Code, comments, commit messages, test names are English.
 - `npm test` → `node --test test/*.test.ts`
 - `npm run typecheck` → `tsc --noEmit`
 - `npm run test:catalog` regenerates `test/CATALOG.md`; every `test/*.test.ts` file must be classified in `test/catalog.config.json` (mixed files use per-case overrides). The catalog test fails on a stale index or an unclassified case.
+- `.github/workflows/ci.yml` tests source plus a local tarball. `.github/workflows/smoke.yml` installs the published packages from npm; it runs daily and on `workflow_dispatch`.
 - The adapter and platform are released as a pair: `package.json` pins `pigroups` exactly, and `EXPECTED_PLATFORM_VERSION` must equal it. Do not add version ranges or compatibility fallbacks; an older platform must fail before it can start or migrate data.
 - The extension entry is `src/extension.ts`; it is loaded by Pi, which supplies the `pi` object.
 - `src/loop.ts` must **not** import `@earendil-works/pi-coding-agent`. It depends on `PiSurface` only. That is the only reason this repo is testable.

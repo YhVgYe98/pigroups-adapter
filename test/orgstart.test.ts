@@ -168,7 +168,7 @@ async function occupiedPlatform(opts: { platformId: string; answerAfterMs?: numb
       res.end(JSON.stringify(body));
     };
     if (ready && req.url === '/v1/health') {
-      json(200, { status: 'ok', version: '0.7.1', uptime_ms: 1, platform_id: opts.platformId });
+      json(200, { status: 'ok', version: '0.7.2', uptime_ms: 1, platform_id: opts.platformId });
       return;
     }
     if (ready && req.url === '/v1/whoami') {
@@ -188,14 +188,14 @@ async function occupiedPlatform(opts: { platformId: string; answerAfterMs?: numb
         groups: [],
         dms: [],
         last_seen_at: 1,
-        server: { version: '0.7.1' },
+        server: { version: '0.7.2' },
       });
       return;
     }
     // The documented starting shape: a PiGroups platform that has bound its port
     // but is not ready yet still names itself, so a competitor can tell it apart
     // from an unrelated service.
-    json(503, { status: 'starting', version: '0.7.1', platform_id: opts.platformId });
+    json(503, { status: 'starting', version: '0.7.2', platform_id: opts.platformId });
   });
   await new Promise<void>((res, rej) => {
     server.once('error', rej);
@@ -222,7 +222,7 @@ async function instrumentedPlatformCheckout(): Promise<{ dir: string; log: strin
   const dir = await tempDir('pigroups-platform-count-');
   const log = join(dir, 'starts.log');
   await mkdir(join(dir, 'src'), { recursive: true });
-  await writeFile(join(dir, 'package.json'), JSON.stringify({ type: 'module', version: '0.7.1' }));
+  await writeFile(join(dir, 'package.json'), JSON.stringify({ type: 'module', version: '0.7.2' }));
   const realMain = pathToFileURL(join(PLATFORM_DIR, 'src', 'main.ts')).href;
   await writeFile(
     join(dir, 'src', 'main.ts'),
@@ -1052,7 +1052,7 @@ test('a platform whose id differs from org.json is refused without rewriting the
   // A platform that answers health with an id different from the recorded one. It
   // records any bootstrap so the test can prove the adapter refused before that.
   await mkdir(join(checkout, 'src'), { recursive: true });
-  await writeFile(join(checkout, 'package.json'), JSON.stringify({ type: 'module', version: '0.7.1' }));
+  await writeFile(join(checkout, 'package.json'), JSON.stringify({ type: 'module', version: '0.7.2' }));
   await writeFile(
     join(checkout, 'src', 'main.ts'),
     [
@@ -1063,7 +1063,7 @@ test('a platform whose id differs from org.json is refused without rewriting the
       'const server = createServer((req, res) => {',
       "  if (req.url === '/v1/health') {",
       "    res.writeHead(200, { 'content-type': 'application/json' });",
-      "    res.end(JSON.stringify({ status: 'ok', version: '0.7.1', uptime_ms: 0, platform_id: 'p_22222222' }));",
+      "    res.end(JSON.stringify({ status: 'ok', version: '0.7.2', uptime_ms: 0, platform_id: 'p_22222222' }));",
       '    return;',
       '  }',
       "  if (req.url === '/v1/bootstrap') {",
@@ -1161,7 +1161,7 @@ test('a checkout from another platform version is refused before it can start', 
     startOrg({ adapterDir, name: 'old-platform', dataDir, platformDir: checkout }),
     (err: Error) => {
       assert.match(err.message, /platform version 0\.2\.0/, 'the error names the version it found');
-      assert.match(err.message, /0\.7\.1/, 'the error names the version it needs');
+      assert.match(err.message, /0\.7\.2/, 'the error names the version it needs');
       return true;
     },
   );
