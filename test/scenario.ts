@@ -7,7 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { AdapterLoop, type LoopConfig } from '../src/loop.ts';
+import { AdapterLoop, type LoopConfig, type MemberStatus } from '../src/loop.ts';
 import { PgClient } from '../src/pgclient.ts';
 
 import {
@@ -55,6 +55,8 @@ export interface LoopConfigOverrides {
   sessionFile?: string;
   /** The organisation directory name a child inherits through PIGROUPS_ORG_KEY. */
   orgKey?: string;
+  /** Capture the UI-only identity line the loop hands to the extension. */
+  onStatus?: (status: MemberStatus) => void;
 }
 
 /** A loop plus its fakes, all pointed at one platform and one member identity. */
@@ -104,6 +106,7 @@ export async function createLoop(
     heartbeatMiss: opts.heartbeatMiss ?? 3,
     orgKey: opts.orgKey,
     parentId: opts.parentId,
+    onStatus: opts.onStatus,
   };
   const pg = new PgClient({ url: config.url, token: config.token });
   const loop = new AdapterLoop({
