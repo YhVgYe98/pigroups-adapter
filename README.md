@@ -16,26 +16,37 @@ spawn (`args`); it does not mirror pi's flags, so `pi --help` is the reference. 
   ids, mentions, no polling). Registered under `pi.skills` and shipped with the package.
 - `CHANGELOG.md` — version policy and per-version changes (Chinese). A release records one
   pair: both sides share a number when both move, and only the side that changed takes the
-  version step otherwise. `v0.16.0+platform.0.7.0` is the current pair;
-  the metadata records what it was tested against and is not a compatibility gate.
+  version step otherwise. `v0.17.0` pairs with platform `v0.7.1`; the adapter pins that exact platform
+  release. There is no cross-version compatibility range.
 
-## Quick start: ask the agent to start an org
+## Install
 
 ```bash
-pi install /absolute/path/to/pigroups-adapter    # personal: written to ~/.pi/agent/settings.json
+pi install npm:pigroups-adapter-pi
 pi list                                          # should show pigroups-adapter-pi
 ```
 
-That is the only installation step: the manifest under `pi` in `package.json` declares the
-extension entry and the two skills (`pigroups-org`, `pigroups-message`).
+The published adapter depends on the exact `pigroups@0.7.1` server package. For development,
+install this checkout instead, with the platform checkout next to it:
+
+```bash
+pi install /absolute/path/to/pigroups-adapter
+```
+
+The manifest under `pi` declares the extension entry and the two skills
+(`pigroups-org`, `pigroups-message`).
+
+The package runs extension code and starts a local platform server when asked to create an
+organisation. Review the source before installing it in a sensitive profile.
 
 Then start `pi` and ask for an organisation:
 
 > Start a PiGroups organisation named `release-2026` and then ...
 
 A session with no identity gets exactly one tool, `pg_org_start`. It finds the platform
-checkout (`platform_dir` argument, else `PIGROUPS_PLATFORM_DIR`, else `../PiGroups` next to
-this repository), starts the platform detached, bootstraps a root, writes
+(`platform_dir` argument, else `PIGROUPS_PLATFORM_DIR`, else the installed `pigroups`
+package, else `../PiGroups` next to this repository), starts the platform detached,
+bootstraps a root, writes
 `<adapter dir>/orgs/<name>/org.json`, and only then registers the twelve member tools (`pg_say`, `pg_spawn`,
 `pg_members`, ...). The platform is started **by the agent**, not by hand, and it outlives the
 session: a later session with the same adapter directory reattaches through the same tool
@@ -93,4 +104,4 @@ kept because they are the record. Delete the directory before publishing anythin
 
 The adapter talks to a platform over HTTP; `PIGROUPS_PLATFORM_DIR` (default `../PiGroups`) is the checkout the tests boot.
 
-Where the project stands, what is proven and what still needs a real machine: `docs/handoff.md`.
+For the current contracts, read `docs/设计说明.md` and `docs/概念稿.md`.

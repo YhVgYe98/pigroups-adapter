@@ -1,0 +1,42 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: adapter
+      - uses: actions/checkout@v4
+        with:
+          repository: YhVgYe98/PiGroups
+          path: PiGroups
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: adapter/package-lock.json
+      - name: Install with the local platform checkout
+        working-directory: adapter
+        run: |
+          npm pkg set dependencies.pigroups="file:../PiGroups"
+          npm install --package-lock-only
+          npm ci
+          git checkout -- package.json package-lock.json
+      - name: Typecheck
+        working-directory: adapter
+        run: npm run typecheck
+      - name: Test
+        working-directory: adapter
+        env:
+          PIGROUPS_PLATFORM_DIR: ${{ github.workspace }}/PiGroups
+        run: npm test
+      - name: Catalog is current
+        working-directory: adapter
+        run: npm run test:catalog:check
+      - name: Package contents
+        working-directory: adapter
+        run: npm pack --dry-run

@@ -1,13 +1,13 @@
 {
   "name": "pigroups-adapter-pi",
-  "version": "0.16.0+platform.0.7.0",
-  "private": true,
+  "version": "0.17.0",
+  "private": false,
   "type": "module",
   "description": "A Pi extension that turns a pi session into a member of a PiGroups workspace.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/YhVgYe98/pigroups-adapter"
+    "url": "git+https://github.com/YhVgYe98/pigroups-adapter.git"
   },
   "keywords": [
     "pi-package",
@@ -28,7 +28,9 @@
     "skills",
     "README.md",
     "CHANGELOG.md",
-    "docs"
+    "LICENSE",
+    "docs/设计说明.md",
+    "docs/概念稿.md"
   ],
   "engines": {
     "node": ">=24"
@@ -37,10 +39,15 @@
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "test:catalog": "node test/catalog.ts",
-    "test:catalog:check": "node test/catalog.ts --check"
+    "test:catalog:check": "node test/catalog.ts --check",
+    "test:package": "node --test test/package.test.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run test:catalog:check && npm run test:package"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "pigroups": "0.7.1"
   }
 }

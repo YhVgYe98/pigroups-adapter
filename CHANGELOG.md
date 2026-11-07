@@ -1,4 +1,23 @@
-## v0.16.0（2026-11-07，与平台 0.7.0 配套）
+## 0.17.0 - 2026-11-08
+
+### 公开 npm 发布；平台版本硬锁
+
+- **适配器与平台作为一对发布**：适配器 `0.17.0` 精确依赖 `pigroups@0.7.1`，不使用 semver range。
+  平台版本检查有四个硬点：npm 依赖、启动 checkout 预检、`/v1/health`、`whoami.server.version`。
+  旧平台在启动/重接前被拒绝，不迁移数据、不进入 ready；旧 live 平台不会被自动杀掉，用户需重启到
+  0.7.1。`pg_whoami` 增加 `expected_platform_version`。
+- **删除兼容层**：`SUPPORTED_PLATFORM_MINORS`、`platformCompatibilityWarning`、
+  `platformMajorMinor`、`platformSupportsHeartbeat` 和 heartbeat 0.4 fallback 移除；0.4/0.5/0.6
+  兼容测试删除，换成精确版本测试。
+- **npm/Pi 发行**：`private: false`、MIT license、精确平台依赖、公开 tarball 文件清单、平台 bin/
+  exports；适配器从已安装的 `pigroups` 包解析平台。
+- **注入提示词英文**：两个 skill 全文改为英文；工具描述和注入行审计后保持英文。代码注释与文档
+  继续用中文。
+- **删除 handoff 文档**：`docs/handoff.md`、`docs/handoff-quant-analysis.md` 及引用移除。
+- 测试：293 条全绿；新增精确版本、npm 平台查找、package/tarball 和英文提示词检查。
+- 版本 `0.17.0`；平台 `0.7.1`。
+
+## 0.16.0 - 2026-11-07
 
 ### 一行身份状态；诊断日志离开 TUI
 
@@ -539,7 +558,7 @@ skill 的守卫改成三态（成员 / 只有 `pg_org_start` / 一个都没有�
   实测到的丢失补上了。
 - **副本只有一个槽位。** 同一轮里两个窗口各投了一批、然后 abort，只有最后一批会被重投。触发条件
   是"一轮还没结束、第二个窗口又关了"。修法是把槽位换成未确认批次表，需要一条新测试；这一版没做，
-  记在 `docs/handoff.md` §7。
+  记在 已删除的 handoff 文档 §7。
 - **`dm:` 不是发送地址。** 注入前缀里的 `dm:<a>_<b>` 只能用于 `pg_read` 认会话；说话要发给对方
   的成员 id。skill 里写清了，工具 schema 没有改（平台契约就是这样）。
 
@@ -579,7 +598,7 @@ skill 的守卫改成三态（成员 / 只有 `pg_org_start` / 一个都没有�
 - 删镜像的变异：只把 `src/command.ts`、`src/extension.ts` 退回 HEAD（保留测试），两条新用例立刻红——`the pg_spawn schema is exactly name, brief, cwd and args…` 的 actual 是 11 个参数（`exclude_tools` … `tools`）、`the command module exposes quoting only…` 的 actual 是 `['SPAWN_THINKING_LEVELS','shellQuote','spawnFlagArgs','splitCommand']`。恢复后两条复绿。
 - 0.4.0 原有的变异也留着：撤掉自加载默认 → `the child starts without the operator’s global extensions` 红；换回朴素按空白切词 → 空格用例红在“4 段而不是 1 段”；删掉启动 warning 的调用 → 不支持平台用例红在 `exactly one warning, got []`；让支持版本也命中 warning → 2 条红；改三处版本号之一 → 各自 1 条红（`package.json must say what src/version.ts says` / `the lockfile carries the same version`）。
 
-### 没做的（都记在 `docs/handoff.md` §7）
+### 没做的（都记在 已删除的 handoff 文档 §7）
 
 - **`pg_spawn` 对健康的子成员报错。** 两次真机调用都返回 `isError=true` / `timed out waiting for agent status`（134 s、124 s），而子成员当场正常工作。根因是 `HerdrCli.waitReady()` 只发 `--until idle`，pi 跑完一轮后 herdr 记的是 `agent_status:"done"`；`--until idle --until done` 立即返回。修法短，但是行为改动 + 一条测试，留给下一轮。
 - **收窄工具会连 `pg_*` 一起收窄**：`--tools` 是允许清单，`args:["--tools","read"]` 的成员只能听、不能说。这是调用者的选择，文档写清，不改实现。
@@ -606,9 +625,9 @@ skill 的守卫改成三态（成员 / 只有 `pg_org_start` / 一个都没有�
 
 ## v0.2.1（2026-11-01，与平台 0.2.0 配套）
 
-**一次只动适配器的 patch。** 端点、字段、工具名都没变，`PiSurface` 与 `Herdr` 的成员没变，`pg_terminate` 的返回形状也没变。四条都是 `docs/handoff.md` §7 里记着的洞（A–D），没有一条是契约变化。`Herdr.close()` 的契约仍然只是“关掉 pane；已经不在的 pane 算成功”；A 加的是实现里的有界等待，`docs/设计说明.md` §2.2 / §5.3 同步写清它等多久、以及 5 s 到点仍会切掉活 agent——那条原本记的是“已知缺口”，不是对调用者的承诺。
+**一次只动适配器的 patch。** 端点、字段、工具名都没变，`PiSurface` 与 `Herdr` 的成员没变，`pg_terminate` 的返回形状也没变。四条都是 已删除的 handoff 文档 §7 里记着的洞（A–D），没有一条是契约变化。`Herdr.close()` 的契约仍然只是“关掉 pane；已经不在的 pane 算成功”；A 加的是实现里的有界等待，`docs/设计说明.md` §2.2 / §5.3 同步写清它等多久、以及 5 s 到点仍会切掉活 agent——那条原本记的是“已知缺口”，不是对调用者的承诺。
 
-- **关 pane 会先等窗格里的 agent 退出（`7ae1adc`）。** `HerdrCli.close()` 每 200 ms 读一次 `herdr pane list`，直到 pane 消失、或它的条目没有 `agent` / `agent_status === 'unknown'`，最多等 `PANE_AGENT_EXIT_TIMEOUT_MS = 5000`，然后才 `pane close`；`pane list` 读失败就落到原来的关闭路径，失败时的行为不变。**这条没有把竞态消掉，只是把它从 0 ms 推到 5 s**：真机上子成员卡在 `bash sleep 40` 里时，5 s 到点仍会关掉一个 `agent=pi working` 的活进程，`pg_terminate` 还是返回 `pane_close_failed: []`（四次 run 3 PASS / 1 FAIL，见 `docs/handoff.md` §3.7）。所以 §7 那一行还是开着的。测试：`close() waits for the pane agent to exit before it runs pane close`。
+- **关 pane 会先等窗格里的 agent 退出（`7ae1adc`）。** `HerdrCli.close()` 每 200 ms 读一次 `herdr pane list`，直到 pane 消失、或它的条目没有 `agent` / `agent_status === 'unknown'`，最多等 `PANE_AGENT_EXIT_TIMEOUT_MS = 5000`，然后才 `pane close`；`pane list` 读失败就落到原来的关闭路径，失败时的行为不变。**这条没有把竞态消掉，只是把它从 0 ms 推到 5 s**：真机上子成员卡在 `bash sleep 40` 里时，5 s 到点仍会关掉一个 `agent=pi working` 的活进程，`pg_terminate` 还是返回 `pane_close_failed: []`（四次 run 3 PASS / 1 FAIL，见 已删除的 handoff 文档 §3.7）。所以 §7 那一行还是开着的。测试：`close() waits for the pane agent to exit before it runs pane close`。
 - **启动时先剪一次死对端的债（`712db53`）。** `init()` 在 `replayJournal()` 之后、`ready` 之前用一份**新读的**名册剪一次。这一份名册比刚读到的历史新，所以 `reconcileObligations()` 刚标上的债也能被它判定；`since >= at` 的守卫只在正常 settle 里保留，startup 这唯一的路径上不适用。**仍漏**：如果死对端的消息还躺在 poll 队列里，第一次 poll 会把它投进来、重新标成欠回复，要等下一次 settle 才再剪。测试：`a member that starts up owing a dead peer has no debt before the first settle`。
 - **名册读保留上一份好快照、超时会中止请求、失败退避 5 s（`6ce2789`）。** `PgClient.tree(signal?)` 把 signal 传进请求与 `fetch`；`aliveIds()` 用新的 `withAbort()`，超时 `abort` 请求，不再只是放弃 promise；读失败或答案不是可信名册时保留上一份好快照，并在 5 s 内不再重读；启动仍然强制新读。测试 4 条：坏名册保留快照、退避内不重读、超时真的中止、`tree()` 把 signal 传进 `fetch`。
 - **注释回到与代码一致（`e1fcf13`）。** 只改注释：名册读现在也发生在启动、缓存的是上一份好快照而不是实时名册、读失败回退到快照而不是无条件保留每条债。
@@ -621,7 +640,7 @@ skill 的守卫改成三态（成员 / 只有 `pg_org_start` / 一个都没有�
 
 ## v0.2.0（2026-11-01，与平台 0.2.0 成对）
 
-**变成了什么。** 一个 Pi 扩展：装进一个 session，那个 session 就是成员。拉取平台 → 分类 → 注入 → 记义务 → 上报遥测；9 个 `pg_*` 工具；`herdr` 起子成员、收 pane；journal 先落盘再注入，水位按成员持久化。真机上跑通了第 4 级主链路（整级仍是部分通过，见 `docs/handoff.md` §3.6）。
+**变成了什么。** 一个 Pi 扩展：装进一个 session，那个 session 就是成员。拉取平台 → 分类 → 注入 → 记义务 → 上报遥测；9 个 `pg_*` 工具；`herdr` 起子成员、收 pane；journal 先落盘再注入，水位按成员持久化。真机上跑通了第 4 级主链路（整级仍是部分通过，见 已删除的 handoff 文档 §3.6）。
 
 ### 为什么是 minor，不是 patch
 

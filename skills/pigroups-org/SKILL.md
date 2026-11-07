@@ -1,142 +1,161 @@
 ---
 name: pigroups-org
-description: 怎么带一个 PiGroups 团队——写一份不需要追问的简报、按名字找人、读下级遥测、什么时候 inspect / abort / terminate、什么时候活该自己干。用于你要派活、分包、处理卡住的下级、或者决定换人的时候。
+description: How to lead a PiGroups team — write a brief that needs no follow-up question, find people by name, read child telemetry, decide when to inspect / abort / terminate, and decide when to do the work yourself. Use it when assigning work, splitting a task, handling a stuck child, or replacing one.
 ---
 
-# 带一个 PiGroups 组织
+# Leading a PiGroups organisation
 
-> **先确认你在不在线上。** 判据是**你能看到哪些 `pg_*` 工具**：
+> **First, confirm that you are online.** The test is **which `pg_*` tools you can see**:
 >
-> - 看得到 `pg_say`、`pg_members`、`pg_spawn` … → 你是成员，这份 skill 全部适用。
-> - **只看到 `pg_org_start`** → 这个会话还没有身份。**如果人是叫你来带队的**（"起一个组织"、
->   "你当根"），先调它（见 §0）；成功之后其余工具才会出现。不是来带队的，
->   就明说："这个会话没有加入 PiGroups，也没有让我开一个"，然后按普通会话干活。
-> - **一个 `pg_*` 都看不到** → 适配器没有装进这个会话（或加载失败）。明说。
+> - You see `pg_say`, `pg_members`, `pg_spawn`, ... → you are a member; this whole skill applies.
+> - **You see only `pg_org_start`** → this session has no identity yet. **If a person asked you to lead**
+>   ("start an organisation", "you are the root"), call it first (see §0); the other tools appear only after
+>   it succeeds. If you were not asked to lead, say so plainly: "this session has not joined PiGroups, and
+>   nobody asked me to start one", then continue as an ordinary session.
+> - **You see no `pg_*` tool at all** → the adapter is not installed in this session (or failed to load).
+>   Say so.
 >
-> 任何情况下都**不要**用 `subagent`、`todo` 或别的机制去模拟这个组织。静默降级是最坏的结果：
-> 人以为在用 PiGroups，其实没有。
+> In every case, **do not** simulate the organisation with `subagent`, `todo`, or any other mechanism.
+> Silent degradation is the worst outcome: the person thinks PiGroups is working when it is not.
 
+## 0. The root's first move: start the organisation
 
-## 0. 根的第一件事：把组织开起来
+If you were asked to lead and the session has only `pg_org_start`, call it first:
 
-如果你是被叫来带队的、而会话里只有 `pg_org_start`，第一件事就是调它：
+- `pg_org_start(name: "<organisation name>", ...)`. `name` is the root member's name and the first row of
+  the roster; name it after **what this team is for** (`release-2026`, `billing`), not `root` or `agent1`.
+- It finds the platform code (`platform_dir` → `PIGROUPS_PLATFORM_DIR` → the installed `pigroups` package →
+  `../PiGroups` next to the adapter), starts the platform if necessary, and bootstraps the root identity.
+  After success, `pg_say`, `pg_spawn`, and the other tools appear.
+- If it fails, it returns the paths it tried or the platform's error code. Change the arguments and retry;
+  do not guess.
+- Once it succeeds you are the **root**: you have no parent, and tasks come directly from the person. State
+  the organisation name and your root identity before your first report.
+- **The platform outlives this session.** If you exit or the pane closes, the organisation stays in the
+  platform data; the root credential and the organisation are recorded in `<adapterDir>/orgs/<key>/org.json`.
+  A later `pg_org_start` with the same `PIGROUPS_ADAPTER_DIR` and organisation name reattaches to the same
+  organisation. Do not kill the platform to "restart" it, and do not start a second one by hand.
+- **`port` is only a starting candidate** (design §8.2): the platform binds its own port and writes
+  `endpoint.json`; the adapter verifies the platform identity, waits for healthy health, and updates the
+  organisation URL. Do not pin the old port or pick a free port to bypass a startup error. A starting
+  identity response or a transient health failure is not evidence that the member died; the adapter owns
+  liveness and layered respawn.
+- A session that already has an identity (it can see other `pg_*` tools because `PIGROUPS_URL` and
+  `PIGROUPS_TOKEN` are in the environment) does not have this tool. Then you are a member, not the root.
+  An organisation you just started in this session is different: `pg_org_start` remains visible and only
+  answers "already belongs to <url>".
 
-- `pg_org_start(name: "<组织名>", ...)`。`name` 是根成员的名字，也是这个组织在名册上的第一行；
-  按**这支队伍要干的事**取名（`release-2026`、`billing`），不要 `root`、`agent1`。
-- 它自己找平台代码（`platform_dir` → `PIGROUPS_PLATFORM_DIR` → 适配器旁的 `../PiGroups`），
-  必要时把平台拉起来，然后 `bootstrap` 出根身份；成功后 `pg_say`、`pg_spawn` 等工具才会出现。
-  失败时它会把试过的路径、或者平台的错误码原样给你，照着改参数再试，不要猜。
-- 成功之后你就是**根**：没有上级，任务直接来自人。第一次汇报之前先把组织名和根身份说清楚。
-- **平台比这个 session 活得久。** 你退出、pane 关掉，组织仍保存在平台数据中；根凭据与组织关联在
-  `<adapterDir>/orgs/<key>/org.json`。下一次用同一个 `PIGROUPS_ADAPTER_DIR` 与组织名调
-  `pg_org_start` 会**重新接上**同一个组织；不要为了"重启"去杀平台进程，也不要手动再起第二个。
-- **`port` 只是起始候选（设计说明 §8.2）**：平台自己绑定端口并写 `endpoint.json`；适配器核对平台身份、
-  等正常 health 就绪，再更新组织 URL。不要固定旧端口或自己挑空闲端口绕过启动错误。启动期身份响应、
-  短暂 health 失败都不是成员死亡证据；平台恢复后，成员判活与逐层 respawn 仍由适配器负责。
-- 启动时就已经有身份（一上来就看得到其它 `pg_*`，因为环境里已经有 `PIGROUPS_URL` +
-  `PIGROUPS_TOKEN`）的会话里没有这个工具。那时你是一个成员，不是根。**由你自己刚开出来的
-  组织不算**：同一会话里 `pg_org_start` 会一直在，再调它只会回答"已经属于 <url>"。
+You are a parent (at least to the members you spawn). Your job is not to "pass the task down"; it is to
+**make the child not need to come back with a second question**, and to decide when the child is stuck.
+The tools answer "what can I do"; this skill answers "how should I use it".
 
----
+## 1. A brief that needs no follow-up
 
-你是上级（至少对你派生出来的成员而言）。你的工作不是"把任务传下去"，而是**让下级不需要
-回来问第二遍**，并且在他们卡住时做出决定。工具解决"能做什么"，这份 skill 解决"该怎么用"。
+The `brief` of `pg_spawn(name?, brief, cwd?, args?)` is the first DM the child receives. A bad brief makes
+the child do one of two things: stop and ask, or guess. Four elements are mandatory:
 
-## 1. 一份不需要追问的简报
+1. **Goal**: what the world should look like when this is done (not "look at X", but "X should produce Z at
+   time Y").
+2. **Acceptance**: what counts as done, which command to run, which output to inspect, who signs off. If
+   it can be a command, make it a command.
+3. **Boundaries**: what must not be touched, how long it may take, how long it may stay stuck before
+   reporting, and which decision must be asked about.
+4. **Report**: send `pg_say` to whom when done, and with what (conclusion, evidence paths, what was not done).
 
-`pg_spawn(name?, brief, cwd?, args?)` 的 `brief` 会作为第一条一对一发出去。写坏了，
-下级只会做两件事：停下来问，或者猜着做。四个要素缺一不可：
+One more habit: **put the context you already have into the brief** (relevant files, earlier conclusions,
+known traps). The child does not share your session history; "do what we discussed" is zero information.
 
-1. **目标**：做完之后世界应该是什么样（不是"看一下 X"，而是"X 应该在 Y 时给出 Z"）。
-2. **验收**：怎么算完成、跑什么命令、看哪个输出、谁签字。能写成命令就写成命令。
-3. **边界**：不许动什么、可以花多久、卡住多久必须上报、遇到哪个决定必须问。
-4. **回报**：完成后用 `pg_say` 发给谁、要带什么（结论、证据路径、没做的部分）。
+Do not use the brief as a substitute for tool permissions: `args` is appended to the pi launch arguments
+verbatim. Passing `--tools read` can leave the child unable to use `pg_*` at all (it can listen but not speak).
 
-再加一条使用习惯：**把已经知道的上下文写进去**（相关文件、之前的结论、踩过的坑）。
-下级没有你的会话历史；"按我们刚才说的做"对它等于零信息。
+## 2. Name members: the name is the only index
 
-不要用简报代替工具权限：`args` 原样追加到 pi 启动参数，传 `--tools read` 会让它连 `pg_*`
-都不能用（那个成员只能听、不能说）。
+`pg_members(query)` does a case-insensitive substring match on **name** only. Ids are opaque; people do
+not remember them and models cannot guess them. The name is the one handle on the platform.
 
-## 2. 给成员起名：名字是唯一的索引
+- Name by **what it owns**: `billing-api`, `web-tests`, `release-notes`; not `helper1` or `agent2`.
+- A query can hit several members with the same fragment, so names must distinguish responsibilities; do
+  not call three repositories `coder`.
+- After assigning work, find the child again with `pg_members('billing')`; do not make your parent remember ids.
+- `relation` in the roster is a capability boundary: only `child` may be `pg_abort`ed or `pg_terminate`d;
+  `sibling` and `peer` may speak but not command. `last_seen_at` is the **last authentication time, not
+  liveness**.
+- The roster lists only **alive** members. Whether a child process is still running is decided by the adapter
+  from **panes** (heartbeats are a fact, not a death sentence). To reopen, use `pg_respawn()` (§6); do not
+  `pg_terminate` and then `pg_spawn`.
 
-`pg_members(query)` 只按**名字**做大小写不敏感的子串匹配——id 是不透明的，人记不住，
-模型也猜不出。所以名字是平台上唯一的把手。
+## 3. Read telemetry
 
-- 按**它拥有的东西**命名：`billing-api`、`web-tests`、`release-notes`；不要 `helper1`、`agent2`。
-- 同一个名字会被 `query` 一次命中，所以名字要能区分职责，不要把三个仓库都叫 `coder`。
-- 派完活以后，用 `pg_members('billing')` 找回它，而不是让上级替你记 id。
-- 名册里的 `relation` 是能力边界：`child` 才能 `pg_abort` / `pg_terminate`；`sibling`、`peer`
-  能说话，不能指挥。`last_seen_at` 是**最近一次鉴权的时间，不是活着**。
-- 名册只列**活着**的成员。孩子进程是否还在，由适配器按 **pane** 判断（心跳只是事实，不判死）；真要重开用
-  `pg_respawn()`（§6），不要 `pg_terminate` 再 `pg_spawn`。
+`pg_children()` is a snapshot; `pg_inspect(member)` asks once. Read the snapshot first; do not inspect immediately.
 
-## 3. 读遥测
-
-`pg_children()` 是快照，`pg_inspect(member)` 是主动问一次。先读快照，别一上来就 inspect。
-
-| 状态 | 意思 | 通常该做什么 |
+| State | Meaning | What to do |
 |---|---|---|
-| `stalled` | 同一个工具跑了很久 | 看 `last.tool` 是什么。值得等就等；方向错了就 abort + 说清新方向 |
-| `slow_turn` | 一轮整体跑太久 | 可能是在想，也可能在空转；看 `last.text` |
-| `error` | 一轮以 provider 错误结束 | 不是任务失败；必要时让它重试，或换个模型 |
-| `idle_owed` | 空闲但欠回复 | 它在等你或别人；先看它欠哪个会话，必要时先回它 |
-| `blocked` | 同一个会话催了 3 次仍没有产出 | 它多半卡在一个决定上：直接问缺什么，或 abort + 给方向 |
-| `silent_acking` | 同一会话连续 ack ≥3 次、期间一句话没说 | 它在用 ack 清账而不汇报；要结论就点名要 |
-| `recovered` | 刚离开某个状态，`of` 说明是哪一个 | 不用动作，知道它好了即可 |
+| `stalled` | One tool has been running a long time | Look at `last.tool`. If it is worth waiting, wait; if the direction is wrong, abort and state the new direction |
+| `slow_turn` | The whole turn is taking too long | It may be thinking or spinning; read `last.text` |
+| `error` | The turn ended with a provider error | This is not task failure; retry if needed, or switch models |
+| `idle_owed` | Idle but owes a reply | It is waiting for you or someone else; see which conversation it owes, and answer it first if needed |
+| `blocked` | The same conversation was nudged three times with no output | It is probably stuck on a decision: ask what is missing, or abort and give direction |
+| `silent_acking` | The same conversation was acked at least three times with no words in between | It is clearing debt with acks instead of reporting; ask explicitly for the conclusion |
+| `recovered` | It just left a state; `of` names it | No action; know that it recovered |
 
-`gone` **不是**遥测状态（0.13.0 起删掉）：成员被删除后直接从名册和遥测里消失，不会再出现一行 `gone`。
-不要等一个 `gone` 来告诉你它没了——它没了的证据是 pane 里没有那个 session；
-心跳缺席只说明“喂心跳的循环没在跑”，不证明进程退出。
+`gone` is **not** a telemetry state (removed in 0.13.0): a deleted member disappears from the roster and
+telemetry; there is no `gone` row. Do not wait for a `gone` to tell you it is gone — the evidence is that
+its session is absent from the panes. A missing heartbeat only says the heartbeat loop stopped; it does not
+prove the process exited.
 
-`pg_children()` 的每一行还带 `last`：最后一条助手文本（截断）和最后一个工具调用
-（名字、参数预览、`ok`）。`ok: false` 是 pi 报的错误；`ok: true` **不等于**任务成功。
+Each `pg_children()` row also carries `last`: the last assistant text (truncated) and the last tool call
+(name, argument preview, `ok`). `ok: false` is a pi-reported error; `ok: true` does **not** mean the task succeeded.
 
-## 4. 什么时候 inspect
+## 4. When to inspect
 
-- 遥测说"不正常"，但说不清在做什么（例如 `slow_turn` 且 `last.text` 是空的）。
-- 你要做一个不可逆的决定（abort / terminate）之前。
-- 不要用 inspect 代替读遥测：它是**问一次**，不是轮询接口；同一个成员连续问，只会拿到同一张表。
+- Telemetry says "not normal" but not what it is doing (for example `slow_turn` with an empty `last.text`).
+- Before an irreversible decision (abort / terminate).
+- Do not use inspect instead of reading telemetry: it is **one question**, not a polling endpoint; asking
+  the same member repeatedly returns the same table.
 
-## 5. 什么时候 abort
+## 5. When to abort
 
-`pg_abort(member)` 切断当前回合，**不携带任何话**。指引是沟通动作，切断是运维动作，
-两者分开：
+`pg_abort(member)` cuts the current turn and **carries no words**. Direction is communication; cutting is
+operations. Keep them separate:
 
-- 它卡在一个不会自己结束的工具里；或
-- 它做的方向已经确定是错的，继续做只是浪费。
+- It is stuck in a tool that will not end by itself; or
+- Its direction is definitely wrong, and continuing only wastes work.
 
-用法是 **`pg_abort` → `pg_say`**：先停，再说新方向。适配器在 abort 之后会立刻关掉投递窗口，
-所以紧跟着的那条消息会尽快进入它的上下文，而不是等一个窗口。
+Use **`pg_abort` → `pg_say`**: stop first, then state the new direction. After an abort, the adapter closes
+the delivery window immediately, so the message that follows enters its context as soon as possible instead
+of waiting for a window.
 
-不要用 abort 表达"我不高兴"：切断会丢掉它这一轮正在做的事。也不要指望 abort 能让它
-"看到"你的话——abort 自己不注入任何提示。
+Do not use abort to express displeasure: cutting throws away the work in that turn. Do not expect abort to
+make it "see" your words — abort injects no prompt of its own.
 
-## 6. 什么时候 terminate
+## 6. When to terminate
 
-`pg_terminate(member)` 删整棵子树（平台级联），并关掉本适配器为这些成员起过的 pane。
+`pg_terminate(member)` deletes the whole subtree (the platform cascades) and closes the panes this adapter
+started for those members.
 
-- 这个分支确定不再需要（人走了、方向废了、重复派生了一个）。
-- 不要为了"重启它"而 terminate + spawn：成员保留自己的 session 和上下文，重启会丢；
-  先试 abort / say。要重开一个**身份还在、进程没了**的孩子，用 `pg_respawn()`：它没有参数，范围就是你的子树；
-  它按 `children/<id>.json` 里的 session 重开、沿用原 token（绝不重发）；pane 里已经在跑的只发一条
-  `pg.respawn`，让它去修自己的子树；pane 列表读不到时不启动。`pg_terminate` 删的是身份，
-  `pg_spawn` 造的是新身份，两者都不是"重启"。
-- 删之前想一下：级联会带走它的所有下级，以及它们欠你的回复。
+- This branch is definitely no longer needed (the person left, the direction is dead, a duplicate was spawned).
+- Do not terminate + spawn to "restart it": the member keeps its session and context, which are lost on
+  restart; try abort / say first. To reopen a child whose **identity still exists but whose process is gone**,
+  use `pg_respawn()`: it takes no arguments and covers your subtree. It reopens from the session in
+  `children/<id>.json` using the original token (never reissues one); a pane already running that session
+  only gets a `pg.respawn` control so it can repair its own subtree; an unreadable pane list starts nothing.
+  `pg_terminate` deletes identity; `pg_spawn` creates new identity; neither is a restart.
+- Before deleting, remember that the cascade takes every child below it, and their replies owed to you.
 
-## 7. 什么时候自己干
+## 7. When to do the work yourself
 
-派活有成本：写简报、等、读遥测、处理偏差。下面这些情况自己干更快：
+Delegation has a cost: writing the brief, waiting, reading telemetry, handling drift. These are faster done yourself:
 
-- 一次性的小改动，几分钟能完，不需要第二个人持有上下文。
-- 下级缺少必要上下文或工具（比如它没有 `bash`，而你只需要跑一条命令）。
-- 需要拍板且只有你知道决定的时候——这时候应该**向上**问，而不是向下派。
+- A one-off small change that takes a few minutes and does not need a second holder of context.
+- The child lacks required context or tools (for example it has no `bash`, and you only need one command).
+- A decision only you can make — then ask **upward**, not downward.
 
-不要为了"看起来像在管理"而派活。团队是为了**并行**和**长期持有上下文**，不是为了层级本身。
+Do not delegate to "look like a manager". A team is for **parallelism** and **long-lived context**, not hierarchy for its own sake.
 
-## 8. 不要轮询
+## 8. Do not poll
 
-消息、遥测、催办都会到你的上下文里。不要 `bash sleep` 等结果，不要反复 `pg_inspect`。
-真的需要过一会儿再看，用 `pg_schedule(after_seconds, note)`：一次性、有上下限、
-只在适配器进程内有效；到点适配器把 `[scheduled] note` 投给你并起一轮。连续预约同一件事
-说明你该改遥测策略，而不是加定时器。
+Messages, telemetry, and reminders enter your context by themselves. Do not `bash sleep` waiting for a
+result, and do not repeat `pg_inspect`. If you really need to look later, use
+`pg_schedule(after_seconds, note)`: one-shot, bounded, valid only inside the adapter process. When it is due
+the adapter injects `[scheduled] note` and starts a turn. Scheduling the same thing repeatedly means you
+should fix the telemetry strategy, not add another timer.

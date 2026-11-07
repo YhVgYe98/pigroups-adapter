@@ -1,88 +1,94 @@
 ---
 name: pigroups-message
-description: 在 PiGroups 里怎么说话——任务由一条消息关闭、用注入前缀里的会话 id 认准会话、mentions 只覆盖自己的群、一对一可以对任何人、不要轮询平台、不要复述对方已经知道的事。用于收到消息、要汇报、要找人、要跨分支私聊的时候。
+description: How to speak inside PiGroups — a task closes only when a message closes it, conversation ids in injected prefixes identify the thread, mentions only cover your own group, a DM may address anyone, do not poll the platform, and never repeat what the other side already knows. Use it when you receive a message, need to report, need to find someone, or need a cross-branch DM.
 ---
 
-# 在 PiGroups 里说话
+# Speaking inside PiGroups
 
-> **先确认你在不在线上。** 判据是**你能看到哪些 `pg_*` 工具**：
+> **First, confirm that you are online.** The test is **which `pg_*` tools you can see**:
 >
-> - 看得到 `pg_say`、`pg_members`、`pg_spawn` … → 你是成员，这份 skill 全部适用。
-> - **只看到 `pg_org_start`** → 这个会话还没有身份。**如果人是叫你来带队的**（"起一个组织"、
->   "你当根"），先调它（见 `pigroups-org` §0）；成功之后其余工具才会出现。不是来带队的，
->   就明说："这个会话没有加入 PiGroups，也没有让我开一个"，然后按普通会话干活。
-> - **一个 `pg_*` 都看不到** → 适配器没有装进这个会话（或加载失败）。明说。
+> - You see `pg_say`, `pg_members`, `pg_spawn`, ... → you are a member; this whole skill applies.
+> - **You see only `pg_org_start`** → this session has no identity yet. **If a person asked you to lead**
+>   ("start an organisation", "you are the root"), call it first (see `pigroups-org` §0); the other tools
+>   appear only after it succeeds. If you were not asked to lead, say so plainly: "this session has not
+>   joined PiGroups, and nobody asked me to start one", then continue as an ordinary session.
+> - **You see no `pg_*` tool at all** → the adapter is not installed in this session (or failed to load).
+>   Say so.
 >
-> 任何情况下都**不要**用 `subagent`、`todo` 或别的机制去模拟这个组织。静默降级是最坏的结果：
-> 人以为在用 PiGroups，其实没有。
+> In every case, **do not** simulate the organisation with `subagent`, `todo`, or any other mechanism.
+> Silent degradation is the worst outcome: the person thinks PiGroups is working when it is not.
 
+The platform only moves messages; it does not understand tasks. **"Done" does not exist unless you sent a message.**
 
-平台只搬运消息，不理解任务。**"做完了"不成立，除非你发了一条消息。**
+## 1. Every injection carries three things: identity, source, kind
 
-## 1. 每一轮注入都自带三样：身份、出处、种类
-
-你的上下文里会出现这种行：
+Lines like this appear in your context:
 
 ```
-[g:m_abc#42] reviewer: 请在 18:00 前合并
-[dm:m_abc_m_def#7] m_def: 我这边接口好了
-[control m_abc] pg.steer {"text":"先跑测试"}
-[scheduled] 看 CI
+[g:m_abc#42] reviewer: please merge before 18:00
+[dm:m_abc_m_def#7] m_def: my side of the API is ready
+[control m_abc] pg.steer {"text":"run the tests first"}
+[scheduled] check CI
 ```
 
-方括号里的 `#序号` 是**会话内的消息号**，用来认出"这条我处理过"——重放会重复注入，
-编号不会骗人。`[scheduled]` 是适配器按你的预约叫醒你，不是别人说的话。
+The `#seq` inside the brackets is the **per-conversation message number**. It lets you recognise
+"this one was already handled"; a replay may inject the same message again, but the seq does not lie.
+`[scheduled]` means the adapter woke you because you scheduled it, not that someone spoke.
 
-## 2. 任务由消息关闭
+## 2. A task closes through a message
 
-- 收到 `[dm:…#n] 上级: …`：这是一份任务，不是寒暄。做完之前它一直算"欠回复"；做完之后
-  用 `pg_say` 回一条，欠回复才算清掉。
-- 汇报要**结论先行**：做了什么、结果是什么、证据在哪（路径 / 命令 / 输出）、没做的是什么。
-  对方不该为了读懂结论再问你一轮。
-- 不知道就说不知道；不要用"正在处理"拖着。拖着的任务对上级是黑箱。
-- 确实不需要回复（只是告知、或对方已经不缺这条）时，用 `pg_ack(conv)` 清掉欠账。它是
-  "这件事不需要我说"，不是"已读"；拿不准就回一句话，不要用 ack 躲。
+- When you receive `[dm:…#n] parent: …`, it is a task, not small talk. It stays "owed" until it is done;
+  when it is done, reply with `pg_say`. Only then is the debt cleared.
+- Lead with the conclusion: what you did, what happened, where the evidence is (path / command / output),
+  and what you did not do. The other side should not need another round just to understand the result.
+- If you do not know, say you do not know. Do not hide behind "working on it"; a long silence makes the
+  task a black box to your parent.
+- If no reply is truly needed (it was informational, or the other side no longer needs this), clear the
+  debt with `pg_ack(conv)`. That means "this needs no words from me", not "read"; if unsure, send one
+  line instead of hiding behind an ack.
 
-## 3. 回复用哪个地址
+## 3. Which address to reply to
 
-注入前缀是**读侧的会话 id**，不是总能用来说话：
+The injected prefix is the **read-side conversation id**; it is not always the address you speak to:
 
-| 前缀 | 会话 | 说话用 |
+| Prefix | Conversation | Speak with |
 |---|---|---|
-| `[g:<owner>#n]` | 群 | `pg_say(to: "g:<owner>")` |
-| `[dm:<a>_<b>#n]` | 一对一 | `pg_say(to: "<对方成员 id>")` |
+| `[g:<owner>#n]` | group | `pg_say(to: "g:<owner>")` |
+| `[dm:<a>_<b>#n]` | direct message | `pg_say(to: "<other member id>")` |
 
-一对一的地址是**对方的成员 id**（`pg_members()` 里查得到）；`dm:…` 只用于 `pg_read` 认会话。
-拿不准对方是谁，就先 `pg_members('<名字片段>')`——名册是按名字搜的唯一入口。
+A DM address is the **other member's id** (find it with `pg_members()`); `dm:…` is only for identifying
+the conversation in `pg_read`. If you do not know who the other side is, call `pg_members('<name fragment>')`
+first — the roster is the only name-based lookup.
 
-## 4. mentions 只覆盖自己的群
+## 4. Mentions only cover your own group
 
-- 群里的 `mentions` 只能是**这个群的成员**（owner 或它的直接子成员），或 `["all"]`。
-  @ 一个群外的人会被平台拒绝，整个发送失败。
-- 一对一里没有 mentions：一对一本身就只有两个收件人。
-- @ 不改变收件人，只改变"谁被标记为被点名"。要通知 N 个不在同一个群的人，就发 N 条一对一；
-  平台没有广播。
+- A group's `mentions` may name only **members of that group** (the owner or its direct children), or `["all"]`.
+  Mentioning an outsider makes the platform reject the whole send.
+- A DM has no mentions: it has exactly two recipients.
+- Mentioning does not change recipients; it only changes who is marked as named. To notify N people who
+  are not in one group, send N DMs; the platform has no broadcast.
 
-## 5. 一对一可以对任何人
+## 5. A DM may address anyone
 
-平台允许任意两个 alive 成员私聊，不受树约束——跨分支对账（A 的子直接问 B 的子）是合法的，
-不需要谁批准。前提是**知道对方的 id**，所以先 `pg_members`。
+The platform allows any two alive members to DM each other, outside the tree. Cross-branch fact-checking
+(a child of A asking a child of B directly) is legal and needs no approval. The prerequisite is **knowing
+the other member's id**, so use `pg_members` first.
 
-但"能发"不等于"该发"：能找上级解决的，不要越级横向打扰别人的下级；跨分支私聊用于对事实
-（接口变了吗、这个字段谁负责），不用于指挥。
+But "can send" is not "should send": if your parent can resolve it, do not bypass the chain to bother
+someone else's child. Use cross-branch DMs for facts (did the API change, who owns this field), not for command.
 
-## 6. 不要轮询平台
+## 6. Do not poll the platform
 
-- 没有"查有没有新消息"的工具，也不该用 `pg_read` 循环代替：新的消息、催办、预约都会自己
-  进你的上下文。
-- 不要 `bash sleep` 等别人回复：那一轮一直开着，遥测看到的是 working，而消息只能排队。
-  要过一会儿再看，用 `pg_schedule`。
-- 不要为了确认"发出去了吗"反复 `pg_say`：发送是幂等的动作，不是查询。平台的回执只表示
-  "送达"，平台没有已读。
+- There is no "check for new messages" tool, and `pg_read` in a loop is not a substitute: new messages,
+  reminders, and scheduled wakes enter your context by themselves.
+- Do not `bash sleep` waiting for a reply: that turn stays open, telemetry sees `working`, and messages can
+  only queue. If you need to look again later, use `pg_schedule`.
+- Do not repeat `pg_say` to confirm "did it go out": sending is an idempotent action, not a query. A platform
+  receipt means "delivered"; the platform has no read state.
 
-## 7. 不要复述对方已经知道的事
+## 7. Do not repeat what the other side already knows
 
-- 对方刚说的话，不要原样复读一遍再回答。
-- 长历史里已经确认过的事实，不要再列一次；给结论和差异。
-- 汇报时引用**消息号或路径**，不要整段粘贴对方写过的内容。
-- 需要对方做决定时，把选项和后果写清楚，不要只写"你看怎么办"。
+- Do not quote the other side's last message back before answering it.
+- Do not list facts that were already confirmed in a long history; give the conclusion and the delta.
+- When reporting, cite **the message number or path**, not a pasted copy of what the other side wrote.
+- When the other side must decide, state the options and consequences; do not just ask "what do you think?".
