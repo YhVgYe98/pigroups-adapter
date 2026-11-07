@@ -19,6 +19,9 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: adapter/package-lock.json
+      - name: Install platform dependencies
+        working-directory: PiGroups
+        run: npm ci
       - name: Install with the local platform checkout
         working-directory: adapter
         run: |
