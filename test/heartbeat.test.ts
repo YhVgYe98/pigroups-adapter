@@ -270,35 +270,6 @@ test('an unreadable herdr list does not start a child in the periodic scan', asy
     'the scan does not invent a repair report',
   );
 });
-test('a 0.4 platform gets no heartbeat requests and one warning', async (t) => {
-  const s = await scenario({ heartbeatMs: 1_000 });
-  t.after(() => s.close());
-  const warnings = captureWarnings(t);
-
-  let beats = 0;
-  s.pg.heartbeat = async () => {
-    beats += 1;
-    return { heartbeat_at: s.clock.now() };
-  };
-  const realWhoami = s.pg.whoami.bind(s.pg);
-  s.pg.whoami = async () => {
-    const who = await realWhoami();
-    return { ...who, server: { ...who.server, version: '0.4.9' } };
-  };
-
-  await s.cycle();
-  s.clock.set(Date.now());
-  s.loop.tick();
-  await delay(50);
-  s.clock.advance(1_000);
-  s.loop.tick();
-  await delay(50);
-
-  assert.equal(beats, 0, 'the heartbeat route only exists from platform 0.5');
-  const heartbeatWarnings = warnings.filter((line) => /heartbeat/i.test(line) && /0\.5/.test(line));
-  assert.equal(heartbeatWarnings.length, 1, `exactly one warning names the missing platform feature: ${JSON.stringify(warnings)}`);
-});
-
 test('a heartbeat that never settles is abandoned so later ticks can beat again', async (t) => {
   const s = await scenario({ heartbeatMs: 1_000 });
   t.after(() => s.close());

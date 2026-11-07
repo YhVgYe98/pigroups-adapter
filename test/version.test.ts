@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import pigroupsExtension from '../src/extension.ts';
 import type { PiContext, PiLike, PiToolDefinition } from '../src/surface.ts';
-import { ADAPTER_VERSION } from '../src/version.ts';
+import { ADAPTER_VERSION, EXPECTED_PLATFORM_VERSION } from '../src/version.ts';
 
 import { bootPlatform, bootstrapRoot, waitFor, type MemberRef, type Platform } from './support.ts';
 
@@ -22,13 +22,15 @@ function readJson(relative: string): Record<string, any> {
   return JSON.parse(readFileSync(new URL(relative, import.meta.url), 'utf8'));
 }
 
-test('this release is 0.16.0 for the platform 0.7 endpoint claim', () => {
-  assert.equal(ADAPTER_VERSION, '0.16.0+platform.0.7.0', 'the release records the platform it was exercised against');
+test('this release is 0.17.0 for the platform 0.7.1 release', () => {
+  assert.equal(ADAPTER_VERSION, '0.17.0');
+  assert.equal(EXPECTED_PLATFORM_VERSION, '0.7.1');
 });
 
 test('ADAPTER_VERSION is the version package.json and its lockfile publish', () => {
   const pkg = readJson('../package.json');
   assert.equal(pkg.version, ADAPTER_VERSION, 'package.json must say what src/version.ts says');
+  assert.equal(pkg.dependencies.pigroups, EXPECTED_PLATFORM_VERSION, 'the platform dependency is exact');
 
   const lock = readJson('../package-lock.json');
   assert.equal(lock.version, ADAPTER_VERSION, 'the lockfile carries the same version');
@@ -146,6 +148,7 @@ test('pg_whoami reports adapter_version next to the platform version', async () 
   try {
     const answer = await callWhoami(session.tools);
     assert.equal(answer.adapter_version, ADAPTER_VERSION, 'the adapter version is in the answer');
+    assert.equal(answer.expected_platform_version, EXPECTED_PLATFORM_VERSION, 'the expected platform version is explicit');
     assert.equal(answer.who.member.id, session.me.id, 'the platform coordinates are still there');
     assert.equal(typeof answer.who.server.version, 'string', 'the platform version stays under who.server.version');
     assert.ok(answer.adapter !== undefined, 'the adapter state stays in the answer');

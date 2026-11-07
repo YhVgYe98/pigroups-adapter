@@ -749,7 +749,10 @@ async function makeLoop(tree: (signal?: AbortSignal) => Promise<unknown>): Promi
   const clock = new FakeClock(1_000_000);
   const dir = await mkdtemp(join(tmpdir(), 'pigroups-roster-'));
   const pg = {
-    whoami: async () => ({ member: { id: SELF_ID, name: 'me', parent_id: null } }),
+    whoami: async () => ({
+      member: { id: SELF_ID, name: 'me', parent_id: null },
+      server: { version: '0.7.1' },
+    }),
     conversations: async () => ({ items: [{ to: PEER_DM }] }),
     messages: async () => ({
       items: [

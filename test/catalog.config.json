@@ -1,52 +1,204 @@
 {
   "files": {
-    "catalog.test.ts": { "type": "tooling", "area": "catalog" },
-    "compatibility.test.ts": { "type": "unit", "area": "compatibility" },
-    "config.test.ts": { "type": "unit", "area": "config" },
-    "control.test.ts": { "type": "integration", "area": "control" },
-    "datadir.test.ts": { "type": "unit", "area": "datadir" },
-    "delivery-body.test.ts": { "type": "integration", "area": "delivery" },
-    "delivery.test.ts": { "type": "integration", "area": "delivery" },
-    "exit.test.ts": { "type": "integration", "area": "exit" },
-    "format.test.ts": { "type": "unit", "area": "format" },
-    "heartbeat.test.ts": { "type": "integration", "area": "heartbeat" },
-    "herdr.test.ts": { "type": "unit", "area": "herdr" },
-    "journal.test.ts": { "type": "integration", "area": "journal" },
-    "lease.test.ts": { "type": "integration", "area": "lease" },
-    "log.test.ts": { "type": "unit", "area": "log" },
-    "members.test.ts": { "type": "integration", "area": "members" },
-    "obligation.test.ts": { "type": "integration", "area": "obligation" },
-    "orgrepair.test.ts": { "type": "regression", "area": "org" },
-    "orgstart.test.ts": { "type": "integration", "area": "org" },
-    "owed.test.ts": { "type": "integration", "area": "owed" },
-    "package.test.ts": { "type": "tooling", "area": "package" },
-    "records.test.ts": { "type": "integration", "area": "records" },
-    "recover.test.ts": { "type": "regression", "area": "recover" },
-    "respawn.test.ts": { "type": "integration", "area": "respawn" },
-    "schedule.test.ts": { "type": "integration", "area": "schedule" },
-    "spawn.test.ts": { "type": "unit", "area": "spawn" },
-    "startup-repair.test.ts": { "type": "regression", "area": "startup" },
-    "status.test.ts": { "type": "unit", "area": "status" },
-    "stop.test.ts": { "type": "integration", "area": "stop" },
-    "surface.abort.test.ts": { "type": "unit", "area": "surface" },
-    "surface.test.ts": { "type": "unit", "area": "surface" },
-    "telemetry.test.ts": { "type": "integration", "area": "telemetry" },
-    "toolsowe.test.ts": { "type": "integration", "area": "tools" },
-    "tools.test.ts": { "type": "integration", "area": "tools" },
-    "toolsurface.test.ts": { "type": "integration", "area": "tools" },
-    "version.test.ts": { "type": "tooling", "area": "version" },
-    "watermark.test.ts": { "type": "integration", "area": "watermark" }
+    "catalog.test.ts": {
+      "type": "tooling",
+      "area": "catalog"
+    },
+    "config.test.ts": {
+      "type": "unit",
+      "area": "config"
+    },
+    "control.test.ts": {
+      "type": "integration",
+      "area": "control"
+    },
+    "datadir.test.ts": {
+      "type": "unit",
+      "area": "datadir"
+    },
+    "delivery-body.test.ts": {
+      "type": "integration",
+      "area": "delivery"
+    },
+    "delivery.test.ts": {
+      "type": "integration",
+      "area": "delivery"
+    },
+    "exit.test.ts": {
+      "type": "integration",
+      "area": "exit"
+    },
+    "format.test.ts": {
+      "type": "unit",
+      "area": "format"
+    },
+    "heartbeat.test.ts": {
+      "type": "integration",
+      "area": "heartbeat"
+    },
+    "herdr.test.ts": {
+      "type": "unit",
+      "area": "herdr"
+    },
+    "journal.test.ts": {
+      "type": "integration",
+      "area": "journal"
+    },
+    "lease.test.ts": {
+      "type": "integration",
+      "area": "lease"
+    },
+    "log.test.ts": {
+      "type": "unit",
+      "area": "log"
+    },
+    "members.test.ts": {
+      "type": "integration",
+      "area": "members"
+    },
+    "obligation.test.ts": {
+      "type": "integration",
+      "area": "obligation"
+    },
+    "orgrepair.test.ts": {
+      "type": "regression",
+      "area": "org"
+    },
+    "orgstart.test.ts": {
+      "type": "integration",
+      "area": "org"
+    },
+    "owed.test.ts": {
+      "type": "integration",
+      "area": "owed"
+    },
+    "package.test.ts": {
+      "type": "tooling",
+      "area": "package"
+    },
+    "records.test.ts": {
+      "type": "integration",
+      "area": "records"
+    },
+    "recover.test.ts": {
+      "type": "regression",
+      "area": "recover"
+    },
+    "respawn.test.ts": {
+      "type": "integration",
+      "area": "respawn"
+    },
+    "schedule.test.ts": {
+      "type": "integration",
+      "area": "schedule"
+    },
+    "spawn.test.ts": {
+      "type": "unit",
+      "area": "spawn"
+    },
+    "startup-repair.test.ts": {
+      "type": "regression",
+      "area": "startup"
+    },
+    "status.test.ts": {
+      "type": "unit",
+      "area": "status"
+    },
+    "stop.test.ts": {
+      "type": "integration",
+      "area": "stop"
+    },
+    "surface.abort.test.ts": {
+      "type": "unit",
+      "area": "surface"
+    },
+    "surface.test.ts": {
+      "type": "unit",
+      "area": "surface"
+    },
+    "telemetry.test.ts": {
+      "type": "integration",
+      "area": "telemetry"
+    },
+    "toolsowe.test.ts": {
+      "type": "integration",
+      "area": "tools"
+    },
+    "tools.test.ts": {
+      "type": "integration",
+      "area": "tools"
+    },
+    "toolsurface.test.ts": {
+      "type": "integration",
+      "area": "tools"
+    },
+    "version.test.ts": {
+      "type": "tooling",
+      "area": "version"
+    },
+    "watermark.test.ts": {
+      "type": "integration",
+      "area": "watermark"
+    },
+    "platform-version.test.ts": {
+      "type": "unit",
+      "area": "platform-version"
+    }
   },
   "cases": [
-    { "file": "compatibility.test.ts", "title": "starting against a supported platform logs no compatibility warning", "type": "integration", "area": "compatibility" },
-    { "file": "compatibility.test.ts", "title": "an unsupported platform warns once at startup and the loop keeps working", "type": "integration", "area": "compatibility" },
-    { "file": "config.test.ts", "title": "missing PIGROUPS_TOKEN means the adapter does nothing at all: no poll, no deliver", "type": "integration", "area": "config" },
-    { "file": "spawn.test.ts", "title": "spawnMember returns as soon as the child is launched, without waiting for it to connect", "type": "integration", "area": "spawn" },
-    { "file": "spawn.test.ts", "title": "a child that never connects is reported to the parent instead of blocking it", "type": "integration", "area": "spawn" },
-    { "file": "status.test.ts", "title": "the loop reports the tree path and keeps it current after spawn", "type": "integration", "area": "status" },
-    { "file": "version.test.ts", "title": "pg_whoami reports adapter_version next to the platform version", "type": "integration", "area": "version" },
-    { "file": "version.test.ts", "title": "the one startup log line names the adapter version and the platform it talks to", "type": "integration", "area": "version" },
-    { "file": "version.test.ts", "title": "the extension paints one footer status and clears it on shutdown", "type": "integration", "area": "status" },
-    { "file": "version.test.ts", "title": "a throwing setStatus cannot break the member tools", "type": "integration", "area": "status" }
+    {
+      "file": "config.test.ts",
+      "title": "missing PIGROUPS_TOKEN means the adapter does nothing at all: no poll, no deliver",
+      "type": "integration",
+      "area": "config"
+    },
+    {
+      "file": "spawn.test.ts",
+      "title": "spawnMember returns as soon as the child is launched, without waiting for it to connect",
+      "type": "integration",
+      "area": "spawn"
+    },
+    {
+      "file": "spawn.test.ts",
+      "title": "a child that never connects is reported to the parent instead of blocking it",
+      "type": "integration",
+      "area": "spawn"
+    },
+    {
+      "file": "status.test.ts",
+      "title": "the loop reports the tree path and keeps it current after spawn",
+      "type": "integration",
+      "area": "status"
+    },
+    {
+      "file": "version.test.ts",
+      "title": "pg_whoami reports adapter_version next to the platform version",
+      "type": "integration",
+      "area": "version"
+    },
+    {
+      "file": "version.test.ts",
+      "title": "the one startup log line names the adapter version and the platform it talks to",
+      "type": "integration",
+      "area": "version"
+    },
+    {
+      "file": "version.test.ts",
+      "title": "the extension paints one footer status and clears it on shutdown",
+      "type": "integration",
+      "area": "status"
+    },
+    {
+      "file": "version.test.ts",
+      "title": "a throwing setStatus cannot break the member tools",
+      "type": "integration",
+      "area": "status"
+    },
+    {
+      "file": "platform-version.test.ts",
+      "title": "a whoami from another platform release stops before ready or delivery",
+      "type": "integration",
+      "area": "platform-version"
+    }
   ]
 }

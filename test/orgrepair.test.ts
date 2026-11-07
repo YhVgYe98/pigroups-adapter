@@ -111,7 +111,7 @@ async function fakePlatformCheckout(
 ): Promise<string> {
   const dir = await tempDir(prefix);
   await mkdir(join(dir, 'src'), { recursive: true });
-  await writeFile(join(dir, 'package.json'), JSON.stringify({ type: 'module' }));
+  await writeFile(join(dir, 'package.json'), JSON.stringify({ type: 'module', version: opts.version }));
   const health = {
     status: 'ok',
     version: opts.version,
@@ -301,66 +301,6 @@ test('a record naming a data dir with no database for its platform is refused, a
 // F2: a refused pre-0.3 platform leaves a flat database behind. Move it aside.
 // ---------------------------------------------------------------------------
 
-test('a pre-0.3 flat database created by this start is moved to refused-0.2.0-* and does not block the next 0.3 platform', async (t) => {
-  const adapterDir = await tempDir('pigroups-orgrepair-');
-  const dataDir = await tempDir('pigroups-orgrepair-data-');
-  const checkout = await fakePlatformCheckout('pigroups-orgrepair-old-', {
-    version: '0.2.0',
-    flatDatabase: true,
-  });
-  t.after(() => cleanup(adapterDir, dataDir, checkout));
-
-  await assert.rejects(
-    startOrg({ adapterDir, name: 'debris', dataDir, platformDir: checkout }),
-    (err: Error) => {
-      assert.match(err.message, /does not report a platform_id/, 'the platform is refused for its missing id');
-      assert.match(err.message, /refused-0\.2\.0-/, 'the error says where the debris was moved');
-      return true;
-    },
-  );
-
-  assert.equal(existsSync(join(dataDir, 'pigroups.db')), false, 'no flat pigroups.db remains in the data root');
-  assert.equal(existsSync(join(dataDir, 'bootstrapped')), false, 'the refused platform was never bootstrapped');
-  const refused = (await readdir(dataDir)).filter((name) => name.startsWith('refused-0.2.0-'));
-  assert.equal(refused.length, 1, 'exactly one debris directory was made');
-  assert.ok(existsSync(join(dataDir, refused[0]!, 'pigroups.db')), 'the database was moved, not deleted');
-
-  const started = await startOrg({ adapterDir, name: 'after-debris', dataDir, platformDir: PLATFORM_DIR });
-  const state = await readJson(started.orgFile);
-  assert.match(String(state.platform_id), /^p_[0-9a-f]{8}$/, 'a normal 0.3 platform starts on the same data root');
-  assert.ok(
-    existsSync(join(dataDir, 'platforms', String(state.platform_id), 'pigroups.db')),
-    'the next platform gets its own database under platforms/<id>/',
-  );
-});
-
-test('an old flat database that was not created by this start is left exactly where it is', async (t) => {
-  const adapterDir = await tempDir('pigroups-orgrepair-');
-  const dataDir = await tempDir('pigroups-orgrepair-data-');
-  const checkout = await fakePlatformCheckout('pigroups-orgrepair-old-', {
-    version: '0.2.0',
-    flatDatabase: false,
-  });
-  t.after(() => cleanup(adapterDir, dataDir, checkout));
-
-  const oldDb = join(dataDir, 'pigroups.db');
-  await writeFile(oldDb, 'a database from a previous run');
-  const oldTime = new Date(Date.now() - 60_000);
-  const { utimes } = await import('node:fs/promises');
-  await utimes(oldDb, oldTime, oldTime);
-
-  await assert.rejects(
-    startOrg({ adapterDir, name: 'old-db', dataDir, platformDir: checkout }),
-    (err: Error) => {
-      assert.match(err.message, /does not report a platform_id/);
-      assert.doesNotMatch(err.message, /refused-0\.2\.0-/, 'nothing was moved, so nothing is reported as moved');
-      return true;
-    },
-  );
-
-  assert.equal(await readFile(oldDb, 'utf8'), 'a database from a previous run', 'the pre-existing database is untouched');
-});
-
 // ---------------------------------------------------------------------------
 // F3/F4: the platform must be the one we named, including for a brand-new org.
 // ---------------------------------------------------------------------------
@@ -369,7 +309,7 @@ test('a new organisation whose platform reports a different id is refused before
   const adapterDir = await tempDir('pigroups-orgrepair-');
   const dataDir = await tempDir('pigroups-orgrepair-data-');
   const checkout = await fakePlatformCheckout('pigroups-orgrepair-wrong-id-', {
-    version: '0.3.0',
+    version: '0.7.1',
     platformId: 'p_22222222',
   });
   t.after(() => cleanup(adapterDir, dataDir, checkout));
@@ -460,26 +400,6 @@ test('each organisation writes platform.log beside org.json, not into the shared
 // ---------------------------------------------------------------------------
 // F7: 0.2 is outside the supported list, and START refuses it with a way out.
 // ---------------------------------------------------------------------------
-
-test('a 0.2 platform is refused at START with an actionable upgrade path, not warned past', async (t) => {
-  const adapterDir = await tempDir('pigroups-orgrepair-');
-  const dataDir = await tempDir('pigroups-orgrepair-data-');
-  const checkout = await fakePlatformCheckout('pigroups-orgrepair-020-', { version: '0.2.0' });
-  t.after(() => cleanup(adapterDir, dataDir, checkout));
-
-  await assert.rejects(
-    startOrg({ adapterDir, name: 'old-start', dataDir, platformDir: checkout }),
-    (err: Error) => {
-      assert.match(err.message, /does not report a platform_id/, 'the refusal is grounded in the missing id');
-      assert.match(err.message, /0\.3\.0/, 'the error names the minimum platform line');
-      assert.match(err.message, /Point PIGROUPS_PLATFORM_DIR at a 0\.3\.0 checkout/i, 'the remedy names what to upgrade');
-      assert.doesNotMatch(err.message, /will continue/, 'START does not warn and continue');
-      return true;
-    },
-  );
-
-  assert.equal(existsSync(join(adapterDir, 'orgs', 'old-start', 'org.json')), false, 'the refused org has no record');
-});
 
 // ---------------------------------------------------------------------------
 // A real platform with an explicit id/data dir, used by F1's "do not migrate" case.
