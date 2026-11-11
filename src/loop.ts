@@ -2136,9 +2136,9 @@ export class AdapterLoop {
       // that a busy surface or a throwing `deliver` never took — the one copy of it.
       for (const item of entry.batch.items) await this.dispatch(item, entry.id);
       await this.flush();
-      // Drained means every item of this entry either reached the agent (released in
-      // `deliverPending`) or was dropped by the watermark; anything still queued keeps
-      // the entry on disk for the next start (§3.1).
+      // Drained means every item of this entry either reached the transcript (released by
+      // `commitDelivery` on pi's echo) or was dropped by the watermark; anything still
+      // queued or un-echoed keeps the entry on disk for the next start (§3.1).
       await this.commitIfDrained(entry.id);
     }
   }
@@ -2603,9 +2603,9 @@ export class AdapterLoop {
   /**
    * Commit an entry only when nothing of it is still queued (§3.1: the entry must
    * outlive a delivery that did not happen). The count, not `flush()`'s return value,
-   * decides: a busy surface or a throwing `deliver` gives the items back to `pending`,
-   * so they are still counted here, while an entry whose items all reached the agent
-   * was already released in `deliverPending`.
+   * decides: a busy surface, an abort or a throwing `deliver` leaves the items queued or
+   * in `inFlight`, so they are still counted here, while an entry whose items pi echoed
+   * was already released in `commitDelivery`.
    */
   private async commitIfDrained(journalId: string): Promise<void> {
     if ((this.queuedByJournal.get(journalId) ?? 0) === 0) {
