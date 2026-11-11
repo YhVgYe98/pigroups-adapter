@@ -254,27 +254,27 @@ Every `node:test` case in `test/*.test.ts`, grouped by type and area. There are 
 | A-INT-081 | [orgstart.test.ts:343](./orgstart.test.ts#L343) | a session with an identity gets the twelve member tools and is not offered pg_org_start |
 | A-INT-082 | [orgstart.test.ts:365](./orgstart.test.ts#L365) | a session with no env identity recovers it from sessions/<sha1(sessionFile)>.json |
 | A-INT-083 | [orgstart.test.ts:417](./orgstart.test.ts#L417) | a resumed member whose platform is down starts the recorded organisation itself, on the recorded port |
-| A-INT-084 | [orgstart.test.ts:470](./orgstart.test.ts#L470) | a session record without orgKey reattaches by matching its orgUrl under orgs/*/org.json |
-| A-INT-085 | [orgstart.test.ts:504](./orgstart.test.ts#L504) | a session record with no orgKey and no matching org record does not start a platform |
-| A-INT-086 | [orgstart.test.ts:547](./orgstart.test.ts#L547) | a child record does not enable the platform ensure, even when the platform is down |
-| A-INT-087 | [orgstart.test.ts:606](./orgstart.test.ts#L606) | mayBootstrap:false refuses to mint a new root |
-| A-INT-088 | [orgstart.test.ts:623](./orgstart.test.ts#L623) | pg_org_start starts a platform, bootstraps a root, wires the member tools, and is idempotent |
-| A-INT-089 | [orgstart.test.ts:700](./orgstart.test.ts#L700) | a later session reattaches to the org that outlived the root session instead of starting a second platform |
-| A-INT-090 | [orgstart.test.ts:743](./orgstart.test.ts#L743) | a new organisation keeps its platform under the one shared data root and records the id health reports |
-| A-INT-091 | [orgstart.test.ts:767](./orgstart.test.ts#L767) | an explicit data_dir still wins over the shared root |
-| A-INT-092 | [orgstart.test.ts:785](./orgstart.test.ts#L785) | a restart passes the recorded platform id to the platform process |
-| A-INT-093 | [orgstart.test.ts:822](./orgstart.test.ts#L822) | a new organisation follows the platform past a seed port held by another service |
-| A-INT-094 | [orgstart.test.ts:857](./orgstart.test.ts#L857) | an existing organisation follows the endpoint when org.json.url is stale |
-| A-INT-095 | [orgstart.test.ts:902](./orgstart.test.ts#L902) | an occupied recorded port is reattached when health answers, never replaced by a new port |
-| A-INT-096 | [orgstart.test.ts:949](./orgstart.test.ts#L949) | an occupied recorded port with no health answer fails instead of starting a second platform |
-| A-INT-097 | [orgstart.test.ts:995](./orgstart.test.ts#L995) | two simultaneous starts of the same new organisation spawn one platform and share its URL |
-| A-INT-098 | [orgstart.test.ts:1022](./orgstart.test.ts#L1022) | a start that cannot take the lock adopts the healthy platform instead of waiting it out |
-| A-INT-099 | [orgstart.test.ts:1042](./orgstart.test.ts#L1042) | a platform whose id differs from org.json is refused without rewriting the record or bootstrapping |
-| A-INT-100 | [orgstart.test.ts:1120](./orgstart.test.ts#L1120) | a checkout from another platform version is refused before it can start |
-| A-INT-101 | [orgstart.test.ts:1178](./orgstart.test.ts#L1178) | a missing platform checkout fails with every candidate path it tried |
-| A-INT-102 | [orgstart.test.ts:1213](./orgstart.test.ts#L1213) | a record without a platform id is reattached or refused, never bootstrapped over |
-| A-INT-103 | [orgstart.test.ts:1248](./orgstart.test.ts#L1248) | a failed bootstrap kills the platform it just started |
-| A-INT-104 | [orgstart.test.ts:1325](./orgstart.test.ts#L1325) | two organisations with different names are two platforms and two records |
+| A-INT-084 | [orgstart.test.ts:490](./orgstart.test.ts#L490) | a session record without orgKey reattaches by matching its orgUrl under orgs/*/org.json |
+| A-INT-085 | [orgstart.test.ts:524](./orgstart.test.ts#L524) | a session record with no orgKey and no matching org record does not start a platform |
+| A-INT-086 | [orgstart.test.ts:567](./orgstart.test.ts#L567) | a child record does not enable the platform ensure, even when the platform is down |
+| A-INT-087 | [orgstart.test.ts:626](./orgstart.test.ts#L626) | mayBootstrap:false refuses to mint a new root |
+| A-INT-088 | [orgstart.test.ts:643](./orgstart.test.ts#L643) | pg_org_start starts a platform, bootstraps a root, wires the member tools, and is idempotent |
+| A-INT-089 | [orgstart.test.ts:720](./orgstart.test.ts#L720) | a later session reattaches to the org that outlived the root session instead of starting a second platform |
+| A-INT-090 | [orgstart.test.ts:763](./orgstart.test.ts#L763) | a new organisation keeps its platform under the one shared data root and records the id health reports |
+| A-INT-091 | [orgstart.test.ts:787](./orgstart.test.ts#L787) | an explicit data_dir still wins over the shared root |
+| A-INT-092 | [orgstart.test.ts:805](./orgstart.test.ts#L805) | a restart passes the recorded platform id to the platform process |
+| A-INT-093 | [orgstart.test.ts:842](./orgstart.test.ts#L842) | a new organisation follows the platform past a seed port held by another service |
+| A-INT-094 | [orgstart.test.ts:877](./orgstart.test.ts#L877) | an existing organisation follows the endpoint when org.json.url is stale |
+| A-INT-095 | [orgstart.test.ts:922](./orgstart.test.ts#L922) | an occupied recorded port is reattached when health answers, never replaced by a new port |
+| A-INT-096 | [orgstart.test.ts:969](./orgstart.test.ts#L969) | an occupied recorded port with no health answer fails instead of starting a second platform |
+| A-INT-097 | [orgstart.test.ts:1015](./orgstart.test.ts#L1015) | two simultaneous starts of the same new organisation spawn one platform and share its URL |
+| A-INT-098 | [orgstart.test.ts:1042](./orgstart.test.ts#L1042) | a start that cannot take the lock adopts the healthy platform instead of waiting it out |
+| A-INT-099 | [orgstart.test.ts:1062](./orgstart.test.ts#L1062) | a platform whose id differs from org.json is refused without rewriting the record or bootstrapping |
+| A-INT-100 | [orgstart.test.ts:1140](./orgstart.test.ts#L1140) | a checkout from another platform version is refused before it can start |
+| A-INT-101 | [orgstart.test.ts:1198](./orgstart.test.ts#L1198) | a missing platform checkout fails with every candidate path it tried |
+| A-INT-102 | [orgstart.test.ts:1233](./orgstart.test.ts#L1233) | a record without a platform id is reattached or refused, never bootstrapped over |
+| A-INT-103 | [orgstart.test.ts:1268](./orgstart.test.ts#L1268) | a failed bootstrap kills the platform it just started |
+| A-INT-104 | [orgstart.test.ts:1345](./orgstart.test.ts#L1345) | two organisations with different names are two platforms and two records |
 
 ### owed
 

@@ -454,7 +454,27 @@ test('a resumed member whose platform is down starts the recorded organisation i
   assert.equal(who.who.member.id, before.root.id, 'the recorded identity is the one that came back');
   assert.ok(await answers(before.url), 'the platform answers on the URL the record named');
 
-  const afterState = JSON.parse(await readFile(before.orgFile, 'utf8')) as { pid: number; url: string };
+  // `startOrg` writes org.json *after* `/v1/health` answers and after it has read the
+  // root identity back, so a health probe can see the restarted platform before the
+  // record catches up with it. Wait for the record to name a live process that is not
+  // the one this test killed; that write is what "the record follows the restart" means.
+  let afterState: { pid: number; url: string } | undefined;
+  const recordDeadline = Date.now() + 5000;
+  while (Date.now() < recordDeadline) {
+    const state = JSON.parse(await readFile(before.orgFile, 'utf8')) as { pid: number; url: string };
+    let alive = true;
+    try {
+      process.kill(state.pid, 0);
+    } catch {
+      alive = false;
+    }
+    if (alive && state.pid !== before.pid) {
+      afterState = state;
+      break;
+    }
+    await delay(25);
+  }
+  assert.ok(afterState !== undefined, 'org.json never named the process that came back');
   assert.equal(afterState.url, before.url, 'the organisation did not move to another port');
   assert.notEqual(afterState.pid, before.pid, 'a new process serves the same organisation');
   assert.equal(orgRecords(adapterDir).length, 1, 'self-healing reattached the record instead of creating a second organisation');
