@@ -1,0 +1,22 @@
+{
+  "marker": "BOUNDARY-A-75058Z",
+  "text": "BOUNDARY-A-75058Z: when you next see this marker, reply with exactly BOUNDARY-A-75058Z and then stop. Do not call any tool.",
+  "memberId": "m_429f41",
+  "sender": "root (parent)",
+  "postStart": 1794419469244,
+  "postEnd": 1794419469247,
+  "postStartIso": "2026-11-11T17:51:09.244Z",
+  "postEndIso": "2026-11-11T17:51:09.247Z",
+  "response": {
+    "to": "dm:m_429f41_m_a745c9",
+    "seq": 1,
+    "recipients": [
+      "m_429f41"
+    ],
+    "created_at": 1794419469246,
+    "server_version": "0.7.2"
+  },
+  "conv": "dm:m_429f41_m_a745c9",
+  "seq": 1,
+  "created_at": 1794419469246
+}

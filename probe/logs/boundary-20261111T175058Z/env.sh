@@ -1,0 +1,10 @@
+export EVID=/home/yang/Documents/pigroups-adapter/probe/logs/boundary-20261111T175058Z
+export PORT=34213
+export PIGROUPS_URL=http://127.0.0.1:34213
+export PIGROUPS_DATA=/tmp/pigroups-boundary-data.tuOR9k
+export ADIR=/tmp/pigroups-boundary-adir.UYdK3H
+export SCRATCH=/tmp/pigroups-boundary-scratch.4Kg0Ts
+export SESS=/tmp/pigroups-boundary-sessions.SPWODE
+export MODEL=deepseek/deepseek-flash
+export WINDOW_MS=60000
+export POLL_WAIT_S=1

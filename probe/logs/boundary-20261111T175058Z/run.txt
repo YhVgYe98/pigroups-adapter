@@ -1,0 +1,25 @@
+[2026-11-11T17:50:58.469Z] platform pid 1632902 on http://127.0.0.1:34213, data=/tmp/pigroups-boundary-data.tuOR9k, adir=/tmp/pigroups-boundary-adir.UYdK3H, sessions=/tmp/pigroups-boundary-sessions.SPWODE
+[2026-11-11T17:50:58.695Z] platform healthy
+[2026-11-11T17:50:58.701Z] bootstrapped root=m_a745c9
+[2026-11-11T17:50:58.703Z] created member m_429f41 (parent m_a745c9)
+[2026-11-11T17:51:02.635Z] member pi is idle
+[2026-11-11T17:51:02.636Z] session file: /tmp/pigroups-boundary-sessions.SPWODE/2026-11-11T17-50-58-897Z_01a1cbbc-0351-74bc-8e05-417df49a787c.jsonl
+[2026-11-11T17:51:02.636Z] --- phase A: message while inside a 120 s tool ---
+[2026-11-11T17:51:03.238Z] phase-a: prompt accepted
+[2026-11-11T17:51:04.241Z] phase A: tool_start at 2026-11-11T17:51:04.083Z ({"command":"sleep 120; echo SLEEPDONE","timeout":150})
+[2026-11-11T17:51:09.247Z] phase A: message posted at 2026-11-11T17:51:09.244Z (3 ms) -> dm:m_429f41_m_a745c9#1, created_at=2026-11-11T17:51:09.246Z
+[2026-11-11T17:53:04.111Z] phase A: tool_end at 2026-11-11T17:53:04.089Z (isError=false, 120005 ms)
+[2026-11-11T17:53:05.364Z] phase A: custom_message at 2026-11-11T17:53:05.128Z (1 entr(y/ies))
+[2026-11-11T17:53:06.115Z] phase A: assistant reply at 2026-11-11T17:53:05.939Z
+[2026-11-11T17:53:07.619Z] phase A: tool result 2026-11-11T17:53:04.090Z; custom_message 2026-11-11T17:53:05.128Z; result->delivery 1038 ms; marker occurrences: prefix=1, token=4
+[2026-11-11T17:53:07.619Z] --- phase B: queued message + pg.abort through the platform ---
+[2026-11-11T17:53:08.022Z] phase-b: prompt accepted
+[2026-11-11T17:53:09.023Z] phase B: tool_start at 2026-11-11T17:53:09.016Z
+[2026-11-11T17:53:14.026Z] phase B: message posted at 2026-11-11T17:53:14.023Z (3 ms) -> dm:m_429f41_m_a745c9#2
+[2026-11-11T17:53:22.028Z] phase B: pg.abort posted at 2026-11-11T17:53:22.026Z (2 ms) -> {"control_seq":1,"receipts":[{"to_id":"m_429f41","state":"pending"}],"server_version":"0.7.2"}
+[2026-11-11T17:53:22.229Z] phase B: aborted settle at 2026-11-11T17:53:22.032Z (6 ms after the post)
+[2026-11-11T17:54:22.304Z] phase B: no turn and no delivery in the 60000 ms after the cut
+[2026-11-11T17:54:22.304Z] phase B: custom_message at 2026-11-11T17:54:22.189Z (60157 ms after the cut)
+[2026-11-11T17:54:23.557Z] phase B: assistant reply at 2026-11-11T17:54:23.362Z
+[2026-11-11T17:54:26.068Z] cleanup: killing pi, closing tab, stopping platform, removing temp dirs
+[2026-11-11T17:54:26.630Z] cleanup: platformAlive=false; leftover run processes=0; panes closed

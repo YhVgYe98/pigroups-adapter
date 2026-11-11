@@ -1,0 +1,1 @@
+Call the bash tool exactly once with this exact command, and call no other tool: sleep 120; echo SLEEPDONE. Do not shorten the sleep. After the bash result comes back, follow the newest instruction. If there is none, reply exactly READY and stop.

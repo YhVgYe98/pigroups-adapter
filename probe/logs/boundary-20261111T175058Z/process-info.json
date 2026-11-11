@@ -1,0 +1,22 @@
+{
+  "id": "cli:pane:process_info",
+  "result": {
+    "process_info": {
+      "foreground_process_group_id": 1633028,
+      "foreground_processes": [
+        {
+          "argv": [
+            "pi"
+          ],
+          "cmdline": "pi",
+          "cwd": "/tmp/pigroups-boundary-scratch.4Kg0Ts",
+          "name": "pi",
+          "pid": 1633028
+        }
+      ],
+      "pane_id": "wE:p64",
+      "shell_pid": 1632921
+    },
+    "type": "pane_process_info"
+  }
+}

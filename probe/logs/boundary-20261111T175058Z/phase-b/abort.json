@@ -1,0 +1,16 @@
+{
+  "postStart": 1794419602026,
+  "postEnd": 1794419602028,
+  "postStartIso": "2026-11-11T17:53:22.026Z",
+  "postEndIso": "2026-11-11T17:53:22.028Z",
+  "control": {
+    "control_seq": 1,
+    "receipts": [
+      {
+        "to_id": "m_429f41",
+        "state": "pending"
+      }
+    ],
+    "server_version": "0.7.2"
+  }
+}

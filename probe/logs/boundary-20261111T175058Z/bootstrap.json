@@ -1,0 +1,14 @@
+{
+  "member": {
+    "id": "m_a745c9",
+    "name": "root",
+    "parent_id": null,
+    "status": "alive",
+    "is_root": true,
+    "child_count": 0,
+    "groups": [],
+    "last_seen_at": null,
+    "heartbeat_at": null,
+    "created_at": 1794419458700
+  }
+}

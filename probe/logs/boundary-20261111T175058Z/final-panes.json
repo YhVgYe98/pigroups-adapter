@@ -1,0 +1,94 @@
+{
+  "id": "cli:pane:list",
+  "result": {
+    "panes": [
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/yang/Documents/watchparty",
+        "focused": false,
+        "foreground_cwd": "/home/yang/Documents/watchparty",
+        "pane_id": "wE:p55",
+        "revision": 67,
+        "scroll": {
+          "max_offset_from_bottom": 13494,
+          "offset_from_bottom": 0,
+          "viewport_rows": 44
+        },
+        "tab_id": "wE:t38",
+        "terminal_id": "term_65fbf6c1e5e8f6",
+        "terminal_title": "yang@yangPC:~/Documents/watchparty",
+        "terminal_title_stripped": "yang@yangPC:~/Documents/watchparty",
+        "workspace_id": "wE"
+      },
+      {
+        "agent": "pi",
+        "agent_session": {
+          "agent": "pi",
+          "kind": "path",
+          "source": "herdr:pi",
+          "value": "/home/yang/.pi/agent/sessions/--home-yang--/2026-11-07T15-09-28-785Z_01a1b68e-b751-75ba-8076-f98e165f05e9.jsonl"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/yang/Documents/watchparty",
+        "focused": false,
+        "foreground_cwd": "/home/yang/Documents/watchparty",
+        "pane_id": "wE:p5G",
+        "revision": 34,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 44
+        },
+        "tab_id": "wE:t38",
+        "terminal_id": "term_65fc17b72d66311",
+        "terminal_title": "π - yang",
+        "terminal_title_stripped": "π - yang",
+        "workspace_id": "wE"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/home/yang",
+        "focused": false,
+        "foreground_cwd": "/home/yang",
+        "pane_id": "wE:p5Z",
+        "revision": 16,
+        "scroll": {
+          "max_offset_from_bottom": 184,
+          "offset_from_bottom": 0,
+          "viewport_rows": 46
+        },
+        "tab_id": "wE:t3Y",
+        "terminal_id": "term_65ff94f48e6dc20",
+        "terminal_title": "npx @deepseek-ai/dsh web",
+        "terminal_title_stripped": "npx @deepseek-ai/dsh web",
+        "workspace_id": "wE"
+      },
+      {
+        "agent": "pi",
+        "agent_session": {
+          "agent": "pi",
+          "kind": "path",
+          "source": "herdr:pi",
+          "value": "/home/yang/.pi/agent/sessions/--home-yang--/2026-10-29T17-37-50-566Z_01a188bd-4fe5-715e-bbb7-af7d5ee34135.jsonl"
+        },
+        "agent_status": "idle",
+        "cwd": "/home/yang",
+        "focused": true,
+        "foreground_cwd": "/home/yang",
+        "pane_id": "wE:p62",
+        "revision": 18,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 46
+        },
+        "tab_id": "wE:t30",
+        "terminal_id": "term_66002f4fddbf623",
+        "terminal_title": "π - PiGroups 实现 - yang",
+        "terminal_title_stripped": "π - PiGroups 实现 - yang",
+        "workspace_id": "wE"
+      }
+    ],
+    "type": "pane_list"
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "phaseA": {
+    "marker": "BOUNDARY-A-75058Z",
+    "prefix": "[dm:m_429f41_m_a745c9#1",
+    "posted": {
+      "marker": "BOUNDARY-A-75058Z",
+      "text": "BOUNDARY-A-75058Z: when you next see this marker, reply with exactly BOUNDARY-A-75058Z and then stop. Do not call any tool.",
+      "memberId": "m_429f41",
+      "sender": "root (parent)",
+      "postStart": 1794419469244,
+      "postEnd": 1794419469247,
+      "postStartIso": "2026-11-11T17:51:09.244Z",
+      "postEndIso": "2026-11-11T17:51:09.247Z",
+      "response": {
+        "to": "dm:m_429f41_m_a745c9",
+        "seq": 1,
+        "recipients": [
+          "m_429f41"
+        ],
+        "created_at": 1794419469246,
+        "server_version": "0.7.2"
+      },
+      "conv": "dm:m_429f41_m_a745c9",
+      "seq": 1,
+      "created_at": 1794419469246
+    },
+    "toolCall": {
+      "index": 5,
+      "id": "call_00_amUG2LvdozU1KZnSVqjG2906",
+      "args": {
+        "command": "sleep 120; echo SLEEPDONE",
+        "timeout": 150
+      },
+      "timestamp": "2026-11-11T17:51:04.083Z",
+      "epoch_ms": 1794419464083
+    },
+    "toolResult": {
+      "index": 6,
+      "toolName": "bash",
+      "isError": false,
+      "durationMs": 120005,
+      "timestamp": "2026-11-11T17:53:04.090Z",
+      "epoch_ms": 1794419584090,
+      "text": "SLEEPDONE\n"
+    },
+    "delivered": {
+      "index": 8,
+      "timestamp": "2026-11-11T17:53:05.128Z",
+      "epoch_ms": 1794419585128,
+      "customType": "pigroups",
+      "details": {
+        "kind": "message",
+        "deliveryId": "58ef145d-5c02-477b-b7fc-634e1695b574"
+      },
+      "content": "[dm:m_429f41_m_a745c9#1 2026-11-12 01:51] root: BOUNDARY-A-75058Z: when you next see this marker, reply with exactly BOUNDARY-A-75058Z and then stop. Do not call any tool."
+    },
+    "deliveredCount": 1,
+    "reply": {
+      "index": 9,
+      "timestamp": "2026-11-11T17:53:05.939Z",
+      "epoch_ms": 1794419585939,
+      "stopReason": "stop",
+      "text": "The instruction: reply with exactly BOUNDARY-A-75058Z and then stop. Do not call any tool.\nBOUNDARY-A-75058Z"
+    },
+    "occurrences": {
+      "exactPrefix": 1,
+      "markerToken": 4
+    },
+    "deltas": {
+      "arrivalToToolEnd": 114844,
+      "windowClosesAt": 1794419529246,
+      "windowClosesBeforeToolEndByMs": 54844,
+      "toolEndToDelivered": 1038,
+      "arrivalToDelivered": 115882,
+      "deliveredToReply": 811,
+      "arrivalToReply": 116693
+    },
+    "adapterView": {
+      "injected": {
+        "v": 1,
+        "injected": {
+          "dm:m_429f41_m_a745c9": 1
+        }
+      },
+      "journal": []
+    }
+  },
+  "phaseB": {
+    "marker": "BOUNDARY-B-75058Z",
+    "prefix": "[dm:m_429f41_m_a745c9#2",
+    "posted": {
+      "marker": "BOUNDARY-B-75058Z",
+      "text": "BOUNDARY-B-75058Z: when you next see this marker, reply with exactly BOUNDARY-B-75058Z and then stop. Do not call any tool.",
+      "memberId": "m_429f41",
+      "sender": "root (parent)",
+      "postStart": 1794419594023,
+      "postEnd": 1794419594026,
+      "postStartIso": "2026-11-11T17:53:14.023Z",
+      "postEndIso": "2026-11-11T17:53:14.026Z",
+      "response": {
+        "to": "dm:m_429f41_m_a745c9",
+        "seq": 2,
+        "recipients": [
+          "m_429f41"
+        ],
+        "created_at": 1794419594025,
+        "server_version": "0.7.2"
+      },
+      "conv": "dm:m_429f41_m_a745c9",
+      "seq": 2,
+      "created_at": 1794419594025
+    },
+    "abortPosted": {
+      "postStart": 1794419602026,
+      "postEnd": 1794419602028,
+      "postStartIso": "2026-11-11T17:53:22.026Z",
+      "postEndIso": "2026-11-11T17:53:22.028Z",
+      "control": {
+        "control_seq": 1,
+        "receipts": [
+          {
+            "to_id": "m_429f41",
+            "state": "pending"
+          }
+        ],
+        "server_version": "0.7.2"
+      }
+    },
+    "abortSettled": {
+      "ts": "2026-11-11T17:53:22.032Z",
+      "epoch_ms": 1794419602032,
+      "pid": 1633028,
+      "step": "agent_settled",
+      "aborted": true,
+      "isIdle": true
+    },
+    "abortEffectiveAt": 1794419602032,
+    "toolCall": {
+      "index": 11,
+      "id": "call_00_ET_KIsYhyQitNpOpqdvUGLS2371",
+      "args": {
+        "command": "sleep 120; echo SLEEPDONE",
+        "timeout": 150
+      },
+      "timestamp": "2026-11-11T17:53:09.016Z",
+      "epoch_ms": 1794419589016
+    },
+    "toolResult": {
+      "index": 12,
+      "toolName": "bash",
+      "isError": true,
+      "durationMs": 13013,
+      "timestamp": "2026-11-11T17:53:22.030Z",
+      "epoch_ms": 1794419602030,
+      "text": "Command aborted"
+    },
+    "earlyActivity": [],
+    "delivered": {
+      "index": 14,
+      "timestamp": "2026-11-11T17:54:22.189Z",
+      "epoch_ms": 1794419662189,
+      "customType": "pigroups",
+      "details": {
+        "kind": "message",
+        "deliveryId": "0a8c9876-3969-46ca-8930-339dbb7c88fe"
+      },
+      "content": "[dm:m_429f41_m_a745c9#2 2026-11-12 01:53] root: BOUNDARY-B-75058Z: when you next see this marker, reply with exactly BOUNDARY-B-75058Z and then stop. Do not call any tool."
+    },
+    "deliveredCount": 1,
+    "deliveredAfterCutMs": 60157,
+    "reply": {
+      "index": 15,
+      "timestamp": "2026-11-11T17:54:23.362Z",
+      "epoch_ms": 1794419663362,
+      "stopReason": "stop",
+      "text": "BOUNDARY-B-75058Z"
+    },
+    "occurrences": {
+      "exactPrefix": 1,
+      "markerToken": 3
+    },
+    "deltas": {
+      "arrivalToAbortPost": 8001,
+      "abortPostToCut": 6,
+      "cutToDelivered": 60157,
+      "arrivalToDelivered": 68164,
+      "deliveredToReply": 1173,
+      "arrivalToReply": 69337
+    },
+    "adapterView": {
+      "injected": {
+        "v": 1,
+        "injected": {
+          "dm:m_429f41_m_a745c9": 2
+        }
+      },
+      "journal": []
+    }
+  }
+}

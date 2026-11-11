@@ -1,0 +1,9 @@
+{"index":5,"type":"message","timestamp":"2026-11-11T17:51:04.083Z","role":"assistant","stopReason":"toolUse","text":"[thinking] toolCall bash"}
+{"index":6,"type":"message","timestamp":"2026-11-11T17:53:04.090Z","role":"toolResult","toolName":"bash","isError":false,"text":"SLEEPDONE\n"}
+{"index":8,"type":"custom_message","timestamp":"2026-11-11T17:53:05.128Z","customType":"pigroups","details":{"kind":"message","deliveryId":"58ef145d-5c02-477b-b7fc-634e1695b574"},"text":"[dm:m_429f41_m_a745c9#1 2026-11-12 01:51] root: BOUNDARY-A-75058Z: when you next see this marker, reply with exactly BOUNDARY-A-75058Z and then stop. Do not cal"}
+{"index":9,"type":"message","timestamp":"2026-11-11T17:53:05.939Z","role":"assistant","stopReason":"stop","text":"[thinking] BOUNDARY-A-75058Z"}
+{"index":11,"type":"message","timestamp":"2026-11-11T17:53:09.016Z","role":"assistant","stopReason":"toolUse","text":"toolCall bash"}
+{"index":12,"type":"message","timestamp":"2026-11-11T17:53:22.030Z","role":"toolResult","toolName":"bash","isError":true,"text":"Command aborted"}
+{"index":13,"type":"message","timestamp":"2026-11-11T17:53:22.031Z","role":"assistant","stopReason":"error","text":""}
+{"index":14,"type":"custom_message","timestamp":"2026-11-11T17:54:22.189Z","customType":"pigroups","details":{"kind":"message","deliveryId":"0a8c9876-3969-46ca-8930-339dbb7c88fe"},"text":"[dm:m_429f41_m_a745c9#2 2026-11-12 01:53] root: BOUNDARY-B-75058Z: when you next see this marker, reply with exactly BOUNDARY-B-75058Z and then stop. Do not cal"}
+{"index":15,"type":"message","timestamp":"2026-11-11T17:54:23.362Z","role":"assistant","stopReason":"stop","text":"BOUNDARY-B-75058Z"}

@@ -1,0 +1,19 @@
+{
+  "member": {
+    "id": "m_429f41",
+    "name": "boundary",
+    "parent_id": "m_a745c9",
+    "status": "alive",
+    "is_root": false,
+    "child_count": 0,
+    "groups": [
+      {
+        "to": "g:m_a745c9",
+        "owner": "m_a745c9"
+      }
+    ],
+    "last_seen_at": null,
+    "heartbeat_at": null,
+    "created_at": 1794419458702
+  }
+}

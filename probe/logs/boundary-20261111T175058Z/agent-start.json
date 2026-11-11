@@ -1,0 +1,39 @@
+{
+  "id": "cli:agent:start",
+  "result": {
+    "agent": {
+      "agent": "pi",
+      "agent_status": "idle",
+      "cwd": "/tmp/pigroups-boundary-scratch.4Kg0Ts",
+      "focused": false,
+      "foreground_cwd": "/tmp/pigroups-boundary-scratch.4Kg0Ts",
+      "interactive_ready": true,
+      "name": "boundary",
+      "pane_id": "wE:p64",
+      "revision": 3,
+      "state_change_seq": 386,
+      "tab_id": "wE:t42",
+      "terminal_id": "term_66003d66a078625",
+      "terminal_title": "π - pigroups-boundary-scratch.4Kg0Ts",
+      "terminal_title_stripped": "π - pigroups-boundary-scratch.4Kg0Ts",
+      "workspace_id": "wE"
+    },
+    "argv": [
+      "pi",
+      "-ne",
+      "-e",
+      "/home/yang/Documents/pigroups-adapter/src/extension.ts",
+      "-e",
+      "/home/yang/Documents/pigroups-adapter/probe/boundary-probe.ts",
+      "-ns",
+      "-np",
+      "-nc",
+      "--no-mcp",
+      "--session-dir",
+      "/tmp/pigroups-boundary-sessions.SPWODE",
+      "--model",
+      "deepseek/deepseek-flash"
+    ],
+    "type": "agent_started"
+  }
+}
