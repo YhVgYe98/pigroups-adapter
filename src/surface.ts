@@ -16,30 +16,49 @@ export type DeliverKind = 'message' | 'control' | 'nudge' | 'digest' | 'schedule
 export type PiEvent =
   | { type: 'turn_start' }
   /**
-   * `aborted` is the one turn end the delivery layer must act on: a message still
-   * queued when an abort lands is dropped by pi without a trace (probe/, 2026-11-01),
-   * so the batch delivered into that turn has to go back into the queue.
+   * `aborted` is the one turn end the delivery layer must act on: an abort ends the
+   * turn, so the queue must not start a new one in the same tick (概念稿 §8.3).
    */
   | { type: 'turn_end'; error?: { message: string }; aborted?: true }
   | { type: 'tool_start'; name: string; argsPreview: string }
-  | { type: 'tool_end'; name: string; ok: boolean };
+  | { type: 'tool_end'; name: string; ok: boolean }
+  /**
+   * pi echoed the custom message whose `details.deliveryId` is this id: it is now in
+   * the session (`message_end`), which is the only proof the loop can get that the
+   * batch is in the transcript rather than lost in a run that never started
+   * (概念稿 §8.1, 设计说明 §3.4).
+   */
+  | { type: 'delivery_ack'; deliveryId: string };
 
 /**
- * Hand a block of text to the agent. Resolves once pi has accepted the message, not
- * when a run has started: `pi.sendMessage` is void and swallows start errors, so a
- * run that fails to start is invisible from here (设计说明 §2.1). The real adapter
- * sends it as a `steer`: an idle agent starts a turn, a busy one sees it at its next
- * model call (概念稿 §8.1).
+ * Hand a block of text to the agent. Resolves once pi has accepted the call, not when
+ * the message is in the transcript: `pi.sendMessage` is void and swallows start errors,
+ * so a run that fails to prepare is invisible here (设计说明 §2.1). The message is
+ * committed when the matching `delivery_ack` arrives; `deliveryId` is what lets the loop
+ * tell its own messages apart on pi's `message_end`.
+ *
+ * The loop may not call this while `isBusy()`: one `sendMessage` with `triggerTurn`
+ * starts a turn, and a message handed over during a turn is steered into it — the one
+ * path measured to lose a message when an abort lands (概念稿 §8.3).
  */
 export interface PiSurface {
-  deliver(text: string, kind: DeliverKind): Promise<void>;
+  deliver(text: string, kind: DeliverKind, deliveryId: string): Promise<void>;
+  /**
+   * Append a one-line notice to the session without starting or joining a turn: pi
+   * queues it for the end of the running one. Used for the token line of §9, which must
+   * survive the idle gate because the loop stops right after it.
+   */
+  notice(text: string): Promise<void>;
   /**
    * Cut the running turn and wait until idle. Returns at once when already idle.
    * The wait is bounded by `ABORT_IDLE_TIMEOUT_MS` and giving up leaves the abort
    * request standing; `signal` ends the wait early, which is how `stop()` cuts it.
    */
   abort(signal?: AbortSignal): Promise<void>;
-  /** Is a turn running right now. */
+  /**
+   * Is a turn running right now. With no session context attached this answers `true`: an
+   * unknown state must never open the idle gate (概念稿 §8.1).
+   */
   isBusy(): boolean;
   /**
    * The last assistant text this session produced, or `undefined` before the first
@@ -159,8 +178,8 @@ export interface PiSurfaceOptions {
 
 /**
  * The real `PiSurface`. It is the whole of the pi-specific glue:
- * `pi.sendMessage(..., {triggerTurn:true, deliverAs:'steer'})` to deliver, the session
- * abort to cut a turn, `ctx.shutdown()` to exit, and six pi events mapped onto `PiEvent`.
+ * `pi.sendMessage(..., {triggerTurn:true})` to deliver, the session abort to cut a turn,
+ * `ctx.shutdown()` to exit, and seven pi events mapped onto `PiEvent`.
  */
 export class PiSurfaceAdapter implements PiSurface {
   private readonly pi: PiLike;
@@ -203,9 +222,16 @@ export class PiSurfaceAdapter implements PiSurface {
     // The last assistant text is the one fact the parent needs and no pi event above
     // carries (概念稿 §8.5). Tool-call-only messages leave the previous text in place:
     // "the last thing it said" is not "the last message it produced".
+    //
+    // The same event is the delivery acknowledgement (概念稿 §8.1): pi emits it for a
+    // custom message once the message is in the session state — right before the first
+    // model call of an idle-started run, and at the end of the turn for a deferred one.
+    // A run that never prepares emits neither, which is exactly what lets the loop retry.
     pi.on('message_end', (event) => {
       const text = assistantTextOf(event.message);
       if (text !== undefined) this.lastAssistant = text;
+      const deliveryId = deliveryIdOf(event.message);
+      if (deliveryId !== undefined) this.publish({ type: 'delivery_ack', deliveryId });
     });
     pi.on('agent_settled', (event) => {
       // An aborted run never reaches `agent_before_settle`: pi breaks out of the run
@@ -232,17 +258,29 @@ export class PiSurfaceAdapter implements PiSurface {
     this.context = ctx;
   }
 
-  async deliver(text: string, kind: DeliverKind): Promise<void> {
+  async deliver(text: string, kind: DeliverKind, deliveryId: string): Promise<void> {
     // Fire-and-forget by pi's contract: `sendMessage` returns void and pi swallows a
     // start failure. The loop may not treat this return as "a run is now going".
     //
-    // `deliverAs: 'steer'` is the whole point of 概念稿 §8.1: with an idle agent the
-    // message starts a turn; with a busy one it joins the running turn at its next
-    // model call instead of being refused. The measured cost is that a steer queued
-    // behind a long tool is only persisted after the tool returns (probe/, 2026-11-01).
+    // No `deliverAs`: omitting it does not mean "append after the turn". While streaming,
+    // pi routes a `deliverAs`-less message through `agent.steer()` anyway
+    // (agent-session.js, `sendCustomMessage`), so the safety of this call comes from the
+    // loop's idle gate, not from this option (概念稿 §8.1). `deliveryId` rides in
+    // `details` so the matching `message_end` can be recognised as the commit point.
     this.pi.sendMessage(
-      { customType: PIGROUPS_CUSTOM_TYPE, content: text, display: true, details: { kind } },
-      { triggerTurn: true, deliverAs: 'steer' },
+      { customType: PIGROUPS_CUSTOM_TYPE, content: text, display: true, details: { kind, deliveryId } },
+      { triggerTurn: true },
+    );
+  }
+
+  async notice(text: string): Promise<void> {
+    // `triggerTurn: false` is the point: idle → pi appends the message at once; streaming →
+    // pi defers it to the end of the turn (agent-session.js `_pendingCustomMessages`). It
+    // never joins a running turn, so an abort cannot take it away, and it starts no new
+    // turn, so a loop that is about to stop does not wake the member (概念稿 §8.3, §9).
+    this.pi.sendMessage(
+      { customType: PIGROUPS_CUSTOM_TYPE, content: text, display: true, details: { kind: 'message' } },
+      { triggerTurn: false },
     );
   }
 
@@ -270,7 +308,12 @@ export class PiSurfaceAdapter implements PiSurface {
   }
 
   isBusy(): boolean {
-    return this.context ? !this.context.isIdle() : false;
+    // No context means `session_start` has not run yet: nothing is known to be idle, and
+    // answering `false` would open the delivery gate at the one moment there is no turn
+    // boundary to deliver at (概念稿 §8.1).
+    const ctx = this.context;
+    if (ctx === undefined) return true;
+    return !ctx.isIdle();
   }
 
   lastAssistantText(): string | undefined {
@@ -313,6 +356,19 @@ function assistantTextOf(message: unknown): string | undefined {
   }
   const text = parts.join('\n');
   return text.trim() === '' ? undefined : text;
+}
+
+/**
+ * The `deliveryId` a `message_end` carries, if it is one of this adapter's deliveries.
+ * pi's custom messages have `role: 'custom'` and keep the extension's `details` verbatim.
+ */
+function deliveryIdOf(message: unknown): string | undefined {
+  if (typeof message !== 'object' || message === null) return undefined;
+  const record = message as { role?: unknown; customType?: unknown; details?: unknown };
+  if (record.role !== 'custom' || record.customType !== PIGROUPS_CUSTOM_TYPE) return undefined;
+  if (typeof record.details !== 'object' || record.details === null) return undefined;
+  const id = (record.details as { deliveryId?: unknown }).deliveryId;
+  return typeof id === 'string' ? id : undefined;
 }
 
 function previewArgs(args: unknown): string {

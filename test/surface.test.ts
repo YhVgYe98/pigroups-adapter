@@ -180,20 +180,56 @@ test('the settle callback runs for every run, aborted or not, and the turn_end p
   assert.deepEqual(order, ['turn_start', 'turn_end', 'settled', 'turn_start', 'turn_end', 'settled']);
 });
 
-test('deliver sends a custom message that asks pi to start a turn, as a steer', () => {
+test('deliver sends one custom message with a delivery id and asks pi to start a turn', () => {
   const { pi, sent } = fakePi();
   const surface = new PiSurfaceAdapter(pi);
 
-  void surface.deliver('hello', 'message');
+  void surface.deliver('hello', 'message', 'b-1');
 
   assert.equal(sent.length, 1, 'one delivery is one message');
   assert.equal(sent[0].message.customType, 'pigroups', 'the custom type is what the loop filters on');
   assert.equal(sent[0].message.content, 'hello');
   assert.equal(sent[0].message.display, true, 'the member is meant to see the delivered text');
-  assert.deepEqual(sent[0].message.details, { kind: 'message' }, 'the kind travels with the message');
+  assert.deepEqual(
+    sent[0].message.details,
+    { kind: 'message', deliveryId: 'b-1' },
+    'the kind travels with the message, and the id is what the echo is matched against',
+  );
   assert.equal(sent[0].options?.triggerTurn, true, 'without triggerTurn the member is never woken');
-  assert.equal(sent[0].options?.deliverAs, 'steer', '概念稿 §8.1: a busy member is steered, not refused');
+  assert.equal(
+    sent[0].options?.deliverAs,
+    undefined,
+    'concept §8.1: no deliverAs — safety comes from the idle gate, not from this option',
+  );
 });
+
+test('notice appends to the transcript without asking pi to start a turn', () => {
+  const { pi, sent } = fakePi();
+  const surface = new PiSurfaceAdapter(pi);
+
+  void surface.notice('PIGROUPS token is no longer valid: replace it and restart this session.');
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].options?.triggerTurn, false, 'a notice must not wake a loop that is about to stop');
+  assert.equal(sent[0].options?.deliverAs, undefined, 'a notice must not join a running turn either');
+  assert.match(sent[0].message.content, /token/);
+});
+
+test('a message_end for a pigroups custom message is the delivery acknowledgement; other messages are not', () => {
+  const { pi, fire } = fakePi();
+  const surface = new PiSurfaceAdapter(pi);
+  const events = collect(surface);
+
+  fire('message_end', {
+    message: { role: 'custom', customType: 'pigroups', content: 'x', display: true, details: { deliveryId: 'b-7' } },
+  });
+  fire('message_end', { message: { role: 'custom', customType: 'someone-else', details: { deliveryId: 'b-8' } } });
+  fire('message_end', { message: { role: 'custom', customType: 'pigroups', details: { kind: 'message' } } });
+  fire('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] } });
+
+  assert.deepEqual(events, [{ type: 'delivery_ack', deliveryId: 'b-7' }], 'only our own delivery is an ack');
+});
+
 
 test('message_end keeps the last assistant text, and only assistant text', () => {
   const { pi, fire } = fakePi();

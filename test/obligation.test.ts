@@ -22,6 +22,7 @@ async function nudgeRound(s: Scenario, text: string): Promise<void> {
   await s.timer(WINDOW); // the message goes out
   await s.settle(); // the turn ends, so a nudge becomes due
   await s.timer(WINDOW); // the nudge goes out
+  await s.settle(); // ... and the turn it started ends, so the next round starts idle
 }
 
 /** §5.1: `blocked` is an attention state now, not the old `pg.report`. */
@@ -281,6 +282,7 @@ test('a new inbound message neither resets the nudge budget nor re-reports block
   await send(s.platform, s.parent!.token, s.me.id, 'and the second half');
   await s.cycle();
   await s.timer(WINDOW);
+  await s.settle(); // the delivered message's turn ends before the next round begins
   const secondEpisode = s.surface.textsOfKind('nudge').length;
   for (let i = 0; i < s.config.nudgeMax; i += 1) await nudgeRound(s, `second half ${i}`);
   await s.settle(); // the spent budget reports blocked
@@ -382,12 +384,14 @@ test('an exhausted conversation reports blocked once while the live one keeps be
   for (let i = 0; i < s.config.nudgeMax - 1; i += 1) {
     await send(s.platform, s.parent!.token, s.group, `and this one too ${i}`, [s.me.id]);
     await s.cycle();
-    await s.timer(WINDOW);
-    await s.settle();
-    await s.timer(WINDOW);
+    await s.timer(WINDOW); // the message goes out
+    await s.settle(); // its turn ends, so the nudge becomes due
+    await s.timer(WINDOW); // the nudge goes out
+    await s.settle(); // ... and ends, so the spent budget is seen here
   }
-  await s.settle(); // the newly spent budget reports blocked
-  await s.timer(WINDOW);
+  await s.settle();
+  await s.timer(WINDOW); // the last reminder goes out
+  await s.settle(); // its turn ends, so the spent budget reports blocked
 
   assert.equal(
     s.surface.textsOfKind('nudge').length - nudgesBefore,

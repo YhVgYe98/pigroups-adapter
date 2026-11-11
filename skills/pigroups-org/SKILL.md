@@ -121,9 +121,9 @@ operations. Keep them separate:
 - It is stuck in a tool that will not end by itself; or
 - Its direction is definitely wrong, and continuing only wastes work.
 
-Use **`pg_abort` → `pg_say`**: stop first, then state the new direction. After an abort, the adapter closes
-the delivery window immediately, so the message that follows enters its context as soon as possible instead
-of waiting for a window.
+Use **`pg_abort` → `pg_say`**: stop first, then state the new direction. Both are deliberate: after an abort
+the adapter re-opens the delivery window, so the message that follows still waits one full window and the next
+turn boundary. Nothing is rushed, and nothing is lost.
 
 Do not use abort to express displeasure: cutting throws away the work in that turn. Do not expect abort to
 make it "see" your words — abort injects no prompt of its own.

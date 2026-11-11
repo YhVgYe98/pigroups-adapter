@@ -8,39 +8,52 @@ import { join } from 'node:path';
 import { command, createMember, poll, removeMember, send, waitFor, within } from './support.ts';
 import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, createLoop, scenario } from './scenario.ts';
 
-test('pg.abort cuts, then closes the window and delivers the steer queued behind it at once', async (t) => {
+// 概念稿 §8.3: an abort ends the turn; it does not open a delivery path of its own. The
+// steer queued behind it keeps its window and waits for the NEXT turn boundary.
+test('pg.abort cuts the turn and leaves the steer queued behind it in the window', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
+  await s.cycle();
 
+  s.surface.beginTurn();
   s.surface.holdAbort = true;
   await command(s.platform, s.parent!.token, s.me.id, 'pg.abort', { reason: 'stalled 12m' });
   await command(s.platform, s.parent!.token, s.me.id, 'pg.steer', { text: 'run the tests before you continue' });
 
   const drive = s.loop.pollOnce();
   await waitFor(() => s.surface.aborts.length === 1, 'abort() to be called');
-  // Still inside the abort gate: the steer queued behind it must not have been injected yet.
-  assert.equal(s.surface.deliveries.length, 0, 'pg.abort injects no hint, and the steer must wait for it');
+  // Still inside the abort gate: nothing is delivered while a turn is being cut.
+  assert.equal(s.surface.deliveries.length, 0, 'pg.abort injects no hint; nothing goes out during the cut');
 
   const releasedAt = Date.now();
   s.surface.releaseAbort();
   await drive;
+  // The cut lands: pi reports the run as aborted and the loop re-opens the window.
+  s.surface.settleAborted();
+  await s.loop.settled();
   await s.loop.flush();
+  assert.equal(s.surface.deliveries.length, 0, 'an abort must not deliver the steer it interrupted');
+
+  // Half a window later it still has not gone out; one full window after the cut it does.
+  await s.timer(WINDOW / 2);
+  assert.equal(s.surface.deliveries.length, 0, 'the window after an abort is a real window');
+  await s.timer(WINDOW / 2);
 
   const steer = s.surface.deliveries.filter((d) => d.text.includes('run the tests before you continue'));
-  assert.equal(steer.length, 1, 'the queued steer must be delivered once the abort resolved');
+  assert.equal(steer.length, 1, 'the queued steer is delivered once, at the next boundary');
   assert.equal(steer[0].kind, 'control');
-  assert.ok(steer[0].at >= releasedAt, 'the steer is injected after the abort returned, not alongside it');
+  assert.ok(steer[0].at >= releasedAt, 'the steer arrives after the abort returned, not alongside it');
   assert.equal(
     s.surface.aborts.length,
     1,
     'the steer itself no longer aborts: pg_abort is the only way to change a member inside a tool',
   );
-  assert.equal(s.surface.deliveries.length, 1, 'pg.abort closed the window, and one closed window is one deliver');
+  assert.equal(s.surface.deliveries.length, 1, 'one closed window is one deliver');
 });
 
-// 概念稿 §8.3 ①: the window exists to avoid interrupting work; an abort already stopped
-// the work, so the pending batch must not wait out the rest of the window.
-test('pg.abort delivers what is pending without waiting for the window', async (t) => {
+// 概念稿 §8.3: the window exists for a reason the abort does not remove — a delivery is
+// one `sendMessage` that starts a turn. What was pending behind a cut waits a full window.
+test('pg.abort does not flush what is pending; the batch waits a full window after the cut', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
@@ -52,16 +65,24 @@ test('pg.abort delivers what is pending without waiting for the window', async (
 
   await command(s.platform, s.parent!.token, s.me.id, 'pg.abort', { v: 1 });
   await s.loop.pollOnce();
-  await s.loop.flush();
-
   assert.equal(s.surface.aborts.length, 1, 'precondition: the turn was cut');
+
+  // The aborted turn end re-opens the window (概念稿 §8.3 ④).
+  s.surface.settleAborted();
+  await s.loop.settled();
+  await s.loop.flush();
+  assert.equal(s.surface.deliveries.length, 0, 'the abort itself delivers nothing');
+
+  await s.timer(WINDOW - 1);
+  assert.equal(s.surface.deliveries.length, 0, 'one millisecond short of a window is short');
+  await s.timer(1);
   const delivered = s.surface.texts().join('\n');
-  assert.ok(delivered.includes('already queued when the abort lands'), `the abort must close the window: ${delivered}`);
+  assert.ok(delivered.includes('already queued when the abort lands'), `the batch goes out one window later: ${delivered}`);
 });
 
-// 概念稿 §8.3 ①, second sentence: "abort, then say" must take effect at once — a message
-// sent after the abort must not wait out a fresh window just because it arrived later.
-test('a message that arrives after the abort is delivered without waiting for a fresh window', async (t) => {
+// 概念稿 §8.3: "abort, then say" also waits. The abort is not a licence to skip the window
+// for everything that follows; it only guarantees the queue is not lost.
+test('a message that arrives after the abort waits for its own full window', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
@@ -72,16 +93,23 @@ test('a message that arrives after the abort is delivered without waiting for a 
   assert.equal(s.surface.aborts.length, 1, 'precondition: the abort was handled');
   assert.equal(s.surface.deliveries.length, 0, 'precondition: nothing was pending when the abort landed');
 
+  s.surface.settleAborted();
+  await s.loop.settled();
+
   await send(s.platform, s.parent!.token, s.me.id, 'the new direction after the cut');
   await s.cycle();
+  assert.equal(s.surface.deliveries.length, 0, 'the post-abort message opens its own window');
 
+  await s.timer(WINDOW - 1);
+  assert.equal(s.surface.deliveries.length, 0, 'a message after a cut is not rushed');
+  await s.timer(1);
   const delivered = s.surface.texts().join('\n');
-  assert.ok(delivered.includes('the new direction after the cut'), `the post-abort message waited for a window: ${delivered}`);
+  assert.ok(delivered.includes('the new direction after the cut'), delivered);
 });
 
-// 概念稿 §8.2: a steer waits for the running turn — only pg_abort can change a member
-// that is inside a long tool. The old adapter cut the turn before injecting; that is gone.
-test('pg.steer no longer cuts a busy member; it is delivered into the turn like any message', async (t) => {
+// 概念稿 §8.1/§8.2: a steer is a control line like any other — it enters the window and
+// waits for a turn boundary. Only pg_abort can change a member that is inside a long tool.
+test('pg.steer never cuts a busy member and waits for the turn boundary', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
@@ -93,10 +121,12 @@ test('pg.steer no longer cuts a busy member; it is delivered into the turn like 
   assert.equal(s.surface.deliveries.length, 0, 'the steer enters the window');
 
   await s.timer(WINDOW);
-  assert.equal(s.surface.deliveries.length, 1);
+  assert.equal(s.surface.deliveries.length, 0, 'a closed window inside a turn delivers nothing');
+
+  await s.settle();
+  assert.equal(s.surface.deliveries.length, 1, 'the steer goes out at the turn boundary');
   assert.ok(s.surface.deliveries[0].text.includes('the new direction'));
   assert.equal(s.surface.deliveries[0].kind, 'control');
-  assert.equal(s.surface.isBusy(), true, 'the turn was still running: the steer joined it');
 });
 
 test('pg.steer from a sibling is ignored and does not call abort()', async (t) => {
@@ -300,11 +330,12 @@ test('a pg.report is an unknown control line and changes no state', async (t) =>
   );
 });
 
-// §9: "`poll` 401 | 停循环，注入一条'token 失效'给 agent，等人工". The line has to leave *before*
-// the loop stops: a stopped loop refuses every delivery (`deliverPending` answers `stopped`), so
-// a notice queued after `stop()` would die in the queue — the member would go silent without its
-// model ever learning why. `src/loop.ts` queued it after `stop()` until this test existed.
-test('a 401 from poll hands the model the token line before the loop stops', async (t) => {
+// §9: "`poll` 401 | 停循环，注入一条'token 失效'给 agent，等人工". The line is a transcript
+// notice, not a queue item: with the idle gate a queued line would wait for a turn boundary,
+// and the `stop()` right after it never allows one — the member would go silent without its
+// model ever learning why. A 401 regularly lands in the middle of a turn, so this test runs
+// it that way: `notice` must reach the transcript even while the agent is busy.
+test('a 401 from poll hands the model the token line even when it arrives during a turn', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
 
@@ -312,13 +343,17 @@ test('a 401 from poll hands the model the token line before the loop stops', asy
   const rejected = await createLoop(s.platform, s.me, { token: 'not-a-token' });
   t.after(() => rm(rejected.adapterDir, { recursive: true, force: true }));
 
+  // The member is in the middle of a turn when the poll answers 401.
+  rejected.surface.beginTurn();
   rejected.loop.start(); // `whoami` answers 401, which reaches `handlePollError`
   await waitFor(() => rejected.surface.deliveries.length === 1, 'the token line to reach the model');
 
   const [line] = rejected.surface.deliveries;
   assert.equal(line.kind, 'message');
+  assert.equal(line.notice, true, 'the line is appended to the transcript, not handed to a turn');
   assert.match(line.text, /token/, 'the one line says the token is invalid');
   assert.match(line.text, /replace it and restart this session/, `the line is an English prompt: ${line.text}`);
+  assert.equal(rejected.surface.isBusy(), true, 'precondition: the turn was still running');
 
   // The loop is stopped by then, and nothing may start a turn behind it.
   await within(rejected.loop.stop(), 'the loop to stop after a 401');

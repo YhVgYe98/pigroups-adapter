@@ -299,52 +299,45 @@ test('a corrupt ledger is reconciled from history instead of breaking the startu
   assert.equal(rewritten.owed[peerDm].seq > 0, true, 'the reconciliation persisted the seq it found');
 });
 
-// §4.2: "`seq` 只在更大时覆盖，`since` 只在 flag 从空变非空时写一次". A redelivery (the abort
-// path puts a batch back) is the same message, so it must not restart the clock that
-// §4.1's roster snapshot judges a DM debt by.
-test('a redelivery does not reset the flag; a bigger seq moves the seq and keeps since', async (t) => {
+// §4.2: "`seq` 只在更大时覆盖，`since` 只在 flag 从空变非空时写一次". A second message in the
+// same conversation is still one debt, and the clock that §4.1's roster snapshot judges it
+// by does not restart. (An aborted turn no longer re-delivers anything — 概念稿 §8.3 — so
+// the "redelivery" half of this test now lives in `delivery.test.ts`.)
+test('a bigger seq moves the flag forward and keeps since', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
 
-  await send(s.platform, s.parent!.token, s.me.id, 'the message the abort will hand back');
+  await send(s.platform, s.parent!.token, s.me.id, 'the first message');
   await s.cycle();
   await s.timer(WINDOW);
   const first = (await readLedger(s))!.owed[s.dm];
   assert.ok(first, 'precondition: the flag is written');
 
-  // The turn is aborted, so the delivered batch goes back into the queue and out again —
-  // one window of simulated time later, which is exactly what used to reset `since`.
+  // The turn the first delivery started ends before the next message is delivered.
+  await s.settle();
   s.clock.advance(5_000);
-  s.surface.settleAborted();
-  await s.loop.settled();
-  await s.loop.flush();
-  assert.equal(s.surface.deliveries.length, 2, 'precondition: the batch was delivered a second time');
 
-  const replay = (await readLedger(s))!.owed[s.dm];
-  assert.equal(replay.since, first.since, 'a redelivery must not restart the debt clock');
-  assert.equal(replay.seq, first.seq, 'the same message, the same seq');
-
-  // A genuinely newer message moves the named seq but not the instant the debt appeared.
   const second = await send(s.platform, s.parent!.token, s.me.id, 'and a newer one');
   await s.cycle();
   await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 2, 'precondition: the second message went out');
+
   const moved = (await readLedger(s))!.owed[s.dm];
   assert.equal(moved.seq, second.seq, 'the nudge must quote the newest message it covers');
   assert.equal(moved.since, first.since, 'one flag covers everything since it was first set');
 });
 
-// §4.2 / Q2: the abort path puts the delivered batch back. If that redelivery set the flag
-// again, the adapter nudged a message the model had already answered — the answer was in the
-// history, but the ledger only knew the message had been put into the context. The ledger
-// therefore remembers the seq each clear settled: a set at or below it can only advance the
-// ack bound, never open the debt again.
-test('a batch the abort re-delivers cannot re-open a debt that say() already cleared', async (t) => {
+// §4.2 / Q2: the ledger remembers the seq each clear settled, so a set at or below it can
+// only advance the ack bound, never open the debt again. The abort no longer replays the
+// batch it interrupted (概念稿 §8.3), so this covers the surviving path to a re-set: the
+// debt is cleared, the turn is cut, and nothing comes back to re-open it.
+test('an aborted turn does not re-open a debt that say() already cleared', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
 
-  const sent = await send(s.platform, s.parent!.token, s.me.id, 'the message the abort will hand back');
+  const sent = await send(s.platform, s.parent!.token, s.me.id, 'the message the cut turn contained');
   await s.cycle();
   await s.timer(WINDOW);
   assert.deepEqual(s.loop.state().owed, [s.dm], 'precondition: the delivered message is owed');
@@ -355,13 +348,12 @@ test('a batch the abort re-delivers cannot re-open a debt that say() already cle
   assert.deepEqual(cleared?.owed, {}, 'precondition: the cleared flag is gone from disk');
   assert.deepEqual(cleared?.cleared, { [s.dm]: sent.seq }, 'the ledger remembers the seq the reply settled');
 
-  // The turn is cut after the answer, so pi hands the delivered batch back and the adapter
-  // re-delivers it exactly as §8.3 ② does.
+  // The turn is cut after the answer. Nothing is replayed: the batch was already echoed.
   s.clock.advance(5_000);
   s.surface.settleAborted();
   await s.loop.settled();
   await s.loop.flush();
-  assert.equal(s.surface.deliveries.length, 2, 'precondition: the batch was delivered a second time');
+  assert.equal(s.surface.deliveries.length, 1, 'the aborted turn must not re-deliver the batch');
 
   assert.deepEqual(s.loop.state().owed, [], 'an answered message must not become owed again');
   assert.deepEqual((await readLedger(s))?.owed, {}, 'and the ledger must not re-open it');
@@ -591,12 +583,14 @@ test('three real acks enter silent_acking once; a no-op ack does not count and s
   const noop = await s.loop.ack({ conv: s.group, seq: 71 });
   assert.deepEqual(noop.cleared, [], 'precondition: the no-op ack cleared nothing');
 
-  // Each counting ack needs a fresh flag; no settle, so no nudge is in flight.
+  // Each counting ack needs a fresh flag. The delivery starts a turn, so each round ends
+  // that turn too; the ack clears the debt before the settle, so no nudge follows it.
   const ackRound = async (round: number): Promise<void> => {
     await send(s.platform, s.parent!.token, s.me.id, `round ${round}`);
     await s.cycle();
     await s.timer(WINDOW);
     await s.loop.ack({ conv: s.dm });
+    await s.settle();
   };
 
   for (let i = 0; i < 2; i += 1) await ackRound(i);

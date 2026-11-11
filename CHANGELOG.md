@@ -1,3 +1,29 @@
+# 更新日志
+
+## 未发布
+
+### 投递只在回合边界发生；提交点是 pi 的回声
+
+- **投递改成"窗口关闭 + pi 空闲"两个条件。** 一次投递就是一条 `sendMessage(…, {triggerTurn:true})`；
+  忙时**根本不调用**，不再 steer 进正在跑的回合。闸门在 `AdapterLoop.deliverPending()` 里，
+  没有 force 参数；`PiSurfaceAdapter.isBusy()` 在没有 context 时返回 `true`。
+- **提交点从"`deliver` 返回"移到 pi 的 `message_end`。** 消息 `details` 里带 `deliveryId`，
+  `PiSurface` 新增 `delivery_ack` 事件；只有收到对应回声才写水位、置欠回复、提交 journal。
+  `sendMessage` 是 void、会吞掉 `_startRun` 的失败，所以这一条同时关掉了"消息已被标成已注入、
+  journal 已提交，但那一轮其实没起来"的丢失窗口：没回声的批次留在 `inFlight`，
+  下一个"空闲 + 窗口关闭"原样重投。
+- **删除 abort 的投递特权。** 去掉了 `unacknowledged` / `requeueUnacknowledged()` /
+  `windowImmediate` / abort 结束时的强制投递；`turn_end(aborted)` 只把 `windowStart` 置成现在，
+  队列再等一个完整窗口。abort 之后不再重投任何批次——回声过的已经在 transcript 里，
+  没回声的本来就还没到。
+- **401 的 token 提示改走 `PiSurface.notice()`**：不排队、不起回合（`triggerTurn:false`），
+  空闲时立刻追加、忙时排到回合结束。它必须能在回合中落地，因为循环紧接着就 `stop()`。
+- **`flush()` 等待回声带来的提交**，`stop()` 也等（包括在等待期间才开始的那一笔），
+  所以 `await flush()` 之后读水位/账本/journal 都是新的；`stop()` 的 `onEvent` 退订挪到等待之后，
+  否则在飞投递的回声会被丢掉、journal 会在下次启动重放一条已经进过上下文的批次。
+- **文档**：概念稿 §8.1–§8.3 重写（含"长工具期间收不到任何消息"这条代价）、§2.2/§2.4/§9 的
+  "已投递"定义、设计说明 §2.1/§2.3/§3.2/§3.4/§9。
+
 ## 0.17.1 - 2026-11-08
 
 ### 修复安装后的平台启动

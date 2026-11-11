@@ -198,10 +198,10 @@ interface PendingDelivery {
 
 /**
  * What one `flush` did. `flush()` answers only "did something go out", which is what
- * a caller needs; `tick()` and the abort path also care whether the window is still
- * open (`waiting`) or an abort is holding delivery (`aborting`).
+ * a caller needs; `tick()` also cares whether the window is still open (`waiting`), a turn
+ * is running (`busy`) or an abort is holding delivery (`aborting`).
  */
-type FlushOutcome = 'delivered' | 'waiting' | 'aborting' | 'stopped' | 'empty' | 'failed';
+type FlushOutcome = 'delivered' | 'waiting' | 'busy' | 'aborting' | 'stopped' | 'empty' | 'failed';
 
 const TICK_MS = 5000;
 /**
@@ -211,15 +211,19 @@ const TICK_MS = 5000;
  */
 const DELIVER_BATCH = 10;
 /**
- * How many delivered-but-unacknowledged batches one turn may hold (§8.3 ②). At most
- * one batch joins per delivery window, so eight entries cover a turn that spans eight
- * windows — eight minutes at the default 60 s window — with at most 80 items in memory.
- * A turn older than that is already outliving anything this adapter has measured, and
- * unbounded growth is the only alternative. The oldest entry goes first, so the list
- * stays a recovery for recent windows rather than a second journal; a drop is logged,
- * because it is a lost copy, not a silent trim.
+ * One delivery handed to pi that pi has not echoed yet (概念稿 §8.1, 设计说明 §3.4).
+ * Kept only so a send that never produced a `message_end` can be handed over again; the
+ * watermark, the debt and the journal entry move on the ack, not on this record.
  */
-const UNACKNOWLEDGED_BATCH_LIMIT = 8;
+interface DeliveryInFlight {
+  id: string;
+  text: string;
+  kind: DeliverKind;
+  /** The queue items this text carries; empty for a nudge (§4.3). */
+  items: PendingDelivery[];
+  /** The conversations a nudge named, committed on the ack like the items above. */
+  nudged: OwedFlag[];
+}
 /** §13.5: the last assistant text travels truncated; the tool preview is already 200. */
 const LAST_TEXT_CHARS = 500;
 /**
@@ -375,21 +379,16 @@ export class AdapterLoop {
    */
   private lastNudgeText: string | undefined;
   /**
-   * The next windowed item goes out at the next opportunity, without waiting for a
-   * window. Armed by an abort (概念稿 §8.3 ①): the window exists to avoid interrupting
-   * work, and the abort just stopped the work, so a message that follows — the "abort,
-   * then say" pair the concept calls immediately effective — must not wait 60 s.
+   * The delivery pi has not echoed yet (概念稿 §8.1). At most one: the idle gate forbids a
+   * second `deliver` while a turn is running, and a send that started no turn is retried
+   * rather than replaced. `undefined` means nothing is waiting for a `delivery_ack`.
    */
-  private windowImmediate = false;
+  private inFlight: DeliveryInFlight | undefined;
   /**
-   * Every batch pi accepted and the turn has not acknowledged yet, in delivery order.
-   * pi can drop a still-queued steer when an abort lands (§8.3); the copies are in
-   * memory only, because losing them on a crash costs at most one re-delivery and the
-   * injected text already carries `[conv#seq]` markers against duplicates. One entry
-   * per delivery — not one slot — because two windows can steer into the same turn,
-   * and an abort takes back both.
+   * Async commits started by a `delivery_ack`. `flush()` and `stop()` wait for them, so a
+   * caller that just saw a delivery go out also sees the watermark and the journal move.
    */
-  private readonly unacknowledged: PendingDelivery[][] = [];
+  private readonly commits = new Set<Promise<void>>();
   /** One-shot wakes, in memory only: a restart drops them (§7.5). */
   private schedules: ScheduledWake[] = [];
   /**
@@ -578,11 +577,14 @@ export class AdapterLoop {
       clearInterval(this.timer);
       this.timer = undefined;
     }
-    this.eventUnsub();
     this.pollAbort?.abort();
     // Nothing waits for a turn any more: a control item blocked on `abort()`
     // returns instead of holding the loop (§3.2).
     this.stopGate.abort();
+    // The event subscription is dropped *after* the wait below, not here: a delivery the
+    // surface is still holding can be echoed while `stop()` waits for it, and that echo
+    // is the only thing that commits the batch (概念稿 §8.1). A stopped loop ignores every
+    // other event, so nothing can start a turn in the meantime.
 
     // §2.3: `stop()` waits for in-flight work, and a `deliver` the surface is still
     // holding *is* in-flight work — resolving before it settles would report a quiet
@@ -599,10 +601,17 @@ export class AdapterLoop {
     // reaction: it re-checks `stopped` after each await and will not deliver now.
     for (const settle of this.settles) work.push(settle.catch(() => undefined));
     for (const delivery of this.deliveries) work.push(delivery.catch(() => undefined));
-    if (work.length === 0) return;
+    // A commit started by a `delivery_ack` is in-flight work too: it is the write that
+    // makes the watermark agree with the transcript. Leaving it behind would make a
+    // stopped loop look quiet while its own records were still moving.
+    for (const commit of this.commits) work.push(commit.catch(() => undefined));
     // Bounded at `STOP_TIMEOUT_MS` (§2.3). Giving up is not an error: the loops are
     // stopped, the delivery stays journalled, and the next start replays it (§3.1).
     await withTimeout(Promise.all(work), STOP_TIMEOUT_MS).catch(() => undefined);
+    // A held delivery can settle *while* the wait above runs, and its echo then starts a
+    // commit that the snapshot did not name. Wait for those too, under the same bound.
+    await withTimeout(this.commitFence(), STOP_TIMEOUT_MS).catch(() => undefined);
+    this.eventUnsub();
   }
 
   /**
@@ -647,9 +656,10 @@ export class AdapterLoop {
   }
 
   /**
-   * Deliver the current window if it is due (概念稿 §8.1). A window that is still
-   * open, or an abort that is cutting a turn, delivers nothing — but a window is no
-   * longer held back by a busy agent: delivery is a pi `steer`.
+   * Deliver the current window if it is due (概念稿 §8.1). Nothing goes out while the
+   * window is open, while an abort is cutting a turn, or while the agent is busy: one
+   * delivery is one `sendMessage` with `triggerTurn`, so it happens at a turn boundary
+   * or not at all.
    *
    * Returns whether this call actually delivered. `tick()` is what closes a window in
    * production; tests drive it by advancing the injected clock and calling `tick()`.
@@ -659,67 +669,86 @@ export class AdapterLoop {
    * own, which would re-concatenate the taken batch and append the chatter count twice.
    */
   async flush(): Promise<boolean> {
-    return (await this.flushOutcome()) === 'delivered';
+    const outcome = await this.flushOutcome();
+    // A delivery is committed by pi's echo, not by `deliver` returning. Waiting for the
+    // commit here is what lets a caller read the watermark and the ledger right after a
+    // window closed (概念稿 §8.1).
+    await this.commitFence();
+    return outcome === 'delivered';
   }
 
-  /**
-   * The same single-flight call, keeping *why* nothing went out (see `FlushOutcome`).
-   * `force` is the abort path (概念稿 §8.3 ①): once a turn has been cut, the reason the
-   * window exists — don't interrupt running work — is gone, so what is pending goes out
-   * at once instead of waiting for the timer.
-   */
-  private async flushOutcome(force = false): Promise<FlushOutcome> {
+  /** The same single-flight call, keeping *why* nothing went out (see `FlushOutcome`). */
+  private async flushOutcome(): Promise<FlushOutcome> {
     const inFlight = this.flushInFlight;
-    if (inFlight) {
-      const outcome = await inFlight;
-      // A forced call must not be answered by a window check that ran before the
-      // abort landed; anything else (delivered, empty, failed) is already the answer.
-      if (!force || outcome !== 'waiting') return outcome;
-    }
-    const tracked = this.deliverPending(force).finally(() => {
+    if (inFlight) return inFlight;
+    const tracked = this.deliverPending().finally(() => {
       if (this.flushInFlight === tracked) this.flushInFlight = undefined;
     });
     this.flushInFlight = tracked;
     return tracked;
   }
 
+  /**
+   * Is there anything a delivery still has to answer for? An un-acknowledged send counts:
+   * pi may have failed to prepare the run, and the retry is what keeps the items out of
+   * the watermark until they really are in the transcript (§3.4).
+   */
+  private hasQueuedWork(): boolean {
+    return this.pending.length > 0 || this.nudgeDue || this.inFlight !== undefined;
+  }
+
   /** True when the window has run its course (or something in it may not wait). */
   private windowDue(now: number): boolean {
-    if (this.pending.length === 0 && !this.nudgeDue) return false;
-    // The start-up brief does not wait for a window (§8.4), and neither does the first
-    // batch after an abort (§8.3 ①), nor a batch already holding one: they go out
-    // together, in one call.
-    if (this.windowImmediate) return true;
+    if (!this.hasQueuedWork()) return false;
+    // The start-up brief does not wait for a window (§8.4), and neither does a batch
+    // already holding one: they go out together, in one call.
     if (this.pending.some((item) => item.windowless === true)) return true;
     return this.windowStart !== null && now - this.windowStart >= this.config.deliveryWindowMs;
   }
 
-  private async deliverPending(force = false): Promise<FlushOutcome> {
+  private async deliverPending(): Promise<FlushOutcome> {
     // A stopped loop delivers nothing: `stop()` is the last step of the delete path and of
     // process exit, and a manual `flush()` must not start a turn behind it.
     if (this.stopped) return 'stopped';
     // §3.2: an abort is cutting the turn. Delivering now would be the very turn the
-    // abort then waits for; the abort path itself calls back with `force` once the
-    // cut is over (概念稿 §8.3 ①).
+    // abort then waits for.
     if (this.aborting) return 'aborting';
-    if (this.pending.length === 0 && !this.nudgeDue) {
+    if (!this.hasQueuedWork()) {
       this.windowStart = null;
       return 'empty';
     }
     const now = this.now();
-    if (!force && !this.windowDue(now)) return 'waiting';
+    if (!this.windowDue(now)) return 'waiting';
+    // 概念稿 §8.1, the whole invariant: one delivery is one `sendMessage` with
+    // `triggerTurn`, so it happens at a turn boundary and nowhere else. This check lives
+    // here, not at the callers: `tick()`, `ingest`, a tool and a test all arrive through
+    // this function, and there is no force path that skips it.
+    if (this.surface.isBusy()) return 'busy';
 
     // §8.4: real items win the window; the nudge is only delivered when there is
     // nothing else to put in front of the model, and otherwise waits for a quiet one.
-    const batch = this.pending.slice(0, DELIVER_BATCH);
+    //
+    // A retry comes first and alone: an un-acknowledged send never entered the
+    // transcript, so the same text is safe to hand over again, and new items keep their
+    // own window instead of changing a text the previous attempt already named.
+    const retry = this.inFlight;
     let text: string;
     let kind: DeliverKind;
+    let batch: PendingDelivery[] = [];
+    let items: PendingDelivery[];
     let nudged: OwedFlag[] = [];
-    if (batch.length > 0) {
+    if (retry !== undefined) {
+      text = retry.text;
+      kind = retry.kind;
+      items = retry.items;
+      nudged = retry.nudged;
+    } else if (this.pending.length > 0) {
+      batch = this.pending.slice(0, DELIVER_BATCH);
       let joined = batch.map((item) => item.text).join('\n');
       if (this.chatter > 0) joined += `\n[and ${this.chatter} unrelated messages]`;
       text = joined;
       kind = batch.some((item) => item.kind === 'control') ? 'control' : batch[0].kind;
+      items = batch;
     } else {
       nudged = this.owableNudges();
       if (nudged.length === 0) {
@@ -729,7 +758,8 @@ export class AdapterLoop {
       }
       text = nudgeText(nudged);
       kind = 'nudge';
-      // §4.3: the same text as the last nudge this session is not delivered twice. The
+      items = [];
+      // §4.3: the same text as the last nudge this session delivered is not delivered twice. The
       // one `(conv, #seq)` it names is already in the context above, so a repeat adds
       // nothing — it was 61 of the 62 verbatim duplicates measured on a real run. The
       // skip is logged, but it still spends one unit of budget per conversation: a
@@ -748,62 +778,90 @@ export class AdapterLoop {
       }
     }
 
+    const id = randomUUID();
+    // Set before the send: pi's `message_end` can arrive while `deliver` is still on the
+    // stack (the fake in the tests, an idle pi that appends at once), and the ack has to
+    // find the record it commits.
+    this.inFlight = { id, text, kind, items, nudged };
     try {
-      await this.trackDelivery(this.surface.deliver(text, kind));
+      await this.trackDelivery(this.surface.deliver(text, kind, id));
     } catch {
-      // Nothing was delivered: the batch and its journal entry stay queued, and the
-      // window is left as it was so the next flush retries (§9).
+      // Nothing was delivered: a fresh batch stays queued (it was never removed from
+      // `pending`) and the window is left as it was so the next flush retries (§9). An
+      // un-acknowledged send stays in flight for the same reason.
+      if (retry === undefined) this.inFlight = undefined;
+      if (retry === undefined && batch.length === 0) this.nudgeDue = true;
       return 'failed';
     }
 
-    if (batch.length === 0) {
+    if (retry === undefined) {
+      if (batch.length > 0) {
+        const sent = new Set(batch);
+        for (let i = this.pending.length - 1; i >= 0; i -= 1) {
+          if (sent.has(this.pending[i])) this.pending.splice(i, 1);
+        }
+        // The chatter count travels with this text; if the send never reaches the
+        // transcript it is re-sent inside the same text, so it is consumed either way.
+        this.chatter = 0;
+      } else {
+        // §4.3: the budget and `lastNudgeText` move on the ack, not here — a nudge whose
+        // run never starts must not count, or a frozen debt would reach `blocked` unseen.
+        this.nudgeDue = false;
+      }
+    }
+    // A batch cap or a held-back nudge leaves something behind: open the next window
+    // now, so the remainder waits a whole window rather than riding this close (§8.1).
+    // Read the clock after the delivery: a slow `deliver` must not eat into it. The same
+    // window is what an un-acknowledged send waits for before its retry.
+    this.windowStart = this.now();
+    return 'delivered';
+  }
+
+  /**
+   * pi echoed one of our messages: it is in the session, so the records may move (§3.4).
+   * An id that is not the one in flight is stale (a retry already replaced it) and is
+   * ignored: only the newest send can commit.
+   */
+  private handleDeliveryAck(deliveryId: string): void {
+    const delivered = this.inFlight;
+    if (delivered === undefined || delivered.id !== deliveryId) return;
+    this.inFlight = undefined;
+    this.trackCommit(this.commitDelivery(delivered));
+  }
+
+  /**
+   * Move the records for a batch pi has echoed.
+   *
+   * Three records are written per item, and the order between them decides which window
+   * a crash can land in:
+   *
+   *   1. the owed flag (§4.2): "a message is in my context and I have not answered it";
+   *   2. the injection watermark (§3.4): "this `(conv, seq)` has been shown";
+   *   3. the journal entry (§3.1): the only copy of the item — dropped last, so a crash
+   *      before it replays the batch.
+   *
+   * The debt goes first on purpose. A crash between the two writes is possible either way
+   * (two files cannot be renamed atomically), so the question is which loss it may cause:
+   * flag first → the watermark is behind, the journal replays, the model sees the message
+   * twice and `set` keeps the earlier flag; watermark first → the replay is suppressed
+   * ("already seen"), the entry is committed and the debt is gone for good. This file
+   * chooses the duplicate: "错剪会丢一条真债" is the rule the prune path already follows,
+   * and a re-shown `[conv#seq]` costs one turn while a lost flag is silence.
+   */
+  private async commitDelivery(delivered: DeliveryInFlight): Promise<void> {
+    if (delivered.items.length === 0) {
       // §4.3: a delivered nudge counts against the budget and becomes the text a later
       // nudge is compared against. A skipped one was counted where it was skipped.
-      this.lastNudgeText = text;
-      for (const entry of nudged) {
+      this.lastNudgeText = delivered.text;
+      for (const entry of delivered.nudged) {
         this.nudges.record(entry.conv);
         // §4.3 / Q11: the nudge named `#seq`, so that seq is now answerable by `pg_ack`
         // even when it never reached the injection watermark (a gap anchor, §3.4).
         this.owed.advance(entry.conv, entry.seq);
       }
-      this.nudgeDue = false;
-      this.windowStart = null;
-      this.windowImmediate = false;
-      return 'delivered';
+      return;
     }
-
-    const sent = new Set(batch);
-    for (let i = this.pending.length - 1; i >= 0; i -= 1) {
-      if (sent.has(this.pending[i])) this.pending.splice(i, 1);
-    }
-    this.chatter = 0;
-    // §8.3 ②: "pi accepted it" is not "the model saw it". Keep the batch in memory so
-    // an aborted turn can put it back (`handleEvent` → `requeueUnacknowledged`).
-    this.unacknowledged.push(batch);
-    if (this.unacknowledged.length > UNACKNOWLEDGED_BATCH_LIMIT) {
-      const dropped = this.unacknowledged.shift() ?? [];
-      logWarn(
-        `[pigroups] ${UNACKNOWLEDGED_BATCH_LIMIT} delivered batches are still unacknowledged ` +
-          `(one turn spanning that many windows); dropping the oldest, ${dropped.length} item(s): ` +
-          `an abort will not replay it`,
-      );
-    }
-    // Three records are written per item, and the order between them decides which window
-    // a crash can land in:
-    //
-    //   1. the owed flag (§4.2): "a message is in my context and I have not answered it";
-    //   2. the injection watermark (§3.4): "this `(conv, seq)` has been shown";
-    //   3. the journal entry (§3.1): the only copy of the item — dropped last, so a crash
-    //      before it replays the batch.
-    //
-    // The debt goes first on purpose. A crash between the two writes is possible either way
-    // (two files cannot be renamed atomically), so the question is which loss it may cause:
-    // flag first → the watermark is behind, the journal replays, the model sees the message
-    // twice and `set` keeps the earlier flag; watermark first → the replay is suppressed
-    // ("already seen"), the entry is committed and the debt is gone for good. This file
-    // chooses the duplicate: "错剪会丢一条真债" is the rule the prune path already follows,
-    // and a re-shown `[conv#seq]` costs one turn while a lost flag is silence.
-    for (const item of batch) {
+    for (const item of delivered.items) {
       if (item.conv !== undefined) {
         // §4.2: a delivered message is what makes the conversation owed. The start-up
         // brief is the one delivery that must not create a debt ("启动简报不置"): it is a
@@ -814,10 +872,10 @@ export class AdapterLoop {
           if (item.noOwed === true) this.owed.advance(item.conv, item.seq);
           else await this.owed.set(item.conv, item.seq, this.now());
         }
-        // §3.4: the watermark moves only now, after `deliver` returned, so a delivery
-        // that throws or a crash in between cannot make the message disappear. This is
-        // an acknowledgement that pi accepted the message, not that a run started
-        // (`sendMessage` is void and swallows start failures; see 设计说明 §3.4).
+        // §3.4: the watermark moves only now, after pi echoed the message, so a run that
+        // failed to prepare or a crash in between cannot make the message disappear. This
+        // is an acknowledgement that pi put the message in the session, not that the model
+        // has read it (`sendMessage` is void and swallows start failures; 设计说明 §3.4).
         // A gap is the exception: its `seq` is a backfill anchor, and when nothing was
         // retained the platform sets it to "newest skipped seq + 1" (platform §6.4) —
         // the seq the next real message will carry. Writing it would drop that message
@@ -826,12 +884,20 @@ export class AdapterLoop {
       }
       if (item.journalId !== undefined) await this.releaseJournal(item.journalId);
     }
-    // A batch cap or a held-back nudge leaves something behind: open the next window
-    // now, so the remainder waits a whole window rather than riding this close (§8.1).
-    // Read the clock after the delivery: a slow `deliver` must not eat into it.
-    this.windowStart = this.pending.length > 0 || this.nudgeDue ? this.now() : null;
-    this.windowImmediate = false;
-    return 'delivered';
+  }
+
+  /** Track one ack-driven commit so `flush()`/`stop()` can wait for it. */
+  private trackCommit(commit: Promise<void>): void {
+    this.commits.add(commit);
+    const done = (): void => {
+      this.commits.delete(commit);
+    };
+    void commit.then(done, done);
+  }
+
+  /** Wait for every commit already started; a commit does not start another one. */
+  private async commitFence(): Promise<void> {
+    while (this.commits.size > 0) await Promise.all([...this.commits]);
   }
 
   /** Conversations the nudge may name: owed, and not past their budget. */
@@ -2275,9 +2341,9 @@ export class AdapterLoop {
       await this.journal.discard();
       this.pending.length = 0;
       this.queuedByJournal.clear();
-      // Nothing is re-delivered after a termination: the member is gone, so a copy
-      // that an abort would normally requeue has nowhere to go.
-      this.unacknowledged.length = 0;
+      // Nothing is re-delivered after a termination: the member is gone, so an
+      // un-acknowledged send has nowhere to go.
+      this.inFlight = undefined;
       await this.stop();
       const reason = typeof payload.reason === 'string' ? payload.reason : 'terminated';
       this.surface.shutdown(reason);
@@ -2297,10 +2363,10 @@ export class AdapterLoop {
    * this race gives up then or earlier when `stop()` runs. Giving up is not an error:
    * the abort request stands and the turn is still running.
    *
-   * 概念稿 §8.3 ①: once the cut is over, the window is forced shut and what is pending
-   * goes out at once. The window exists to avoid interrupting work; the abort already
-   * stopped the work, so that reason is gone. This is what makes "abort, then say"
-   * take effect on the next poll instead of up to a window later.
+   * 概念稿 §8.3: the abort ends the turn and nothing else. There is no forced flush and
+   * no "next batch skips the window" flag: an abort is what the queue waits behind, so
+   * the work it interrupted goes out at the next turn boundary after a full window, in
+   * the same tick-free order as everything else.
    */
   private async abortTurn(): Promise<void> {
     this.aborting = true;
@@ -2309,12 +2375,6 @@ export class AdapterLoop {
     } finally {
       this.aborting = false;
     }
-    if (this.stopped) return;
-    await this.flushOutcome(true);
-    // 概念稿 §8.3 ①: the window's reason is gone once the work was cut, so whatever
-    // the abort could not deliver (nothing was pending yet) goes out as soon as it
-    // arrives. This is what makes "abort, then say" take effect immediately.
-    this.windowImmediate = true;
   }
 
   /** The bounded cut itself; the caller owns the `aborting` guard. */
@@ -2591,9 +2651,8 @@ export class AdapterLoop {
     if (this.stopped) return;
     await this.reconcileMembers();
     if (this.stopped) return;
-    // The window is checked here, by the same scan the 5 s timer runs. Nothing is
-    // delivered outside that check — except the two documented cases: the start-up
-    // brief (`windowless`) and the forced flush that follows an abort.
+    // The window is checked here, by the same scan the 5 s timer runs. A settle is not a
+    // delivery trigger: it only ends the turn a window was waiting behind.
     this.tick();
     await this.markNudgeDue();
   }
@@ -2751,8 +2810,7 @@ export class AdapterLoop {
 
   /**
    * The telemetry window expires into one queued reminder (§5.2). It waits for the
-   * delivery window like any other item; there is no busy gate, because delivery is a
-   * steer now and a busy member is a normal recipient (概念稿 §8.1).
+   * delivery window and for a turn boundary like any other item (概念稿 §8.1).
    */
   private queueReminder(now: number): void {
     const decision = this.telemetry.due(now);
@@ -2763,6 +2821,14 @@ export class AdapterLoop {
   // ---- child-side telemetry: edge-triggered four states (§5.1) -----------
 
   private handleEvent(event: PiEvent): void {
+    // A delivery echo is not a reaction to a turn: it records a message that is already in
+    // the transcript, and dropping it while `stop()` waits for that very delivery would
+    // leave the journal holding a batch the model has already been shown — the next start
+    // would replay it. Everything else is ignored once the loop is on its way down.
+    if (event.type === 'delivery_ack') {
+      this.handleDeliveryAck(event.deliveryId);
+      return;
+    }
     if (this.stopped) return;
     const now = this.now();
     switch (event.type) {
@@ -2775,19 +2841,12 @@ export class AdapterLoop {
         this.runningToolPreviews.clear();
         // A provider error sticks until a later turn ends cleanly.
         this.errorNote = event.error ? event.error.message : undefined;
-        // 概念稿 §8.3 ②: an aborted turn can swallow a steer that was still queued —
-        // the only measured way a delivered message disappears. Put every batch back.
-        //
-        // Every other end drops the table, a provider error included (§3.4). The rule is
-        // "delivered means seen": `sendMessage` is void, so an error proves neither that
-        // the model saw a batch nor that it did not, and keeping the copies would make
-        // *everything* delivered during that turn suspect until the next abort. Measured
-        // on the quant run: that is 31 `(conv, seq)` delivered twice, 29 of them more than
-        // two minutes apart (median 650 s, longest 1839 s), all of it replaying batches the
-        // model had already acted on. An error is not evidence that the abort dropped them;
-        // only `aborted` is (probe/logs/steer-20261101T170244Z).
-        if (event.aborted === true) this.requeueUnacknowledged();
-        else this.unacknowledged.length = 0;
+        // 概念稿 §8.3: an abort ends the turn, so the queue must not start a new one in
+        // the same tick. Re-opening the window is the whole rule: whatever was waiting
+        // (and, if pi never echoed it, the send that took the cut) goes out one full
+        // window from here. Nothing is requeued or replayed — a send pi echoed is in the
+        // transcript, and a send it did not echo is already still in `inFlight`.
+        if (event.aborted === true) this.reopenWindow(now);
         this.evaluateAttention(now);
         return;
       case 'tool_start':
@@ -2811,22 +2870,16 @@ export class AdapterLoop {
   }
 
   /**
-   * Put every unacknowledged batch back in front of the queue, in delivery order
-   * (概念稿 §8.3 ②). It must bypass `enqueue`: the watermark already advanced past
-   * these items when pi accepted them, and that acceptance is exactly what the abort
-   * took back.
-   *
-   * The window is set to "due now" so the next opportunity — the tick, or the forced
-   * flush at the end of the abort — delivers them. Duplicates are acceptable; the
-   * injected text already carries `[conv#seq]` markers.
+   * Start a fresh window at `now` (概念稿 §8.3). Used by the aborted turn end: the work
+   * that was cut does not get to start its replacement immediately, and the queue waits
+   * for a full window like any other batch.
    */
-  private requeueUnacknowledged(): void {
-    const batches = this.unacknowledged.splice(0);
-    if (batches.length === 0) return;
-    // One unshift of the flattened list keeps the batches in order; unshifting each
-    // batch in turn would reverse them.
-    this.pending.unshift(...batches.flat());
-    this.windowStart = this.now() - this.config.deliveryWindowMs;
+  private reopenWindow(now: number): void {
+    if (!this.hasQueuedWork()) {
+      this.windowStart = null;
+      return;
+    }
+    this.windowStart = now;
   }
 
   /**
@@ -3021,21 +3074,17 @@ export class AdapterLoop {
     }
 
     if (err instanceof PgError && err.status === 401) {
-      // §9: stop the loops, hand the agent one line, and wait for a human to replace
+      // §9: hand the agent one line, then stop the loops and wait for a human to replace
       // the token. Not the poll's own business — a loop that is not running (no token
       // at all, §7) delivers nothing.
       //
-      // The line goes out *before* `stop()`: a stopped loop delivers nothing
-      // (`deliverPending` answers `stopped`), so a notice queued afterwards would sit
-      // in a dead queue and the model would never learn why the member went silent.
-      // `windowless` is the one exception the start-up brief also uses — the window
-      // exists to avoid interrupting work, and there is no work left to protect.
-      this.pending.push({
-        text: 'PIGROUPS token is no longer valid: replace it and restart this session.',
-        kind: 'message',
-        windowless: true,
-      });
-      await this.flush();
+      // The line goes through `notice`, not the delivery queue. The queue only sends at a
+      // turn boundary, and a 401 regularly lands in the middle of a turn (the poll runs
+      // beside the agent), so a queued line would wait for an idle moment that the
+      // `stop()` right after it will never allow — the stranded notice this test exists
+      // for. `notice` appends to the transcript without starting or joining a turn, so it
+      // reaches the session whether or not a turn is running.
+      await this.surface.notice('PIGROUPS token is no longer valid: replace it and restart this session.');
       await this.stop();
       return;
     }

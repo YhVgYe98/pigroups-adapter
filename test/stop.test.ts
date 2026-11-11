@@ -92,6 +92,9 @@ test('stop() waits for a settle that is still reading the roster, and a stopped 
     deliver: async (text) => {
       deliveries.push(text);
     },
+    notice: async (text) => {
+      deliveries.push(text);
+    },
     abort: async () => undefined,
     isBusy: () => busy,
     lastAssistantText: () => undefined,

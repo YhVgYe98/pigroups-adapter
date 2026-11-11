@@ -637,6 +637,9 @@ test('a repeated blocked set is not re-reported, while a larger or smaller set i
   const child = await createMember(s.platform, s.me, 'coder');
   const since = attentionSince(s);
   const blocked = async (owed: string[]): Promise<void> => {
+    // A reminder is a delivery: it starts a turn, and the next reminder needs that turn to
+    // have ended (概念稿 §8.1).
+    if (s.surface.isBusy()) await s.settle();
     await command(s.platform, child.token, s.me.id, 'pg.attention', {
       v: 1,
       child: child.id,

@@ -1,14 +1,34 @@
-// 概念稿 §8.1/§8.2: one queue, a tumbling time window, and delivery as a steer.
+// 概念稿 §8.1/§8.3: one queue, a tumbling time window, and delivery at a turn boundary.
 //
 // The window is checked by the same 5 s `tick()`, so every test here moves the injected
-// clock and calls `tick()` (via `s.timer`) instead of waiting for wall time.
+// clock and calls `tick()` (via `s.timer`) instead of waiting for wall time. A delivery
+// starts a turn (the fake reports busy until the test settles), which is what makes the
+// idle gate observable.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { formatLocalMinute } from '../src/format.ts';
 import { history, send } from './support.ts';
-import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, scenario } from './scenario.ts';
+import { DEFAULT_DELIVERY_WINDOW_MS as WINDOW, scenario, type Scenario } from './scenario.ts';
+
+/** `<adapterDir>/journal/<memberId>/*.json`: the batches whose only copy is still on disk. */
+async function journalEntries(s: Scenario): Promise<string[]> {
+  const dir = join(s.adapterDir, 'journal', s.me.id);
+  return (await readdir(dir).catch(() => [])).filter((name) => name.endsWith('.json'));
+}
+
+/** `<adapterDir>/injected/<memberId>.json`: the seqs pi has echoed into the transcript. */
+async function injected(s: Scenario): Promise<Record<string, number>> {
+  try {
+    const raw = await readFile(join(s.adapterDir, 'injected', `${s.me.id}.json`), 'utf8');
+    return (JSON.parse(raw) as { injected?: Record<string, number> }).injected ?? {};
+  } catch {
+    return {};
+  }
+}
 
 test('a DM from the parent waits for its window, then arrives with the conversation id and the message seq', async (t) => {
   const s = await scenario();
@@ -136,31 +156,47 @@ test('chatter is counted and appears as a suffix on the next real delivery, neve
   assert.match(delivery.text, /and 3 unrelated messages/, `missing the chatter suffix: ${delivery.text}`);
 });
 
-test('a busy member still receives the window batch: delivery is a steer, not a wait for idle', async (t) => {
+// 概念稿 §8.1: a delivery is one `sendMessage` with `triggerTurn`, so the turn boundary is
+// the only moment it may happen. A member inside a 60 s tool receives the batch once, after
+// the tool returns — not during it, and never twice.
+test('a message that arrives while a tool is running is delivered once, after the tool returns', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle(); // drain the startup sequence: no DM exists yet, so nothing is injected
 
+  // One turn, opened by a 60 s tool: it outlives the whole delivery window.
   s.surface.beginTurn();
+  s.surface.emit({ type: 'tool_start', name: 'bash', argsPreview: '{"command":"sleep 60"}' });
   await send(s.platform, s.parent!.token, s.me.id, 'first');
   await send(s.platform, s.parent!.token, s.me.id, 'second');
   await s.cycle();
 
-  assert.equal(s.surface.isBusy(), true, 'precondition: a turn is running');
-  assert.equal(s.surface.deliveries.length, 0, 'the window, not the busy flag, decides when');
-  assert.equal(s.surface.heldCount, 0);
+  assert.equal(s.surface.isBusy(), true, 'precondition: the tool is still running');
+  assert.equal(s.surface.deliveries.length, 0, 'the window is open; nothing may be handed to pi yet');
 
+  // The window closes inside the tool. Nothing goes out, and a second window does not
+  // accumulate either.
   await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 0, 'a closed window is not a turn boundary');
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 0, 'no delivery may pile up inside one turn');
 
+  // The tool returns and the turn ends: now the batch goes out, in arrival order, once.
+  s.surface.emit({ type: 'tool_end', name: 'bash', ok: true });
+  await s.settle();
   const delivered = s.surface.texts().join('\n');
-  assert.equal(s.surface.deliveries.length, 1, `one window is one steer, got:\n${delivered}`);
-  assert.equal(s.surface.isBusy(), true, 'the turn is still running: the batch was steered into it');
+  assert.equal(s.surface.deliveries.length, 1, `one turn boundary is one delivery, got:\n${delivered}`);
   assert.ok(delivered.includes('first'), delivered);
   assert.ok(delivered.includes('second'), delivered);
-  assert.ok(
-    delivered.indexOf('first') < delivered.indexOf('second'),
-    `held items must keep arrival order, got:\n${delivered}`,
-  );
+  assert.ok(delivered.indexOf('first') < delivered.indexOf('second'), `arrival order, got:\n${delivered}`);
+
+  // The batch is in the transcript: later windows and ticks do not send it again. (A
+  // reminder about the unanswered message may follow; the batch itself must not.)
+  await s.timer(WINDOW);
+  await s.settle();
+  await s.timer(WINDOW);
+  const copies = s.surface.texts().filter((text) => text.includes('first') && text.includes('second'));
+  assert.equal(copies.length, 1, `the echoed batch must never be delivered twice, got:\n${s.surface.texts().join('\n---\n')}`);
 });
 
 test('a gap that skipped messages naming me is delivered as a hint with its anchor; a gap of pure chatter is only counted', async (t) => {
@@ -211,6 +247,9 @@ test('the batch cap is a size valve, not a trigger: a full window sends ten and 
   assert.ok(!first.includes('message 10'), `the eleventh must wait for the next window: ${first}`);
 
   assert.equal(s.surface.deliveries.length, 1, 'the remainder does not ride the same close');
+  // The first batch started a turn; the remainder waits for that turn to end as well as
+  // for its own window.
+  await s.settle();
   await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 2, 'the remainder goes out when the next window closes');
   const second = s.surface.texts()[1];
@@ -238,120 +277,114 @@ test('a settle is no longer a delivery trigger; the window is', async (t) => {
   assert.deepEqual(s.loop.state().owed, [s.dm], 'the nudge was not delivered alongside the message');
 });
 
-test('a batch delivered into a provider-error turn is dropped; a later abort does not replay it', async (t) => {
-  const s = await scenario();
+// §3.4: the commit point is pi's echo, not `deliver` returning. A turn that ends in a
+// provider error after the echo does not take the batch back: the message is in the
+// transcript, so the watermark and the journal entry stand and nothing is re-sent.
+test('a batch pi echoed is committed even when its turn ends in a provider error', async (t) => {
+  const s = await scenario({ siblings: 1 });
   t.after(() => s.close());
   await s.cycle();
+  const sibling = s.siblings[0];
 
-  await send(s.platform, s.parent!.token, s.me.id, 'the message a failed turn did not necessarily show');
+  const sent = await send(s.platform, sibling.token, s.group, 'the message the error did not erase', [s.me.id]);
   await s.cycle();
   await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 1, 'precondition: the batch reached pi');
+  assert.equal((await journalEntries(s)).length, 0, 'the echo already committed the journal entry');
+  assert.equal((await injected(s))[s.group], sent.seq, 'the echo already moved the watermark');
 
-  // §3.4: a provider error proves neither that the model saw it nor that it did not, and
-  // keeping the copy would put everything delivered during that turn under suspicion. The
-  // measured cost of keeping it was 31 re-deliveries after `pg.abort` on a real run, so the
-  // rule is "delivered means seen": the table goes.
   s.surface.settle({ message: 'provider 429 ×7' });
   await s.loop.settled();
   await s.loop.flush();
-  assert.equal(s.surface.deliveries.length, 1, 'an errored end does not re-send by itself');
+  assert.equal(s.surface.deliveries.length, 1, 'an errored end does not re-send an echoed batch');
 
+  // A later abort does not replay it either: there is no copy left to take back.
   s.surface.settleAborted();
   await s.loop.settled();
   await s.loop.flush();
-  assert.equal(
-    s.surface.deliveries.length,
-    1,
-    'the errored end dropped the copy, so a later abort has nothing to take back',
-  );
+  assert.equal(s.surface.deliveries.length, 1, 'an abort has nothing to replay');
 });
 
-test('a batch delivered into an aborted turn is put back and delivered again; a clean end clears it', async (t) => {
+// 概念稿 §8.3: an abort ends the turn and nothing else. It does not deliver the queue and
+// it does not replay what was already delivered; the queue waits for the NEXT boundary,
+// a full window after the cut, so the work it interrupted cannot start a new turn in the
+// same tick.
+test('after an aborted turn nothing is delivered until a full window has passed', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   await s.cycle();
 
-  const sent = await send(s.platform, s.parent!.token, s.me.id, 'the message the abort could swallow');
+  await send(s.platform, s.parent!.token, s.me.id, 'the batch that was already in the transcript');
   await s.cycle();
   await s.timer(WINDOW);
-  assert.equal(s.surface.deliveries.length, 1, 'precondition: the batch reached pi');
-  assert.ok(s.surface.deliveries[0].text.includes(`#${sent.seq}`), s.surface.deliveries[0].text);
+  assert.equal(s.surface.deliveries.length, 1, 'precondition: one batch went out');
 
-  // pi drops a steer still queued when an abort lands; the turn ends `aborted`.
+  // The turn runs for another half window; a second message arrives inside it and the
+  // operator cuts the turn. The service window would have expired 30 s from here.
+  s.clock.advance(WINDOW / 2);
+  await send(s.platform, s.parent!.token, s.me.id, 'queued behind the cut');
+  await s.cycle();
+
   s.surface.settleAborted();
   await s.loop.settled();
   await s.loop.flush();
-
-  assert.equal(s.surface.deliveries.length, 2, 'the aborted turn must hand the batch back');
-  const replay = s.surface.deliveries[1].text;
-  assert.ok(replay.includes('the message the abort could swallow'), replay);
-  assert.ok(replay.includes(`[${s.dm}#${sent.seq} `), `the duplicate still carries its marker: ${replay}`);
-
-  // A clean turn end means pi kept it: nothing is re-sent.
-  s.surface.settle();
-  await s.loop.settled();
-  await s.loop.flush();
-  assert.equal(s.surface.deliveries.length, 2, 'a clean end clears the copy');
-});
-
-test('two batches steered into one still-running turn are both re-sent, in delivery order, when that turn is aborted', async (t) => {
-  const s = await scenario();
-  t.after(() => s.close());
-  await s.cycle();
-
-  // One long tool: the turn stays open across both windows, so both deliveries are
-  // steers into the same turn — the case one `lastDelivered` slot cannot cover.
-  s.surface.beginTurn();
-
-  await send(s.platform, s.parent!.token, s.me.id, 'batch one');
-  await s.cycle();
-  await s.timer(WINDOW);
-  assert.equal(s.surface.deliveries.length, 1, 'precondition: batch one reached the turn');
-
-  await send(s.platform, s.parent!.token, s.me.id, 'batch two');
-  await s.cycle();
-  await s.timer(WINDOW);
-  assert.equal(s.surface.deliveries.length, 2, 'precondition: batch two was steered into the same turn');
-
-  // The abort takes back both steers, not just the last one.
-  s.surface.settleAborted();
-  await s.loop.settled();
-  await s.loop.flush();
-
-  assert.equal(s.surface.deliveries.length, 3, 'the aborted turn must hand the batches back');
-  const replay = s.surface.deliveries[2].text;
-  assert.ok(replay.includes('batch one'), `batch one must be re-delivered, got:\n${replay}`);
-  assert.ok(replay.includes('batch two'), replay);
+  assert.equal(s.surface.deliveries.length, 1, 'the abort must not deliver the queue');
   assert.ok(
-    replay.indexOf('batch one') < replay.indexOf('batch two'),
-    `the batches must be re-delivered in delivery order, got:\n${replay}`,
+    !s.surface.texts()[0].includes('queued behind the cut'),
+    'the delivered batch cannot contain the message that arrived after it',
   );
+
+  // Half a window after the cut: nothing. Without the re-opened window this moment is a
+  // full window past the previous delivery and the batch would already be out.
+  await s.timer(WINDOW / 2);
+  assert.equal(s.surface.deliveries.length, 1, 'the abort re-opened the window; it did not close it');
+
+  // One full window after the cut: the queued message goes out, once, and the batch that
+  // already reached the transcript is not repeated.
+  await s.timer(WINDOW / 2);
+  assert.equal(s.surface.deliveries.length, 2, 'the queued work goes out one window after the abort');
+  const after = s.surface.texts()[1];
+  assert.ok(after.includes('queued behind the cut'), after);
+  assert.ok(!after.includes('the batch that was already in the transcript'), `no replay: ${after}`);
 });
 
-test('the unacknowledged list is capped: a turn that outlives the cap loses only the oldest copy', async (t) => {
-  const s = await scenario();
+// §3.4/§8.1: pi's `sendMessage` is void and swallows a start failure (`_startRun` threw:
+// no API key, a compaction failure). The batch is then NOT in the transcript, so the
+// records must not move; it is handed over again at the next idle+window, and the retry
+// is what finally commits it.
+test('a delivery whose run never started stays uncommitted and is retried at the next window', async (t) => {
+  const s = await scenario({ siblings: 1 });
   t.after(() => s.close());
   await s.cycle();
-  s.surface.beginTurn();
+  const sibling = s.siblings[0];
 
-  // One delivery per window; nine is one more than the cap of eight (§8.3 ②).
-  const batches = 9;
-  for (let i = 1; i <= batches; i += 1) {
-    await send(s.platform, s.parent!.token, s.me.id, `batch ${i}`);
-    await s.cycle();
-    await s.timer(WINDOW);
-  }
-  assert.equal(s.surface.deliveries.length, batches, 'precondition: one delivery per window');
+  // pi accepted the call but no run started, and no `message_end` followed.
+  s.surface.startFails = true;
+  const sent = await send(s.platform, sibling.token, s.group, 'the batch a failed run swallowed', [s.me.id]);
+  await s.cycle();
+  await s.timer(WINDOW);
 
-  s.surface.settleAborted();
-  await s.loop.settled();
-  await s.loop.flush();
+  assert.equal(s.surface.deliveries.length, 1, 'precondition: the call was made once');
+  assert.equal(s.surface.isBusy(), false, 'precondition: no turn started');
+  assert.equal((await journalEntries(s)).length, 1, 'the journal entry is still the only copy');
+  assert.equal(
+    (await injected(s))[s.group] ?? 0,
+    0,
+    'a watermark past a message that never arrived would lose it for good',
+  );
 
-  assert.equal(s.surface.deliveries.length, batches + 1, 'the abort replays the batches it still holds');
-  const replay = s.surface.texts().slice(batches).join('\n');
-  assert.ok(!replay.includes('batch 1'), `the oldest copy was dropped: ${replay}`);
-  for (let i = 2; i <= batches; i += 1) {
-    assert.ok(replay.includes(`batch ${i}`), `batch ${i} must survive the cap, got:\n${replay}`);
-  }
+  // pi is healthy again: the retry happens at the next window, without a second poll and
+  // without the item being put back into the queue.
+  s.surface.startFails = false;
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 2, 'the un-acknowledged batch is handed over again');
+  const retry = s.surface.texts()[1];
+  assert.ok(retry.includes('the batch a failed run swallowed'), retry);
+  assert.ok(retry.includes(`#${sent.seq} `), `the retry keeps its marker: ${retry}`);
+
+  assert.equal((await journalEntries(s)).length, 0, 'the echo committed the journal entry');
+  assert.equal((await injected(s))[s.group], sent.seq, 'the watermark moved only after the echo');
+
+  await s.timer(WINDOW);
+  assert.equal(s.surface.deliveries.length, 2, 'a committed batch is not sent a third time');
 });

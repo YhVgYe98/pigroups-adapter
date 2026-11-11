@@ -388,11 +388,17 @@ export interface Delivery {
   text: string;
   kind: DeliverKind;
   at: number;
+  /**
+   * Appended through `notice()`, not handed to a turn: the transcript got it, but nothing
+   * started (the §9 token line).
+   */
+  notice?: true;
 }
 
 /**
  * Records every `deliver` (text + kind) and every `abort`. The test owns the turn lifecycle:
- * `deliver` marks the surface busy, `settle()` ends the turn and fires the `onSettled` callbacks.
+ * `deliver` marks the surface busy and echoes the message the way pi's `message_end` does,
+ * `settle()` ends the turn and fires the `onSettled` callbacks.
  */
 export class FakeSurface implements PiSurface {
   readonly deliveries: Delivery[] = [];
@@ -410,6 +416,12 @@ export class FakeSurface implements PiSurface {
   lastText: string | undefined;
   /** When set, `deliver` stays pending until `releaseDeliveries()` (simulates a turn that never commits). */
   holdDeliveries = false;
+  /**
+   * When set, `deliver` returns without starting a turn and without echoing the message:
+   * pi's `sendMessage` swallowed a failure to prepare the run (`_startRun` threw). The
+   * loop must keep the batch uncommitted and retry it.
+   */
+  startFails = false;
   /** When set, `abort` stays pending until the returned resolver is called. */
   holdAbort = false;
   #releaseAbort: (() => void) | null = null;
@@ -442,13 +454,24 @@ export class FakeSurface implements PiSurface {
     for (const cb of [...this.#eventCallbacks]) cb(event);
   }
 
-  async deliver(text: string, kind: DeliverKind): Promise<void> {
-    this.#busy = true;
+  async deliver(text: string, kind: DeliverKind, deliveryId: string): Promise<void> {
     this.lifecycle.push('deliver');
     this.deliveries.push({ text, kind, at: Date.now() });
+    if (this.startFails) return;
+    this.#busy = true;
     if (this.holdDeliveries) {
       await new Promise<void>((res) => this.#held.push(res));
     }
+    // pi's echo (`message_end`) is the commit point (概念稿 §8.1): it fires before the
+    // first model call of an idle-started turn, and never at all when the run failed to
+    // prepare — the two cases the loop has to tell apart.
+    this.emit({ type: 'delivery_ack', deliveryId });
+  }
+
+  async notice(text: string): Promise<void> {
+    // Not a lifecycle 'deliver': nothing is handed to a turn. pi appends the line to the
+    // transcript and emits its `message_end`, which the loop does not need to observe.
+    this.deliveries.push({ text, kind: 'message', at: Date.now(), notice: true });
   }
 
   async abort(): Promise<void> {
@@ -477,7 +500,7 @@ export class FakeSurface implements PiSurface {
 
   /**
    * The turn was cut: what pi does on an abort (`agent_settled aborted:true`, no
-   * `agent_before_settle`). The loop must requeue the batch it delivered into it.
+   * `agent_before_settle`). The loop must re-open the delivery window (§8.3).
    */
   settleAborted(): void {
     this.#busy = false;

@@ -47,6 +47,20 @@ function fakePi(): FakePi {
   const pi = {
     sendMessage(message: PiMessage): void {
       sent.push(message);
+      // pi echoes every message it put into the session, and the adapter's commit point is
+      // that `message_end` (概念稿 §8.1). A fake that only records the call models a run
+      // that never started, which is a different test.
+      for (const handler of handlers.get('message_end') ?? []) {
+        handler({
+          message: {
+            role: 'custom',
+            customType: message.customType,
+            content: message.content,
+            display: message.display,
+            details: message.details,
+          },
+        });
+      }
     },
     registerTool(tool: PiToolDefinition): void {
       tools.set(tool.name, tool);

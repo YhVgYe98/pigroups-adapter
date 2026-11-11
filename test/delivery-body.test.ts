@@ -141,6 +141,8 @@ test('199- and 200-character messages are delivered with no marker', async (t) =
   assert.ok(firstText.includes(`#${first.seq} `), 'the first delivery is the 199-character message');
   assert.doesNotMatch(firstText, MARKER, '199 characters is under the cap and must not be marked');
 
+  // The first delivery started a turn; the second message needs it to have ended.
+  await s.settle();
   const second = await send(s.platform, s.parent!.token, s.me.id, exactly);
   await s.cycle();
   await s.timer(WINDOW);

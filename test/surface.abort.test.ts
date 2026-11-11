@@ -85,13 +85,17 @@ function quietWarn(): { warns: string[]; restore(): void } {
   };
 }
 
-test('abort() before session_start returns at once and is not busy', async () => {
+test('abort() before session_start returns at once, and no context is ever reported idle', async () => {
   const { pi } = fakePi();
   const surface = new PiSurfaceAdapter(pi);
 
   await surface.abort();
 
-  assert.equal(surface.isBusy(), false, 'without a context nothing can be running');
+  assert.equal(
+    surface.isBusy(),
+    true,
+    'concept §8.1: an unknown state must not open the delivery gate — no context means busy, not idle',
+  );
 });
 
 test('abort() while idle does not ask pi to abort anything', async () => {
@@ -161,12 +165,12 @@ test('abort() returns at once when the stop signal fires, without warning', asyn
   assert.equal(fake.calls.abort, 1, 'the turn was still cut before the wait returned');
 });
 
-test('isBusy() follows the context in both directions', () => {
+test('isBusy() follows the context, and answers busy until one is attached', () => {
   const { pi } = fakePi();
   const surface = new PiSurfaceAdapter(pi);
   const fake = fakeCtx('idle');
 
-  assert.equal(surface.isBusy(), false, 'no context: nothing is running');
+  assert.equal(surface.isBusy(), true, 'no context: unknown is busy, never idle (concept §8.1)');
   surface.attachContext(fake.ctx);
   assert.equal(surface.isBusy(), false, 'an idle context is not busy');
   fake.setBusy();
