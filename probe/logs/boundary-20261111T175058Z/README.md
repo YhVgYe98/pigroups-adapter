@@ -156,7 +156,7 @@ exactly …”），模型回复（或 thinking）里又出现一次/两次。�
 
 1. §8.1 的 **“没有副本，没有重投表。”** 紧接着又说没回声的批次“原样重投”。字面上两者
    需要“回声之后没有副本”这个限定；实现里 `inFlight` 在“send 已接受、pi 还没回声”之间
-   保留一份（至多一份）。本次两轮回声都在 `sendMessage` 后的同一毫秒/1 秒内到达，
+   保留一份（至多一份）。本次两轮的 `custom_message` 与探针的 `message_end` 都在同一毫秒，
    `inFlight` 随即释放，所以行为上没看到任何副本；但这句原文单独读会与实现冲突。
 2. §8.1 的 **“窗口在它干活的第 10 秒就关了”** 是例子；本次是第 65 秒关闭（工具 120 秒、
    消息在第 5 秒到达）。不影响结论。
@@ -200,8 +200,9 @@ exactly …”），模型回复（或 thinking）里又出现一次/两次。�
 ```bash
 cd /home/yang/Documents/pigroups-adapter
 EVID=probe/logs/boundary-$(date -u +%Y%m%dT%H%M%SZ) node probe/boundary-driver.mjs
-node "$EVID/analyze.mjs"    # 或 cd 进去 node analyze.mjs
+cp probe/logs/boundary-20261111T175058Z/analyze.mjs "$EVID"/
+node "$EVID/analyze.mjs"    # 默认读脚本所在目录；也可以传一个证据目录参数
 ```
 
-整轮约 6 分钟（两轮 120 秒工具 + 一轮 60 秒窗口）。需要 `herdr` server、`pi`、一个可用模型
-与凭据；平台、成员、adapter 目录、session 目录都是临时目录，驱动自己收尾。
+实测 `17:50:58 → 17:54:26`（约 3.5 分钟）。需要 `herdr` server、`pi`、一个可用模型与凭据；
+平台、成员、adapter 目录、session 目录都是临时目录，驱动自己收尾。

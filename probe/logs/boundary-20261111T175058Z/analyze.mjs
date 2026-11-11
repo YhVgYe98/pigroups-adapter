@@ -8,7 +8,7 @@
  *   summary.json         the driver's snapshot of the two phases
  *   cleanup.json         teardown evidence
  *
- * Usage: node analyze.mjs
+ * Usage: node analyze.mjs [evidence-dir]
  */
 
 import { readFileSync } from 'node:fs';
@@ -16,13 +16,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const DIR = process.argv[2] ?? HERE;
 const readJsonl = (name) =>
-  readFileSync(join(HERE, name), 'utf8')
+  readFileSync(join(DIR, name), 'utf8')
     .trim()
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line));
-const readJson = (name) => JSON.parse(readFileSync(join(HERE, name), 'utf8'));
+const readJson = (name) => JSON.parse(readFileSync(join(DIR, name), 'utf8'));
 
 const session = readJsonl('final-session.jsonl');
 const probe = readJsonl('final-probe.jsonl');
@@ -61,7 +62,7 @@ session.forEach((entry, index) => {
 const resultFor = (call) => toolResults.find((result) => result.toolCallId === call?.id);
 const customMessages = session.filter((entry) => entry.type === 'custom_message');
 const occurrences = (haystack, needle) => haystack.split(needle).length - 1;
-const raw = readFileSync(join(HERE, 'final-session.jsonl'), 'utf8');
+const raw = readFileSync(join(DIR, 'final-session.jsonl'), 'utf8');
 const ms = (iso) => Date.parse(iso);
 const fmt = (n) => `${(n / 1000).toFixed(3)} s`;
 const iso = (n) => new Date(n).toISOString();
