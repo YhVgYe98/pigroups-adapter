@@ -1,28 +1,57 @@
 # 更新日志
 
-## 未发布
+## 0.18.0 - 2026-11-12
 
-### 投递只在回合边界发生；提交点是 pi 的回声
+### 投递只在回合边界发生；steer 不再是投递方式
 
-- **投递改成"窗口关闭 + pi 空闲"两个条件。** 一次投递就是一条 `sendMessage(…, {triggerTurn:true})`；
-  忙时**根本不调用**，不再 steer 进正在跑的回合。闸门在 `AdapterLoop.deliverPending()` 里，
-  没有 force 参数；`PiSurfaceAdapter.isBusy()` 在没有 context 时返回 `true`。
+**契约变化（minor）。** 平台仍是 `0.7.2`，所以这次只有适配器进号：`0.17.1 → 0.18.0`。
+上一版的"投递"是"把消息交给 pi"，这一版的"投递"是"消息已经进了 transcript"。
+
+1. **投递只在回合边界发生。** 一项被投递，当且仅当**窗口已关闭**（默认 60 秒翻滚窗，
+   从第一条入队起算）**并且 pi 空闲**（`isBusy()` 为假）。一次投递就是一条
+   `sendMessage(…, {triggerTurn:true})`，不带 `deliverAs`。闸门只在
+   `AdapterLoop.deliverPending()` 里，没有 force 参数；`PiSurfaceAdapter.isBusy()`
+   在没有 context 时返回 `true`（"不知道"按"忙"算）。
+2. **steer 不再是投递方式。** 忙时**根本不调用** `sendMessage`，而不是"steer 进正在跑的回合"。
+   注意省略 `deliverAs` **不等于**"回合结束后追加"：pi 在 streaming 时会把没有 `deliverAs`
+   的消息交给 `agent.steer()`（`agent-session.js`）。所以这条设计的安全性**只**来自空闲闸门，
+   不是来自某个参数。`pg.steer` 这条线协议控制项仍然存在，但它现在也只走队列。
+3. **重复在构造上不可能。** v3 的"未确认批次表"（`unacknowledged`）、
+   `requeueUnacknowledged()`、`windowImmediate`、abort 结束时的强制投递全部删除。
+   现在只剩两种状态：**没回声**（没进 transcript，原样重投是第一次落地）与
+   **有回声**（在 transcript 里，不需要也不允许第二份）。v3 那张表在真实组织上量到 31 次
+   重复注入（29 次间隔 ≥120 秒）；这一版没有那个中间态可重投。
+4. **代价是延迟，上界是当前回合。** 投递延迟 = **窗口剩余时间 + 当前回合剩余时间**，
+   回合没有上界（工具可以跑十分钟）。成员卡在一个等外部输入的工具里时
+   （`ask_user_question`、一个等 CI 的构建），**什么都收不到**——不是"最多晚 60 秒"，
+   是"工具返回之前一条都没有"。这是"绝不重复"的价钱；要在一个长工具期间改变它的行为，
+   只有 `pg_abort`（概念稿 §8.1、设计说明 §9.1）。
+5. **abort 之后是一整窗的安静。** `turn_end(aborted)` 只把 `windowStart` 置成**现在**，
+   队列再等一个完整窗口才可能投。abort 不是投递的通行证：它结束这一轮，不追投、不重投、
+   也不设"下一批免等窗口"。真机（`probe/logs/boundary-20261111T175058Z/`）：切断在 `+6 ms`，
+   投递在切断后 `60.157 s`，中间 60 秒零次 `agent_start`、零条 `custom_message`。
+
+其余：
+
 - **提交点从"`deliver` 返回"移到 pi 的 `message_end`。** 消息 `details` 里带 `deliveryId`，
   `PiSurface` 新增 `delivery_ack` 事件；只有收到对应回声才写水位、置欠回复、提交 journal。
-  `sendMessage` 是 void、会吞掉 `_startRun` 的失败，所以这一条同时关掉了"消息已被标成已注入、
-  journal 已提交，但那一轮其实没起来"的丢失窗口：没回声的批次留在 `inFlight`，
-  下一个"空闲 + 窗口关闭"原样重投。
-- **删除 abort 的投递特权。** 去掉了 `unacknowledged` / `requeueUnacknowledged()` /
-  `windowImmediate` / abort 结束时的强制投递；`turn_end(aborted)` 只把 `windowStart` 置成现在，
-  队列再等一个完整窗口。abort 之后不再重投任何批次——回声过的已经在 transcript 里，
-  没回声的本来就还没到。
+  `sendMessage` 是 void、会吞掉 `_startRun` 的失败（没有 API key、压缩失败），所以这一条同时
+  关掉了"消息已被标成已注入、journal 已提交，但那一轮其实没起来"的丢失窗口：没回声的批次留在
+  `inFlight`，下一个"空闲 + 窗口关闭"原样重投。journal 条目的 `queuedByJournal` 计数保持到回声，
+  `commitIfDrained` 不会提前提交。
 - **401 的 token 提示改走 `PiSurface.notice()`**：不排队、不起回合（`triggerTurn:false`），
-  空闲时立刻追加、忙时排到回合结束。它必须能在回合中落地，因为循环紧接着就 `stop()`。
+  空闲时立刻追加、忙时排到回合结束。它必须能在回合中落地，因为循环紧接着就 `stop()`；
+  走队列会让它烂在一个永远不会到来的回合边界上。
 - **`flush()` 等待回声带来的提交**，`stop()` 也等（包括在等待期间才开始的那一笔），
   所以 `await flush()` 之后读水位/账本/journal 都是新的；`stop()` 的 `onEvent` 退订挪到等待之后，
   否则在飞投递的回声会被丢掉、journal 会在下次启动重放一条已经进过上下文的批次。
 - **文档**：概念稿 §8.1–§8.3 重写（含"长工具期间收不到任何消息"这条代价）、§2.2/§2.4/§9 的
-  "已投递"定义、设计说明 §2.1/§2.3/§3.2/§3.4/§9。
+  "已投递"定义（D2 现在由 pi 的回声定义）、设计说明 §2.1/§2.3/§3.2/§3.4/§9；新增设计说明 §9.1
+  "这一版留下的两个风险"（交接文档已在 0.17.0 删除，风险记在这里）。`skills/pigroups-org` 的
+  abort 段落改成"先停，再等一个窗口"。
+- **测试**：`npm test` 294 条全绿；`tsc --noEmit` 与 catalog check 干净。编码了旧行为（忙时收到 / abort 后重投 / 未确认表上限）的 10 条
+  用例删或重写，另加长工具期间只收到一次、回声即提交、abort 后整窗安静、没回声的批次下一窗重试。
+- **版本**：适配器 `0.18.0`；平台 `0.7.2` 不动（单侧发版）。
 
 ## 0.17.1 - 2026-11-08
 
