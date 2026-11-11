@@ -168,7 +168,7 @@ Every `node:test` case in `test/*.test.ts`, grouped by type and area. There are 
 | A-INT-030 | [delivery.test.ts:259](./delivery.test.ts#L259) | a settle is no longer a delivery trigger; the window is |
 | A-INT-031 | [delivery.test.ts:283](./delivery.test.ts#L283) | a batch pi echoed is committed even when its turn ends in a provider error |
 | A-INT-032 | [delivery.test.ts:312](./delivery.test.ts#L312) | after an aborted turn nothing is delivered until a full window has passed |
-| A-INT-033 | [delivery.test.ts:355](./delivery.test.ts#L355) | a delivery whose run never started stays uncommitted and is retried at the next window |
+| A-INT-033 | [delivery.test.ts:356](./delivery.test.ts#L356) | a delivery whose run never started stays uncommitted and is retried at the next window |
 
 ### exit
 

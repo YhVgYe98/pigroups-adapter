@@ -319,12 +319,13 @@ test('after an aborted turn nothing is delivered until a full window has passed'
   await s.timer(WINDOW);
   assert.equal(s.surface.deliveries.length, 1, 'precondition: one batch went out');
 
-  // The turn runs for another half window; a second message arrives inside it and the
-  // operator cuts the turn. The service window would have expired 30 s from here.
-  s.clock.advance(WINDOW / 2);
+  // A second message arrives and opens a window that would expire 60 s from now.
   await send(s.platform, s.parent!.token, s.me.id, 'queued behind the cut');
   await s.cycle();
 
+  // The turn runs for ten more seconds and is then cut. The window is re-opened here, so
+  // its new expiry is 70 s from the start, not 60.
+  s.clock.advance(10_000);
   s.surface.settleAborted();
   await s.loop.settled();
   await s.loop.flush();
@@ -334,14 +335,14 @@ test('after an aborted turn nothing is delivered until a full window has passed'
     'the delivered batch cannot contain the message that arrived after it',
   );
 
-  // Half a window after the cut: nothing. Without the re-opened window this moment is a
-  // full window past the previous delivery and the batch would already be out.
-  await s.timer(WINDOW / 2);
+  // The moment the pre-abort window would have expired: nothing. Without the re-opened
+  // window this is a full window past the queued message's arrival.
+  await s.timer(WINDOW - 10_000);
   assert.equal(s.surface.deliveries.length, 1, 'the abort re-opened the window; it did not close it');
 
   // One full window after the cut: the queued message goes out, once, and the batch that
   // already reached the transcript is not repeated.
-  await s.timer(WINDOW / 2);
+  await s.timer(10_000);
   assert.equal(s.surface.deliveries.length, 2, 'the queued work goes out one window after the abort');
   const after = s.surface.texts()[1];
   assert.ok(after.includes('queued behind the cut'), after);
