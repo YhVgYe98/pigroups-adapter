@@ -24,11 +24,27 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
+      # The suite boots a real platform, and `test/support.ts` defaults to `../PiGroups`.
+      # Check out exactly the platform version this package pins (`dependencies.pigroups`),
+      # not whatever master happens to be: the release promise is that this adapter runs
+      # against the published platform, and a missing tag must fail here rather than pass
+      # against unreleased code.
+      - name: Resolve the pinned platform version
+        id: platform
+        run: echo "version=$(node -p "require('./package.json').dependencies.pigroups")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: YhVgYe98/PiGroups
+          ref: v${{ steps.platform.outputs.version }}
+          path: PiGroups
       - name: Install
         run: npm ci
+      - name: Install platform dependencies
+        working-directory: PiGroups
+        run: npm ci
       # The package's own `prepublishOnly` runs typecheck, the full suite, the catalog
-      # check and the package test, so a tag cannot publish a red tree. It tests the
-      # platform this package declares (pigroups 0.7.2 from npm), which is exactly what
-      # a user installs.
+      # check and the package test, so a tag cannot publish a red tree.
       - name: Publish
+        env:
+          PIGROUPS_PLATFORM_DIR: ${{ github.workspace }}/PiGroups
         run: npm publish
