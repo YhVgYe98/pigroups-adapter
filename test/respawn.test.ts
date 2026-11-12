@@ -195,8 +195,56 @@ test('a pg.respawn control during the settle defers; the manual tool is immediat
   assert.equal(s.herdr.spawns.length, 0, 'the control only sends the next control during the settle');
 
   s.clock.advance(5_001);
-  s.loop.tick();
-  await waitFor(() => s.herdr.spawns.length === 1, 'the deferred control to start after the settle', 15_000);
+  // Drive the timer at the fixed clock instead of moving it: the arm is posted by a
+  // fire-and-forget pass that can still be parked on the control POST when `pollOnce()`
+  // returns, so a deadline can legitimately land after this tick. Repeated ticks accept
+  // that ordering while still failing on a deadline that is late in clock terms.
+  await waitFor(
+    () => {
+      s.loop.tick();
+      return s.herdr.spawns.length === 1;
+    },
+    'the deferred control to start after the settle',
+    15_000,
+  );
+});
+test('a failed control send during the settle still arms the deferred repair', async (t) => {
+  const s = await scenario({ role: 'child', respawnGraceMs: 5_000 });
+  t.after(() => s.close());
+  const child = await childOf(s, 'control-send-fails');
+  writeChildRecord(s.adapterDir, recordFor(s, child));
+  writeMemberSessionFile(s.adapterDir, child.id, '/tmp/pigroups-child/control-send-fails.jsonl');
+
+  // §12.5: the arm must not live inside the send's success path. A transient failure
+  // here used to leave `autoRespawnDueAt` unset, so the deferred pass never ran. Every
+  // settle send fails until the settle is over, so no later pass can arm it instead.
+  const real = s.pg.sendControl.bind(s.pg);
+  let failSends = true;
+  let failures = 0;
+  s.pg.sendControl = async (input) => {
+    if (failSends) {
+      failures += 1;
+      throw new PgUnavailable(503, 'transient');
+    }
+    return real(input);
+  };
+
+  await command(s.platform, s.parent!.token, s.me.id, 'pg.respawn', { v: 1 });
+  await s.loop.pollOnce();
+  // The settle pass is fire-and-forget, so its control send lands after `pollOnce`.
+  await waitFor(() => failures > 0, 'the settle to attempt its control', 5_000);
+  assert.equal(s.herdr.spawns.length, 0, 'the settle starts nothing');
+  failSends = false;
+
+  s.clock.advance(5_001);
+  await waitFor(
+    () => {
+      s.loop.tick();
+      return s.herdr.spawns.length === 1;
+    },
+    'the deferred repair to start the child even though the control send failed',
+    15_000,
+  );
 });
 test('a stale member with no session file is reported as unreopenable, not guessed', async (t) => {
   const s = await scenario({ role: 'root' });

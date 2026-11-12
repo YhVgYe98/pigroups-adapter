@@ -1455,9 +1455,17 @@ export class AdapterLoop {
       // the window. A control-triggered run during the same window defers the same way.
       if (opts.allowStart === false) {
         const graceMs = this.config.respawnGraceMs ?? DEFAULT_RESPAWN_GRACE_MS;
-        const connectedAt = this.connectedAt;
-        const graceEndsAt = connectedAt === undefined ? undefined : connectedAt + graceMs;
-        if (graceEndsAt === undefined || this.now() < graceEndsAt) {
+        // `ensureReady()` above ran `init()`, and `init()` records `connectedAt` before
+        // it returns, so this is defined on every path that can reach here.
+        const graceEndsAt = this.connectedAt! + graceMs;
+        if (this.now() < graceEndsAt) {
+          // Arm before the awaited send. The pass that does this is fire-and-forget, so
+          // `pollOnce()` can return while this POST is still in flight; arming after it
+          // means a late, slow or failed send leaves `autoRespawnDueAt` unset, and
+          // `fireDueAutoRespawn` then returns forever: not a deferral, a repair that
+          // never runs. Nothing here may depend on the control arriving.
+          this.autoRespawnDueAt = graceEndsAt;
+          this.autoRespawnDone = false;
           try {
             await this.sendRespawnControl(id);
             result.skipped.push({
@@ -1466,8 +1474,6 @@ export class AdapterLoop {
                 `startup settle (${graceMs} ms): controls only until the pane list can be trusted; ` +
                 'pg_respawn starts it now',
             });
-            if (graceEndsAt !== undefined) this.autoRespawnDueAt = graceEndsAt;
-            this.autoRespawnDone = false;
           } catch (err) {
             result.failed.push({ id, error: respawnError(err) });
           }
