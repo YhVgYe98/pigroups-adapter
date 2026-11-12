@@ -17,6 +17,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # A hung publish is worse than a failed one: without a bound the job sits on an
+    # interactive auth prompt until the six-hour default. Fail and read the log instead.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,4 +50,4 @@ jobs:
       - name: Publish
         env:
           PIGROUPS_PLATFORM_DIR: ${{ github.workspace }}/PiGroups
-        run: npm publish
+        run: npm publish --loglevel http
