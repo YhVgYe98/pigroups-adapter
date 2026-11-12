@@ -5,7 +5,7 @@
  * fails when they disagree. There is no compatibility range: the adapter and platform are
  * released as a pair, and using an older platform is a hard error rather than a warning.
  */
-export const ADAPTER_VERSION = '0.18.1';
+export const ADAPTER_VERSION = '0.18.2';
 
 /** The exact `pigroups` package / `/v1/health.version` this adapter is built for. */
 export const EXPECTED_PLATFORM_VERSION = '0.7.2';

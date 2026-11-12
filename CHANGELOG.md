@@ -1,10 +1,10 @@
 # 更新日志
 
-## 0.18.1 - 2026-11-12
+## 0.18.2 - 2026-11-12
 
-### 延后修复在控制项发送**之前**排期
+### 延后修复在控制项发送**之前**排期；发布由 CI 用 OIDC 完成
 
-**纯 bug 修复，契约不变。** 平台仍是 `0.7.2`。
+**纯 bug 修复，契约不变。** 平台仍是 `0.7.2`。`0.18.1` 只打了 Git tag 就作废：它没有进 npm，而 tag 指向的提交里还没有发布用的 workflow，所以那个 tag 永远发不出去。
 
 1. **问题。** `0.18.0` 上线后 CI 在同一个 commit 上出现一红一绿：`pg.respawn` 的"启动 settle
    期间延后"那条测试超时 15 秒。超时只是症状——延后分支把
@@ -20,6 +20,12 @@
 
 `connectedAt` 在 `ensureReady()` 之后必然有值（`init()` 在返回前写入），所以延后分支不再为
 它做兜底：那个分支不可达，写着只会误导下一个读代码的人。
+
+4. **发布改由 CI 用 OIDC 完成。** 新增 `.github/workflows/publish.yml`：tag 推送或手动触发，
+   job 只申请 `id-token: write`，**不存 `NPM_TOKEN`、不设 `registry-url`**。npm 用这个 OIDC
+   身份换发权限，所以没有可泄漏的长期凭据，每个版本自动带 provenance。发布必经包自带的
+   `prepublishOnly`（typecheck + 全量测试 + catalog + package 测试），tag 不能把红树发出去。
+   该 workflow 的文件名、空的 environment、允许的动作三项登记在 npm 侧，改一边必须同时改另一边。
 
 ## 0.18.0 - 2026-11-12
 

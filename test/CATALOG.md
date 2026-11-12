@@ -498,5 +498,5 @@ Every `node:test` case in `test/*.test.ts`, grouped by type and area. There are 
 
 | ID | File | Case |
 | --- | --- | --- |
-| A-TOOL-006 | [version.test.ts:25](./version.test.ts#L25) | this release is 0.18.1 for the platform 0.7.2 release |
+| A-TOOL-006 | [version.test.ts:25](./version.test.ts#L25) | this release is 0.18.2 for the platform 0.7.2 release |
 | A-TOOL-007 | [version.test.ts:30](./version.test.ts#L30) | ADAPTER_VERSION is the version package.json and its lockfile publish |
