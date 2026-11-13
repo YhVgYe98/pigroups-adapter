@@ -196,7 +196,7 @@
     },
     {
       "file": "platform-version.test.ts",
-      "title": "a whoami from another platform release stops before ready or delivery",
+      "title": "a whoami from another platform line stops before ready or delivery",
       "type": "integration",
       "area": "platform-version"
     }

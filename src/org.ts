@@ -37,7 +37,7 @@ import { fileURLToPath } from 'node:url';
 
 import { defaultAdapterDir } from './datadir.ts';
 import { PgClient, PgError } from './pgclient.ts';
-import { EXPECTED_PLATFORM_VERSION, platformVersionError, platformVersionMatches } from './version.ts';
+import { SUPPORTED_PLATFORM_RANGE, platformVersionError, platformVersionMatches } from './version.ts';
 
 export { defaultAdapterDir } from './datadir.ts';
 
@@ -192,7 +192,7 @@ function readPlatformPackageVersion(dir: string): string {
   } catch (err) {
     throw new OrgStartError(
       `cannot read the platform version from ${join(dir, 'package.json')}: ${describe(err)}. ` +
-        `This adapter requires pigroups@${EXPECTED_PLATFORM_VERSION}; install that package or point ` +
+        `This adapter requires pigroups ${SUPPORTED_PLATFORM_RANGE}; install that package or point ` +
         'PIGROUPS_PLATFORM_DIR at its checkout.',
     );
   }

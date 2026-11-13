@@ -6,34 +6,38 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { platformCandidates } from '../src/org.ts';
-import { EXPECTED_PLATFORM_VERSION, platformVersionError, platformVersionMatches } from '../src/version.ts';
+import { SUPPORTED_PLATFORM_RANGE, platformVersionError, platformVersionMatches } from '../src/version.ts';
 import { scenario } from './scenario.ts';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-test('the platform version matcher is exact', () => {
-  assert.equal(platformVersionMatches(EXPECTED_PLATFORM_VERSION), true);
-  assert.equal(platformVersionMatches(` ${EXPECTED_PLATFORM_VERSION} `), true);
-  assert.equal(platformVersionMatches('0.7.1'), false, 'an older patch is a different layer');
-  assert.equal(platformVersionMatches('0.7.3'), false, 'a newer patch is not assumed compatible');
-  assert.equal(platformVersionMatches('0.8.0'), false);
+test('the platform matcher accepts the supported minor line and nothing else', () => {
+  assert.equal(SUPPORTED_PLATFORM_RANGE, '^0.7.0');
+  assert.equal(platformVersionMatches('0.7.0'), true);
+  assert.equal(platformVersionMatches('0.7.2'), true);
+  assert.equal(platformVersionMatches('0.7.9'), true, 'a later patch on the same line is the same contract');
+  assert.equal(platformVersionMatches(' 0.7.3 '), true, 'health reports a bare x.y.z, tolerating padding');
+  assert.equal(platformVersionMatches('0.8.0'), false, 'a new minor changes the wire contract');
+  assert.equal(platformVersionMatches('1.0.0'), false);
+  assert.equal(platformVersionMatches('0.6.9'), false);
   assert.equal(platformVersionMatches('v0.7.2'), false, 'the platform reports a bare x.y.z');
-  assert.match(platformVersionError('0.7.1'), /0\.7\.1/);
-  assert.match(platformVersionError('0.7.1'), /no cross-version support/);
+  assert.equal(platformVersionMatches('0.7'), false);
+  assert.match(platformVersionError('0.8.0'), /0\.8\.0/);
+  assert.match(platformVersionError('0.8.0'), /outside the range/);
 });
 
-test('a whoami from another platform release stops before ready or delivery', async (t) => {
+test('a whoami from another platform line stops before ready or delivery', async (t) => {
   const s = await scenario();
   t.after(() => s.close());
   const realWhoami = s.pg.whoami.bind(s.pg);
-  s.pg.whoami = async () => ({ ...(await realWhoami()), server: { version: '0.7.1' } });
+  s.pg.whoami = async () => ({ ...(await realWhoami()), server: { version: '0.8.0' } });
 
   await assert.rejects(
     s.loop.pollOnce(),
     (err: Error) => {
-      assert.match(err.message, /platform version 0\.7\.1/);
-      assert.match(err.message, /0\.7\.1/);
+      assert.match(err.message, /platform version 0\.8\.0/);
+      assert.match(err.message, /outside the range/);
       return true;
     },
   );

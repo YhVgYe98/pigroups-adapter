@@ -1,6 +1,6 @@
 {
   "name": "pigroups-adapter-pi",
-  "version": "0.18.2",
+  "version": "0.19.0",
   "private": false,
   "type": "module",
   "description": "A Pi extension that turns a pi session into a member of a PiGroups workspace.",
@@ -48,6 +48,6 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
-    "pigroups": "0.7.2"
+    "pigroups": "^0.7.0"
   }
 }

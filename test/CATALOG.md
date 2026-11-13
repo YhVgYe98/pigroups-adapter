@@ -72,8 +72,8 @@ Every `node:test` case in `test/*.test.ts`, grouped by type and area. There are 
 
 | ID | File | Case |
 | --- | --- | --- |
-| A-UNIT-029 | [platform-version.test.ts:15](./platform-version.test.ts#L15) | the platform version matcher is exact |
-| A-UNIT-030 | [platform-version.test.ts:43](./platform-version.test.ts#L43) | an npm-installed platform package is a lookup candidate |
+| A-UNIT-029 | [platform-version.test.ts:15](./platform-version.test.ts#L15) | the platform matcher accepts the supported minor line and nothing else |
+| A-UNIT-030 | [platform-version.test.ts:47](./platform-version.test.ts#L47) | an npm-installed platform package is a lookup candidate |
 
 ### spawn
 
@@ -301,7 +301,7 @@ Every `node:test` case in `test/*.test.ts`, grouped by type and area. There are 
 
 | ID | File | Case |
 | --- | --- | --- |
-| A-INT-121 | [platform-version.test.ts:26](./platform-version.test.ts#L26) | a whoami from another platform release stops before ready or delivery |
+| A-INT-121 | [platform-version.test.ts:30](./platform-version.test.ts#L30) | a whoami from another platform line stops before ready or delivery |
 
 ### records
 
@@ -490,7 +490,7 @@ Every `node:test` case in `test/*.test.ts`, grouped by type and area. There are 
 | ID | File | Case |
 | --- | --- | --- |
 | A-TOOL-002 | [package.test.ts:11](./package.test.ts#L11) | package.json declares the Pi package and its entry points |
-| A-TOOL-003 | [package.test.ts:26](./package.test.ts#L26) | the package is public, licensed, and pins the exact platform release |
+| A-TOOL-003 | [package.test.ts:26](./package.test.ts#L26) | the package is public, licensed, and accepts a platform line rather than a patch |
 | A-TOOL-004 | [package.test.ts:37](./package.test.ts#L37) | the tarball list contains only user-facing files |
 | A-TOOL-005 | [package.test.ts:45](./package.test.ts#L45) | model-facing source strings contain no CJK text |
 
@@ -498,5 +498,5 @@ Every `node:test` case in `test/*.test.ts`, grouped by type and area. There are 
 
 | ID | File | Case |
 | --- | --- | --- |
-| A-TOOL-006 | [version.test.ts:25](./version.test.ts#L25) | this release is 0.18.2 for the platform 0.7.2 release |
+| A-TOOL-006 | [version.test.ts:25](./version.test.ts#L25) | this release is 0.19.0 and accepts the 0.7 platform line |
 | A-TOOL-007 | [version.test.ts:30](./version.test.ts#L30) | ADAPTER_VERSION is the version package.json and its lockfile publish |

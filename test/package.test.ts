@@ -23,15 +23,15 @@ test('package.json declares the Pi package and its entry points', () => {
   }
 });
 
-test('the package is public, licensed, and pins the exact platform release', () => {
+test('the package is public, licensed, and accepts a platform line rather than a patch', () => {
   assert.equal(pkg.private, false, 'a published package is not private');
   assert.equal(pkg.license, 'MIT');
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'npm strips build metadata; package versions must be plain');
-  assert.equal(pkg.dependencies.pigroups, '0.7.2', 'the platform dependency is exact, not a compatibility range');
+  assert.match(pkg.dependencies.pigroups, /^\^0\.7\./, 'the platform dependency is a line range, so a platform patch never forces an adapter release');
   assert.equal(pkg.repository.type, 'git');
   assert.match(pkg.repository.url, /^git\+https:/);
   const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
-  assert.match(changelog, /^## 0\.17\.0 - \d{4}-\d{2}-\d{2}/m, 'the latest changelog entry matches package.json');
+  assert.match(changelog, /^## 0\.19\.0 - \d{4}-\d{2}-\d{2}/m, 'the latest changelog entry matches package.json');
 });
 
 test('the tarball list contains only user-facing files', () => {

@@ -19,7 +19,7 @@ import { PgClient } from './pgclient.ts';
 import { acquireConsumerLease, readSessionRecord } from './records.ts';
 import { PiSurfaceAdapter } from './surface.ts';
 import type { PiContext, PiLike, PiToolDefinition } from './surface.ts';
-import { ADAPTER_VERSION, EXPECTED_PLATFORM_VERSION } from './version.ts';
+import { ADAPTER_VERSION, SUPPORTED_PLATFORM_RANGE } from './version.ts';
 
 const INSPECT_TIMEOUT_MS = 10_000;
 
@@ -664,7 +664,7 @@ function buildTools(
           JSON.stringify(
             {
               adapter_version: ADAPTER_VERSION,
-              expected_platform_version: EXPECTED_PLATFORM_VERSION,
+              supported_platform_range: SUPPORTED_PLATFORM_RANGE,
               who,
               adapter: loop?.state() ?? null,
             },

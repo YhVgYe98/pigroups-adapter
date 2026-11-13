@@ -1182,7 +1182,7 @@ test('a checkout from another platform version is refused before it can start', 
     startOrg({ adapterDir, name: 'old-platform', dataDir, platformDir: checkout }),
     (err: Error) => {
       assert.match(err.message, /platform version 0\.2\.0/, 'the error names the version it found');
-      assert.match(err.message, /0\.7\.2/, 'the error names the version it needs');
+      assert.match(err.message, /\^0\.7\.0/, 'the error names the range it needs');
       return true;
     },
   );
