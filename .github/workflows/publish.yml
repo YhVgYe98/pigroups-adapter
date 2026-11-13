@@ -28,17 +28,23 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       # The suite boots a real platform, and `test/support.ts` defaults to `../PiGroups`.
-      # Check out exactly the platform version this package pins (`dependencies.pigroups`),
-      # not whatever master happens to be: the release promise is that this adapter runs
-      # against the published platform, and a missing tag must fail here rather than pass
+      # The dependency is a line (`^0.7.0`), so there is no single tag to check out: use
+      # the newest tag on that line. A line with no tag fails here rather than passing
       # against unreleased code.
-      - name: Resolve the pinned platform version
+      - name: Resolve the newest platform tag on the supported line
         id: platform
-        run: echo "version=$(node -p "require('./package.json').dependencies.pigroups")" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          line=$(node -p "require('./package.json').dependencies.pigroups.replace(/^[^0-9]*/, '').split('.').slice(0, 2).join('.')")
+          tag=$(git ls-remote --tags --refs https://github.com/YhVgYe98/PiGroups.git "v${line}.*" \
+                | sed 's#.*refs/tags/##' | sort -V | tail -1)
+          test -n "$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "platform line ${line}: ${tag}"
       - uses: actions/checkout@v4
         with:
           repository: YhVgYe98/PiGroups
-          ref: v${{ steps.platform.outputs.version }}
+          ref: ${{ steps.platform.outputs.tag }}
           path: PiGroups
       - name: Install
         run: npm ci
